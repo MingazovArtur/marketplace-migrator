@@ -5,11 +5,14 @@ __pycache__/
 .venv/
 venv/
 env/
+*.egg-info/
+dist/
+build/
 
 # Node.js
 node_modules/
-dist/
-build/
+frontend/dist/
+frontend/build/
 
 # Секреты и данные
 .env
@@ -24,3 +27,7 @@ photos/
 .idea/
 *.swp
 .DS_Store
+Thumbs.db
+
+# Docker
+.docker/
