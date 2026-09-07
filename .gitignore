@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Node.js
+node_modules/
+dist/
+build/
+
+# Секреты и данные
+.env
+*.env.local
+links.txt
+Выгрузка_товаров.xlsx
+export_log.txt
+photos/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
