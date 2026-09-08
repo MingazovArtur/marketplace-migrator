@@ -1,33 +1,68 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
+# ==========================================
+# Python / Backend
+# ==========================================
+# Виртуальные окружения
 .venv/
 venv/
 env/
+ENV/
+
+# Скомпилированные файлы Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Сборка и дистрибуция
+build/
+dist/
 *.egg-info/
+*.egg
+
+# Секреты и переменные окружения
+.env
+.env.local
+.env.*.local
+
+# Сгенерированные данные и логи
+photos/
+*.log
+export_log.txt
+
+# ==========================================
+# Node.js / Frontend
+# ==========================================
+# Зависимости (самое важное!)
+node_modules/
+frontend/node_modules/
+
+# Результаты сборки (Production)
 dist/
 build/
-
-# Node.js
-node_modules/
 frontend/dist/
 frontend/build/
 
-# Секреты и данные
-.env
-*.env.local
-links.txt
-Выгрузка_товаров.xlsx
-export_log.txt
-photos/
+# Vite кэш
+.vite/
 
-# IDE
+# Логи пакетных менеджеров
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==========================================
+# IDE и Редакторы кода
+# ==========================================
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
+.editorconfig
+
+# ==========================================
+# Операционная система
+# ==========================================
 .DS_Store
 Thumbs.db
-
-# Docker
-.docker/
+desktop.ini
