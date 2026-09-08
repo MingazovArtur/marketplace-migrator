@@ -1,3 +1,5 @@
+import logging
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -6,10 +8,23 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import time
+import asyncio
+from connectors.ozon import OzonConnector
+from connectors.wildberries import WildberriesConnector
+from services.photo_downloader import PhotoDownloader
+from services.mock_images import create_mock_image
+from services.category_mapper import CategoryMapper
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Marketplace Migrator API")
 
-# Разрешаем запросы с фронтенда (Vite работает на порту 5173)
+photo_downloader = PhotoDownloader(base_dir="backend/photos")
+category_mapper = CategoryMapper()
+
+# Разрешаем запросы с фронтенда
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
@@ -27,6 +42,7 @@ class Product(BaseModel):
     status: str = "pending"
     description: Optional[str] = ""
     photos_count: int = 0
+    mapped_category: Optional[str] = None 
 
 class ImportRequest(BaseModel):
     url: str
@@ -56,40 +72,25 @@ def clean_html(html_text: str) -> str:
     return soup.get_text(separator=" | ", strip=True)
 
 def fetch_product_from_kazan(product_id: int, auth_key: str) -> Optional[dict]:
-    """Получает данные товара через GraphQL API KazanExpress"""
-    graphql_url = "https://graphql.kazanexpress.ru/"
-    query = """
-    query GetProduct($id: Int!) {
-      product(id: $id) {
-        id
-        title
-        shortDescription
-        description
-        minSellPrice
-        rating
-        category { title }
-        photos { original { high } }
-        skuList { id, skuTitle, sellPrice, availableAmount }
-      }
-    }
-    """
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": auth_key,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
-    payload = {"query": query, "variables": {"id": product_id}}
-    
-    try:
-        response = requests.post(graphql_url, json=payload, headers=headers, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        return data.get("data", {}).get("product")
-    except Exception as e:
-        print(f"Ошибка запроса: {e}")
-        return None
+    """Получает данные товара через GraphQL API KazanExpress (оставлено для истории)"""
+    # ... (код можно оставить, он не мешает, но сейчас мы используем Ozon)
+    return None
 
 # === API Эндпоинты ===
+@app.get("/api/categories/ozon")
+def get_ozon_categories():
+    """Получить все категории Ozon"""
+    return category_mapper.get_all_ozon_categories()
+
+@app.get("/api/categories/wildberries")
+def get_wildberries_subjects():
+    """Получить все категории Wildberries"""
+    return category_mapper.get_all_wildberries_subjects()
+
+@app.get("/api/categories/mapping")
+def get_mapping():
+    """Получить маппинг категорий"""
+    return category_mapper.data.get("mapping", {})
 
 @app.get("/")
 def root():
@@ -97,84 +98,131 @@ def root():
 
 @app.get("/api/products")
 def get_products():
-    """Получить список всех товаров"""
     return {"total": len(products_db), "products": products_db}
 
 @app.get("/api/stats")
 def get_stats():
-    """Получить статистику"""
     total = len(products_db)
     pending = sum(1 for p in products_db if p.status == "pending")
     success = sum(1 for p in products_db if p.status == "success")
     error = sum(1 for p in products_db if p.status == "error")
     processing = sum(1 for p in products_db if p.status == "processing")
+    return {"total": total, "pending": pending, "success": success, "error": error, "processing": processing}
+
+@app.post("/api/import/ozon")
+async def import_from_ozon(request: ImportRequest):
+    """
+    Импорт товаров с Ozon.
+    Поддерживает реальные ключи и Mock-режим для тестирования без аккаунта.
+    """
+    global next_id
+
+    use_mock = not (request.auth_key and ":" in request.auth_key and len(request.auth_key.split(":")[0]) > 5)
+    
+    if not use_mock:
+        try:
+            client_id, api_key = request.auth_key.split(":", 1)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Неверный формат ключей")
+    else:
+        client_id, api_key = "MOCK_ID", "MOCK_KEY"
+
+    connector = OzonConnector(client_id, api_key, use_mock=use_mock)
+    ozon_products = await connector.get_products(limit=20)
+    
+    if not ozon_products:
+        raise HTTPException(status_code=404, detail="Товары не найдены")
+    
+    imported_count = 0
+    for ozon_prod in ozon_products:
+        parsed = connector.parse_ozon_product(ozon_prod)
+        
+        # === СКАЧИВАЕМ ФОТО ===
+        if use_mock:
+            # Для Mock-режима создаём тестовые изображения
+            product_dir = Path("backend/photos") / f"mock_{next_id}"
+            product_dir.mkdir(parents=True, exist_ok=True)
+            
+            downloaded_count = 0
+            for i, _ in enumerate(parsed["photos"], 1):
+                img_bytes = create_mock_image(parsed["name"], i)
+                file_path = product_dir / f"photo_{i}.jpg"
+                with open(file_path, 'wb') as f:
+                    f.write(img_bytes)
+                downloaded_count += 1
+            
+            photo_stats = {
+                "downloaded": downloaded_count,
+                "total": len(parsed["photos"]),
+                "folder": str(product_dir)
+            }
+        else:
+            # Реальное скачивание
+            photo_stats = await photo_downloader.download_photos(
+                product_id=f"ozon_{next_id}",
+                photo_urls=parsed["photos"]
+            )
+        
+        new_product = Product(
+            id=next_id,
+            name=parsed["name"],
+            source="Ozon" + (" (тест)" if use_mock else ""),
+            price=parsed["price"],
+            status="pending",
+            description=parsed["description"][:200] if parsed["description"] else "",
+            photos_count=photo_stats["downloaded"]
+        )
+        products_db.append(new_product)
+        next_id += 1
+        imported_count += 1
+        
+        logger.info(f"✅ Товар '{new_product.name}' импортирован. Фото: {photo_stats['downloaded']}/{photo_stats['total']}")
+    
     return {
-        "total": total,
-        "pending": pending,
-        "success": success,
-        "error": error,
-        "processing": processing
+        "success": True, 
+        "imported": imported_count,
+        "total_available": len(ozon_products),
+        "is_mock": use_mock
     }
 
-@app.post("/api/import")
-def import_product(request: ImportRequest):
-    """Импортировать товар по ссылке"""
-    global next_id
-    
-    product_id = extract_product_id(request.url)
-    if not product_id:
-        raise HTTPException(status_code=400, detail="Не удалось извлечь ID товара из ссылки")
-    
-    # Получаем данные с KazanExpress
-    product_data = fetch_product_from_kazan(product_id, request.auth_key)
-    if not product_data:
-        raise HTTPException(status_code=404, detail="Товар не найден или ошибка API")
-    
-    # Определяем цену
-    sku_list = product_data.get("skuList", [])
-    price = sku_list[0].get("sellPrice", product_data.get("minSellPrice", 0)) / 100 if sku_list else 0
-    
-    # Считаем фото
-    photos_count = len(product_data.get("photos", []))
-    
-    # Создаём новый товар
-    new_product = Product(
-        id=next_id,
-        name=product_data.get("title", "Без названия"),
-        source="KazanExpress",
-        price=round(price, 2),
-        status="pending",
-        description=clean_html(product_data.get("description", ""))[:200],
-        photos_count=photos_count
-    )
-    products_db.append(new_product)
-    next_id += 1
-    
-    return {"success": True, "product": new_product}
-
 @app.post("/api/migrate")
-def migrate_product(request: MigrateRequest):
-    """Запустить миграцию товара"""
-    # Ищем товар
+async def migrate_product(request: MigrateRequest):
     product = next((p for p in products_db if p.id == request.product_id), None)
     if not product:
         raise HTTPException(status_code=404, detail="Товар не найден")
     
-    # Меняем статус на "processing"
     product.status = "processing"
+    await asyncio.sleep(1) # Имитация задержки сети
     
-    # Имитация задержки миграции (в реальности здесь будет вызов API целевого маркетплейса)
-    time.sleep(2)
-    
-    # Имитация успеха/ошибки (для демо)
-    product.status = "success"
-    product.source = f"{product.source} → {request.target_marketplace}"
+    if request.target_marketplace.lower() == "wildberries":
+        wb_connector = WildberriesConnector(api_key="MOCK_WB_API_KEY", use_mock=True)
+        
+        mock_product_data = {
+            "name": product.name,
+            "description": product.description,
+            "price": product.price,
+            "offer_id": f"SKU-{product.id}",
+            "category": product.source.split(" → ")[0] if " → " in product.source else "Дом и сад", # Берем примерную категорию
+            "photos": []
+        }
+        
+        result = await wb_connector.create_product(mock_product_data)
+        
+        if result.get("success"):
+            product.status = "success"
+            product.source = f"{product.source} → Wildberries"
+            # Сохраняем информацию о маппинге для отображения (в реальном приложении это шло бы в БД)
+            product.mapped_category = result["data"].get("mapped_category", {}).get("name", "Неизвестно")
+        else:
+            product.status = "error"
+    else:
+        product.status = "success"
+        product.source = f"{product.source} → {request.target_marketplace}"
     
     return {"success": True, "product": product}
 
 @app.delete("/api/products/{product_id}")
 def delete_product(product_id: int):
-    """Удалить товар"""
     global products_db
     products_db = [p for p in products_db if p.id != product_id]
     return {"success": True}
