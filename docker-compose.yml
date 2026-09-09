@@ -1,21 +1,40 @@
 version: '3.8'
 
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
   backend:
     build: ./backend
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app  # Синхронизация кода для горячей перезагрузки
+      - ./backend:/app
     environment:
       - PYTHONUNBUFFERED=1
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+
+  celery_worker:
+    build: ./backend
+    command: celery -A celery_app worker --loglevel=info --pool=solo
+    volumes:
+      - ./backend:/app
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+      - backend
 
   frontend:
     build: ./frontend
     ports:
       - "5173:5173"
     volumes:
-      - ./frontend:/app  # Синхронизация кода для горячей перезагрузки
-      - /app/node_modules # Исключаем node_modules из синхронизации (чтобы не ломалось)
+      - ./frontend:/app
+      - /app/node_modules
     depends_on:
       - backend
