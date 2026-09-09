@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List
 import logging
 import time
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -92,5 +93,3 @@ class PhotoDownloader:
             "folder": str(product_dir)
         }
 
-# Добавляем импорт asyncio в начало файла
-import asyncio
