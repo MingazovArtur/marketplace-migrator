@@ -1,47 +1,101 @@
-from typing import List, Optional
-from models.schemas import Product, Stats
+from sqlalchemy.orm import Session
+from database.models import Product
+from database.session import SessionLocal, engine
+from database.models import Base
 
-class InMemoryRepository:
+# Создаем таблицы при старте, если их нет
+Base.metadata.create_all(bind=engine)
+
+class ProductRepository:
     def __init__(self):
-        self._db: List[Product] = [
-            Product(id=1, name="Швабра с отжимом, 10л", source="Ozon (тест)", price=899, status="pending", photos_count=23, category="Дом и сад"),
-            Product(id=2, name="Набор пластиковых мисок", source="Ozon (тест)", price=450, status="success", photos_count=16, category="Посуда"),
-        ]
-        self._next_id = 3
+        self._next_id = 1 # Для совместимости со старым кодом генерации ID
 
-    def get_all(self) -> List[Product]:
-        return self._db
+    def get_all(self):
+        with SessionLocal() as db:
+            products = db.query(Product).all()
+            # Преобразуем SQLAlchemy объекты в словари для совместимости с Frontend
+            return [
+                {
+                    "id": p.id, "name": p.name, "source": p.source,
+                    "price": p.price, "status": p.status, "description": p.description,
+                    "photos_count": p.photos_count, "category": p.category,
+                    "mapped_category": p.mapped_category
+                }
+                for p in products
+            ]
 
-    def get_by_id(self, product_id: int) -> Optional[Product]:
-        return next((p for p in self._db if p.id == product_id), None)
+    def get_by_id(self, product_id: int):
+        with SessionLocal() as db:
+            p = db.query(Product).filter(Product.id == product_id).first()
+            if not p:
+                return None
+            return {
+                "id": p.id, "name": p.name, "source": p.source,
+                "price": p.price, "status": p.status, "description": p.description,
+                "photos_count": p.photos_count, "category": p.category,
+                "mapped_category": p.mapped_category
+            }
 
-    def add(self, product: Product) -> Product:
-        product.id = self._next_id
-        self._db.append(product)
-        self._next_id += 1
-        return product
+    def add(self, product_data):
+        with SessionLocal() as db:
+            # 1. Если передана Pydantic-модель, конвертируем её в словарь (Pydantic v2)
+            if hasattr(product_data, "model_dump"):
+                data_dict = product_data.model_dump()
+            else:
+                data_dict = product_data
+            
+            # 2. Убираем 'id', чтобы SQLAlchemy сама сгенерировала его (autoincrement)
+            data_dict.pop("id", None)
+            
+            # 3. Создаем запись в БД
+            new_product = Product(**data_dict)
+            db.add(new_product)
+            db.commit()
+            db.refresh(new_product)
+            
+            self._next_id = max(self._next_id, new_product.id + 1)
+            
+            # 4. Возвращаем как словарь для совместимости с остальным кодом
+            return {
+                "id": new_product.id, 
+                "name": new_product.name, 
+                "source": new_product.source,
+                "price": new_product.price, 
+                "status": new_product.status, 
+                "description": new_product.description, 
+                "photos_count": new_product.photos_count,
+                "category": new_product.category, 
+                "mapped_category": new_product.mapped_category
+            }
 
-    def update(self, product_id: int, update_data: dict) -> Optional[Product]:
-        product = self.get_by_id(product_id)
-        if product:
-            for key, value in update_data.items():
-                setattr(product, key, value)
-        return product
+    def update(self, product_id: int, update_data: dict):
+        with SessionLocal() as db:
+            product = db.query(Product).filter(Product.id == product_id).first()
+            if product:
+                for key, value in update_data.items():
+                    setattr(product, key, value)
+                db.commit()
+                db.refresh(product)
+                return {
+                    "id": product.id, "name": product.name, "source": product.source,
+                    "price": product.price, "status": product.status, 
+                    "description": product.description, "photos_count": product.photos_count,
+                    "category": product.category, "mapped_category": product.mapped_category
+                }
+            return None
 
-    def delete(self, product_id: int) -> bool:
-        initial_len = len(self._db)
-        self._db = [p for p in self._db if p.id != product_id]
-        return len(self._db) < initial_len
+    def get_stats(self):
+        with SessionLocal() as db:
+            total = db.query(Product).count()
+            pending = db.query(Product).filter(Product.status == "pending").count()
+            success = db.query(Product).filter(Product.status == "success").count()
+            error = db.query(Product).filter(Product.status == "error").count()
+            processing = db.query(Product).filter(Product.status == "processing").count()
+            
+            return {
+                "total": total, "pending": pending, "success": success, 
+                "error": error, "processing": processing
+            }
 
-    def get_stats(self) -> Stats:
-        total = len(self._db)
-        return Stats(
-            total=total,
-            pending=sum(1 for p in self._db if p.status == "pending"),
-            success=sum(1 for p in self._db if p.status == "success"),
-            error=sum(1 for p in self._db if p.status == "error"),
-            processing=sum(1 for p in self._db if p.status == "processing")
-        )
-
-# Глобальный экземпляр (в будущем заменим на зависимость от БД)
-repo = InMemoryRepository()
+# Глобальный экземпляр
+repo = ProductRepository()

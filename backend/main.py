@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import products, import_router, migrate
+from routers import products, import_router, migrate, export
 from services.category_mapper import CategoryMapper
 from core.platforms import Platform, PLATFORM_CONFIG
 
@@ -22,6 +22,7 @@ app.add_middleware(
 app.include_router(products.router)
 app.include_router(import_router.router)
 app.include_router(migrate.router)
+app.include_router(export.router)
 
 category_mapper = CategoryMapper()
 
