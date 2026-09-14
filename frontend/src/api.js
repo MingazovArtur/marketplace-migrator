@@ -1,6 +1,28 @@
 const API_URL = 'http://localhost:8000/api';
 
 export const api = {
+
+  migrateProduct: async (productId, targetPlatform, editedData = null) => {
+  const body = {
+    product_id: productId,
+    target_marketplace: targetPlatform
+  };
+  
+  // Если есть редактированные данные, добавляем их
+  if (editedData) {
+    body.edited_data = editedData;
+  }
+  
+  const res = await fetch(`${API_URL}/migrate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || 'Ошибка миграции');
+  return data;
+  },
+
   getStats: async () => {
     const res = await fetch(`${API_URL}/stats`);
     if (!res.ok) throw new Error('Не удалось загрузить статистику');
@@ -109,7 +131,28 @@ export const api = {
   deleteProduct: async (productId) => {
     const res = await fetch(`${API_URL}/products/${productId}`, { method: 'DELETE' });
     return res.json();
-  }
+  },
 
+    migrateBatch: async (productIds, targetPlatform) => {
+    const res = await fetch(`${API_URL}/migrate/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        product_ids: productIds, 
+        target_marketplace: targetPlatform 
+      })
+    });
+    
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Ошибка пакетной миграции');
+    return data;
+  },
+
+  getTaskProgress: async (taskId) => {
+    const res = await fetch(`${API_URL}/tasks/${taskId}/progress`);
+    const data = await res.json();
+    if (!res.ok) throw new Error('Не удалось получить прогресс');
+    return data.progress;
+  },
   
 };

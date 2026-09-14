@@ -66,3 +66,11 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# База данных SQLite
+*.db
+migrator.db
+
+# Файлы с данными
+backend/photos/*
+!backend/photos/.gitkeep
