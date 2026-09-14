@@ -18,33 +18,31 @@ def export_migration_report():
     """
     Генерирует и скачивает Excel-файл с отчетом по всем товарам
     """
+    # repo.get_all() теперь возвращает список словарей, а не Pydantic-моделей
     products = repo.get_all()
     
     if not products:
-        # Если товаров нет, создаем пустой отчет с заголовками
         data = []
     else:
         data = []
         for p in products:
-            # Превращаем Pydantic модель в словарь
-            p_dict = p.model_dump()
+            # p - это уже словарь, поэтому используем p["ключ"], а не p.model_dump()
             
-            # Эвристика для "Новой цены" (например, наценка 15% при переносе на WB)
-            # В реальном приложении это может браться из истории миграций
-            new_price = p_dict["price"]
-            if "wildberries" in p_dict["source"].lower() or "→ Wildberries" in p_dict["source"]:
-                new_price = round(p_dict["price"] * 1.15, 2)
+            # Эвристика для "Новой цены" (наценка 15% при переносе на WB)
+            new_price = p["price"]
+            if "wildberries" in p["source"].lower() or "→ Wildberries" in p["source"]:
+                new_price = round(p["price"] * 1.15, 2)
             
             data.append({
-                "ID": p_dict["id"],
-                "Название товара": p_dict["name"],
-                "Артикул (SKU)": f"SKU-{p_dict['id']}",
-                "Источник": p_dict["source"],
-                "Старая цена (₽)": p_dict["price"],
+                "ID": p["id"],
+                "Название товара": p["name"],
+                "Артикул (SKU)": f"SKU-{p['id']}",
+                "Источник": p["source"],
+                "Старая цена (₽)": p["price"],
                 "Новая цена (₽)": new_price,
-                "Категория (источник)": p_dict.get("category") or "Не указана",
-                "Категория (назначение)": p_dict.get("mapped_category") or "Не маппировалось",
-                "Статус": p_dict["status"],
+                "Категория (источник)": p.get("category") or "Не указана",
+                "Категория (назначение)": p.get("mapped_category") or "Не маппировалось",
+                "Статус": p["status"],
                 "Дата выгрузки": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
     
