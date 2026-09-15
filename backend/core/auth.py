@@ -90,3 +90,18 @@ async def get_current_user(
         return user
     finally:
         db.close()
+
+
+async def get_current_admin_user(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """
+    Dependency для проверки роли администратора.
+    Вызывает get_current_user, затем проверяет роль.
+    """
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Доступ запрещен. Требуются права администратора."
+        )
+    return current_user

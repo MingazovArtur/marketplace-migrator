@@ -18,10 +18,11 @@ router = APIRouter(prefix="/api", tags=["Export"])
 @router.get("/export/report")
 def export_migration_report(current_user: User = Depends(get_current_user)):
     """
-    Генерирует и скачивает Excel-файл с отчетом по товарам текущего пользователя
+    Генерирует и скачивает Excel-файл с отчетом по товарам текущего пользователя.
+    Администратор получает отчет по всем товарам.
     """
-    # Получаем только товары текущего пользователя
-    products = repo.get_all(user_id=current_user.id)
+    is_admin = current_user.role == "admin"
+    products = repo.get_all(user_id=current_user.id, is_admin=is_admin)
     
     if not products:
         data = []
