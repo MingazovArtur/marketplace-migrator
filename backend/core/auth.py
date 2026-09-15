@@ -50,54 +50,43 @@ def decode_token(token: str) -> Optional[dict]:
     """Декодирует JWT токен"""
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    except JWTError as e:
-        # 🔍 Печатаем точную причину ошибки от библиотеки jose
-        print(f"❌ [JWT DEBUG] Ошибка декодирования: {type(e).__name__} - {e}")
-        print(f"❌ [JWT DEBUG] Проблемный токен (первые 50 символов): '{token[:50]}...'")
+    except JWTError:
         return None
-    except Exception as e:
-        print(f"❌ [JWT DEBUG] Неожиданная ошибка: {e}")
+    except Exception:
         return None
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+) -> User:
     """Dependency для получения текущего пользователя из токена"""
     token = credentials.credentials
-    print(f"🔍 [AUTH DEBUG] Получен токен: {token[:30]}...")
     
     payload = decode_token(token)
     if payload is None:
-        print("❌ [AUTH DEBUG] Ошибка декодирования токена (неверная подпись или истек)")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Недействительный токен",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    user_id = int(payload.get("sub")) # Явно преобразуем строку обратно в число для БД
+    user_id = int(payload.get("sub"))
     if user_id is None:
-        print("❌ [AUTH DEBUG] В токене отсутствует поле 'sub'")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Недействительный токен",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    print(f"🔍 [AUTH DEBUG] Извлечен user_id из токена: {user_id}")
     
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.id == user_id).first()
         if user is None:
-            print(f"❌ [AUTH DEBUG] КРИТИЧЕСКАЯ ОШИБКА: Пользователь с id={user_id} НЕ НАЙДЕН в базе данных!")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Пользователь не найден",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
-        print(f"✅ [AUTH DEBUG] Успешно: пользователь '{user.username}' (id={user.id}) авторизован")
         return user
     finally:
         db.close()

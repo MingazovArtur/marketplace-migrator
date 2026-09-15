@@ -1,3 +1,7 @@
+"""
+Репозиторий для работы с товарами в базе данных.
+Все методы теперь принимают user_id для изоляции данных пользователей.
+"""
 from sqlalchemy.orm import Session
 from database.models import Product
 from database.session import SessionLocal, engine
@@ -6,59 +10,67 @@ from database.models import Base
 # Создаем таблицы при старте, если их нет
 Base.metadata.create_all(bind=engine)
 
+
 class ProductRepository:
     def __init__(self):
-        self._next_id = 1 # Для совместимости со старым кодом генерации ID
+        pass
 
-    def get_all(self):
+    def get_all(self, user_id: int):
+        """Получить все товары конкретного пользователя"""
         with SessionLocal() as db:
-            products = db.query(Product).all()
-            # Преобразуем SQLAlchemy объекты в словари для совместимости с Frontend
+            products = db.query(Product).filter(Product.user_id == user_id).all()
             return [
                 {
                     "id": p.id, "name": p.name, "source": p.source,
                     "price": p.price, "status": p.status, "description": p.description,
                     "photos_count": p.photos_count, "category": p.category,
-                    "mapped_category": p.mapped_category
+                    "mapped_category": p.mapped_category, "user_id": p.user_id
                 }
                 for p in products
             ]
 
-    def get_by_id(self, product_id: int):
+    def get_by_id(self, product_id: int, user_id: int = None):
+        """Получить товар по ID. Если указан user_id — проверяет владельца."""
         with SessionLocal() as db:
-            p = db.query(Product).filter(Product.id == product_id).first()
+            query = db.query(Product).filter(Product.id == product_id)
+            
+            # Если передан user_id — добавляем проверку владельца
+            if user_id is not None:
+                query = query.filter(Product.user_id == user_id)
+            
+            p = query.first()
             if not p:
                 return None
             return {
                 "id": p.id, "name": p.name, "source": p.source,
                 "price": p.price, "status": p.status, "description": p.description,
                 "photos_count": p.photos_count, "category": p.category,
-                "mapped_category": p.mapped_category
+                "mapped_category": p.mapped_category, "user_id": p.user_id
             }
 
     def add(self, product_data):
+        """Добавить новый товар. product_data должен содержать user_id."""
         with SessionLocal() as db:
-            # 1. Если передана Pydantic-модель, конвертируем её в словарь (Pydantic v2)
+            # 1. Если передана Pydantic-модель, конвертируем её в словарь
             if hasattr(product_data, "model_dump"):
                 data_dict = product_data.model_dump()
             else:
                 data_dict = product_data
             
-            # 2. Убираем 'id', чтобы SQLAlchemy сама сгенерировала его (autoincrement)
+            # 2. Убираем 'id', чтобы SQLAlchemy сама сгенерировала его
             data_dict.pop("id", None)
-
+            
+            # 3. Проверяем, что user_id присутствует (КРИТИЧНО!)
             if "user_id" not in data_dict or data_dict["user_id"] is None:
-                data_dict["user_id"] = 1 
-                
-            # 3. Создаем запись в БД
+                raise ValueError("user_id обязателен при создании товара")
+            
+            # 4. Создаем запись в БД
             new_product = Product(**data_dict)
             db.add(new_product)
             db.commit()
             db.refresh(new_product)
             
-            self._next_id = max(self._next_id, new_product.id + 1)
-            
-            # 4. Возвращаем как словарь для совместимости с остальным кодом
+            # 5. Возвращаем как словарь
             return {
                 "id": new_product.id, 
                 "name": new_product.name, 
@@ -68,12 +80,20 @@ class ProductRepository:
                 "description": new_product.description, 
                 "photos_count": new_product.photos_count,
                 "category": new_product.category, 
-                "mapped_category": new_product.mapped_category
+                "mapped_category": new_product.mapped_category,
+                "user_id": new_product.user_id
             }
 
-    def update(self, product_id: int, update_data: dict):
+    def update(self, product_id: int, update_data: dict, user_id: int = None):
+        """Обновить товар. Если указан user_id — проверяет владельца."""
         with SessionLocal() as db:
-            product = db.query(Product).filter(Product.id == product_id).first()
+            query = db.query(Product).filter(Product.id == product_id)
+            
+            # Если передан user_id — добавляем проверку владельца
+            if user_id is not None:
+                query = query.filter(Product.user_id == user_id)
+            
+            product = query.first()
             if product:
                 for key, value in update_data.items():
                     setattr(product, key, value)
@@ -83,22 +103,42 @@ class ProductRepository:
                     "id": product.id, "name": product.name, "source": product.source,
                     "price": product.price, "status": product.status, 
                     "description": product.description, "photos_count": product.photos_count,
-                    "category": product.category, "mapped_category": product.mapped_category
+                    "category": product.category, "mapped_category": product.mapped_category,
+                    "user_id": product.user_id
                 }
             return None
 
-    def get_stats(self):
+    def delete(self, product_id: int, user_id: int = None):
+        """Удалить товар. Если указан user_id — проверяет владельца."""
         with SessionLocal() as db:
-            total = db.query(Product).count()
-            pending = db.query(Product).filter(Product.status == "pending").count()
-            success = db.query(Product).filter(Product.status == "success").count()
-            error = db.query(Product).filter(Product.status == "error").count()
-            processing = db.query(Product).filter(Product.status == "processing").count()
+            query = db.query(Product).filter(Product.id == product_id)
+            
+            if user_id is not None:
+                query = query.filter(Product.user_id == user_id)
+            
+            product = query.first()
+            if product:
+                db.delete(product)
+                db.commit()
+                return True
+            return False
+
+    def get_stats(self, user_id: int):
+        """Получить статистику по товарам конкретного пользователя"""
+        with SessionLocal() as db:
+            base_query = db.query(Product).filter(Product.user_id == user_id)
+            
+            total = base_query.count()
+            pending = base_query.filter(Product.status == "pending").count()
+            success = base_query.filter(Product.status == "success").count()
+            error = base_query.filter(Product.status == "error").count()
+            processing = base_query.filter(Product.status == "processing").count()
             
             return {
                 "total": total, "pending": pending, "success": success, 
                 "error": error, "processing": processing
             }
+
 
 # Глобальный экземпляр
 repo = ProductRepository()

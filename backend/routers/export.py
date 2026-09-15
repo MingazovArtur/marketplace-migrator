@@ -4,30 +4,30 @@
 import io
 import logging
 from datetime import datetime
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 import pandas as pd
 from database.repository import repo
+from core.auth import get_current_user
+from database.models import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Export"])
 
 
 @router.get("/export/report")
-def export_migration_report():
+def export_migration_report(current_user: User = Depends(get_current_user)):
     """
-    Генерирует и скачивает Excel-файл с отчетом по всем товарам
+    Генерирует и скачивает Excel-файл с отчетом по товарам текущего пользователя
     """
-    # repo.get_all() теперь возвращает список словарей, а не Pydantic-моделей
-    products = repo.get_all()
+    # Получаем только товары текущего пользователя
+    products = repo.get_all(user_id=current_user.id)
     
     if not products:
         data = []
     else:
         data = []
         for p in products:
-            # p - это уже словарь, поэтому используем p["ключ"], а не p.model_dump()
-            
             # Эвристика для "Новой цены" (наценка 15% при переносе на WB)
             new_price = p["price"]
             if "wildberries" in p["source"].lower() or "→ Wildberries" in p["source"]:
@@ -49,7 +49,7 @@ def export_migration_report():
     # Создаем DataFrame
     df = pd.DataFrame(data)
     
-    # Если данных нет, создаем DataFrame с нужными колонками, чтобы файл не был пустым
+    # Если данных нет, создаем DataFrame с нужными колонками
     if df.empty:
         df = pd.DataFrame(columns=[
             "ID", "Название товара", "Артикул (SKU)", "Источник", 
@@ -61,17 +61,14 @@ def export_migration_report():
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Отчет миграции')
-        
-        # Немного украсим таблицу (ширина колонок)
         worksheet = writer.sheets['Отчет миграции']
-        worksheet.column_dimensions['B'].width = 40 # Название
-        worksheet.column_dimensions['D'].width = 20 # Источник
+        worksheet.column_dimensions['B'].width = 40
+        worksheet.column_dimensions['D'].width = 20
     
     output.seek(0)
-    
     filename = f"migration_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
     
-    logger.info(f"📊 Сформирован отчет Excel: {len(data)} строк")
+    logger.info(f" Сформирован отчет Excel: {len(data)} строк для пользователя {current_user.username}")
     
     return StreamingResponse(
         output,

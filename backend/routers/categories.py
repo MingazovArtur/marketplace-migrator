@@ -2,19 +2,11 @@
 Роутер для работы со справочниками категорий и маппингом
 """
 from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.orm import Session
-from database.session import SessionLocal
 from services.category_service import category_service
+from core.auth import get_current_user
+from database.models import User
 
 router = APIRouter(prefix="/api", tags=["Categories"])
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @router.get("/categories/{platform}")
@@ -29,7 +21,6 @@ def get_categories_tree(platform: str):
     """Получить категории в виде дерева"""
     categories = category_service.get_categories(platform)
     
-    # Строим дерево
     tree = []
     category_map = {cat["id"]: {**cat, "children": []} for cat in categories}
     
@@ -47,11 +38,11 @@ def get_category_mapping(
     source_platform: str,
     source_category_id: str,
     target_platform: str,
-    user_id: int = None  # В реальном приложении берется из JWT
+    current_user: User = Depends(get_current_user)  # ✅ Из JWT, не из параметров!
 ):
-    """Найти маппинг категории"""
+    """Найти маппинг категории для текущего пользователя"""
     mapping = category_service.get_category_mapping(
-        source_platform, source_category_id, target_platform, user_id
+        source_platform, source_category_id, target_platform, current_user.id
     )
     
     if mapping:
@@ -66,25 +57,34 @@ def save_category_mapping(
     source_category_id: str,
     target_platform: str,
     target_category_id: str,
-    user_id: int = 1  # В реальном приложении берется из JWT
+    current_user: User = Depends(get_current_user)  # ✅ Из JWT
 ):
-    """Сохранить маппинг категории"""
+    """Сохранить маппинг категории для текущего пользователя"""
     result = category_service.save_category_mapping(
-        user_id, source_platform, source_category_id, 
-        target_platform, target_category_id
+        current_user.id,
+        source_platform,
+        source_category_id,
+        target_platform,
+        target_category_id
     )
     
     if result["success"]:
         return result
     
     raise HTTPException(status_code=500, detail=result["error"])
-@router.post("/categories/{platform}/refresh")
-def refresh_categories_with_api(platform: str, api_key: str):
+
+
+@router.post("/categories/{platform}/refresh")  # ✅ Убраны пробелы
+def refresh_categories_with_api(
+    platform: str,
+    api_key: str,
+    current_user: User = Depends(get_current_user)  # ✅ Добавлена авторизация
+):
     """Обновить справочник категорий с использованием API ключа"""
     categories = category_service.get_categories_with_api_key(platform, api_key)
     return {
-        "success": True, 
-        "categories": categories, 
+        "success": True,
+        "categories": categories,
         "total": len(categories),
         "source": "api" if api_key else "mock"
     }
