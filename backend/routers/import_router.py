@@ -2,7 +2,6 @@
 Роутер для импорта товаров (API ключи, YML, Excel/CSV)
 """
 import logging
-from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from database.repository import repo
 from database.models import User
@@ -18,39 +17,28 @@ async def import_products(
     request: ImportRequest,
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Импорт товаров по API ключу, Mock-ключу или YML-ссылке
-    """
-    # 🔍 ПУЛЕНЕПРОБИВАЕМОЕ ИЗВЛЕЧЕНИЕ: защищаемся от случайных массивов/кортежей с фронтенда
+    """Импорт товаров по API ключу, Mock-ключу или YML-ссылке"""
+    # Пуленепробиваемое извлечение ключа
     raw_key = request.auth_key
-    
     if isinstance(raw_key, (list, tuple)):
         auth_key = str(raw_key[0]).strip() if raw_key else ""
     else:
         auth_key = str(raw_key or "").strip()
-    
-    print(f"🔍 [IMPORT DEBUG] raw_key тип: {type(raw_key)}, значение: {raw_key}")
-    print(f"🔍 [IMPORT DEBUG] Итоговый очищенный auth_key: '{auth_key}'")
-    
-    # 1. MOCK-РЕЖИМ (для тестирования)
-    # Проверяем, является ли ключ известным mock-ключом ИЛИ заканчивается на :test:test
+
+    # MOCK-РЕЖИМ
     is_mock = (
-        auth_key.lower() in ["test:test", "mock_wb_key", "mock_ozon_key", "mock_yandex_key"] or 
-        auth_key.lower().endswith(":test:test")
+        auth_key.lower() in ["test:test", "mock_wb_key", "mock_ozon_key", "mock_yandex_key"]
+        or auth_key.lower().endswith(":test:test")
     )
-    
+
     if is_mock:
-        # Умно определяем платформу из самого ключа
         if "yandex" in auth_key.lower():
             platform = "yandex"
         elif "wb" in auth_key.lower() or "wildberries" in auth_key.lower():
             platform = "wildberries"
         else:
             platform = "ozon"
-            
-        print(f"✅ [IMPORT DEBUG] Активирован MOCK-режим для платформы: {platform}")
-        
-        # Создаем тестовые товары. ВАЖНО: указываем user_id текущего пользователя!
+
         mock_products = [
             ProductCreate(
                 name="Швабра с отжимом и ведром, самоочищающаяся, 2 насадки, 10 л",
@@ -83,18 +71,18 @@ async def import_products(
                 user_id=current_user.id
             )
         ]
-        
+
         imported_count = 0
         for p in mock_products:
             repo.add(p)
             imported_count += 1
-        
+
         platform_name_map = {
             "ozon": "Ozon",
             "wildberries": "Wildberries",
             "yandex": "Яндекс Маркет"
         }
-        
+
         return {
             "success": True,
             "imported": imported_count,
@@ -102,14 +90,12 @@ async def import_products(
             "is_mock": True
         }
 
-    # 2. ИМПОРТ ЧЕРЕЗ YML-ФИД (Яндекс Маркет)
+    # ИМПОРТ ЧЕРЕЗ YML-ФИД
     if auth_key.startswith("http://") or auth_key.startswith("https://"):
         try:
             from services.yml_parser import parse_yml_url
             
-            # Парсим YML (функция должна возвращать список словарей)
             yml_products = parse_yml_url(auth_key)
-            
             if not yml_products:
                 raise HTTPException(status_code=400, detail="Не найдено товаров в YML-фиде")
             
@@ -123,7 +109,7 @@ async def import_products(
                     description=p_data.get("description", ""),
                     photos_count=len(p_data.get("pictures", [])) if p_data.get("pictures") else 0,
                     category=p_data.get("category", "Не указана"),
-                    user_id=current_user.id  # ВАЖНО: привязка к пользователю
+                    user_id=current_user.id
                 )
                 repo.add(product_obj)
                 imported_count += 1
@@ -138,7 +124,7 @@ async def import_products(
             logger.error(f"Ошибка парсинга YML: {e}")
             raise HTTPException(status_code=400, detail=f"Ошибка парсинга YML: {str(e)}")
 
-    # 3. РЕАЛЬНЫЙ API (Ozon / Yandex Seller) - заглушка для будущего расширения
+    # Реальный API — заглушка
     return {
         "success": False,
         "imported": 0,
@@ -154,17 +140,12 @@ async def import_from_file(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Импорт товаров из Excel (.xlsx) или CSV файла
-    """
+    """Импорт товаров из Excel (.xlsx) или CSV файла"""
     if not file.filename.lower().endswith(('.csv', '.xlsx')):
         raise HTTPException(status_code=400, detail="Поддерживаются только файлы .csv и .xlsx")
     
     try:
-        # Читаем содержимое файла
         contents = await file.read()
-        
-        # Импортируем и используем парсер файлов
         from services.file_parser import parse_file
         parsed_data = parse_file(contents, file.filename)
         
@@ -173,14 +154,12 @@ async def import_from_file(
         
         imported_count = 0
         for row in parsed_data:
-            # Безопасное преобразование цены
             raw_price = row.get("price") or row.get("Цена", 0)
             try:
                 clean_price = float(str(raw_price).replace(",", ".").replace(" ", ""))
             except ValueError:
                 clean_price = 0.0
                 
-            # Безопасное преобразование количества фото
             raw_photos = row.get("photos_count") or row.get("Фото", 0)
             try:
                 clean_photos = int(raw_photos)
@@ -195,7 +174,7 @@ async def import_from_file(
                 description=row.get("description") or row.get("Описание", ""),
                 photos_count=clean_photos,
                 category=row.get("category") or row.get("Категория", "Не указана"),
-                user_id=current_user.id  # ВАЖНО: привязка к пользователю
+                user_id=current_user.id
             )
             repo.add(product_obj)
             imported_count += 1

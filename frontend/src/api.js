@@ -1,22 +1,13 @@
 const API_URL = 'http://localhost:8000/api';
 
-// Функция для получения заголовков с токеном авторизации
 const getHeaders = () => {
   const token = localStorage.getItem('token');
-  
-  // 🔍 ОТЛАДКА: Смотрим в консоль браузера, что именно мы отправляем
-  console.log('🔑 Отправляемый токен:', token ? `${token.substring(0, 20)}...` : 'ОТСУТСТВУЕТ');
-  
-  const headers = {
+  return {
     'Content-Type': 'application/json',
     ...(token && { 'Authorization': `Bearer ${token}` })
   };
-  
-  console.log('📦 Итоговые заголовки:', headers);
-  return headers;
 };
 
-// Функция для получения заголовков без Content-Type (для FormData)
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
   return {
@@ -25,8 +16,6 @@ const getAuthHeaders = () => {
 };
 
 export const api = {
-  // === АВТОРИЗАЦИЯ ===
-  
   login: async (username, password) => {
     const res = await fetch(`${API_URL}/auth/login`, {
       method: 'POST',
@@ -62,20 +51,14 @@ export const api = {
     return data;
   },
 
-  // === ТОВАРЫ ===
-
   getStats: async () => {
-    const res = await fetch(`${API_URL}/stats`, {
-      headers: getHeaders()
-    });
+    const res = await fetch(`${API_URL}/stats`, { headers: getHeaders() });
     if (!res.ok) throw new Error('Не удалось загрузить статистику');
     return res.json();
   },
 
   getProducts: async () => {
-    const res = await fetch(`${API_URL}/products`, {
-      headers: getHeaders()
-    });
+    const res = await fetch(`${API_URL}/products`, { headers: getHeaders() });
     if (!res.ok) throw new Error('Не удалось загрузить товары');
     return res.json();
   },
@@ -89,25 +72,17 @@ export const api = {
     return res.json();
   },
 
-  // === ПЛАТФОРМЫ И КАТЕГОРИИ ===
-
   getPlatforms: async () => {
-    const res = await fetch(`${API_URL}/platforms`, {
-      headers: getHeaders()
-    });
+    const res = await fetch(`${API_URL}/platforms`, { headers: getHeaders() });
     if (!res.ok) throw new Error('Не удалось загрузить платформы');
     return res.json();
   },
 
   getCategories: async (platform) => {
-    const res = await fetch(`${API_URL}/categories/${platform}`, {
-      headers: getHeaders()
-    });
+    const res = await fetch(`${API_URL}/categories/${platform}`, { headers: getHeaders() });
     if (!res.ok) throw new Error('Не удалось загрузить категории');
     return res.json();
   },
-
-  // === ИМПОРТ ===
 
   importProducts: async (authKey) => {
     const res = await fetch(`${API_URL}/import`, {
@@ -123,10 +98,9 @@ export const api = {
   importFromFile: async (platform, file) => {
     const formData = new FormData();
     formData.append('file', file);
-    
     const res = await fetch(`${API_URL}/import/file?platform=${platform}`, {
       method: 'POST',
-      headers: getAuthHeaders(), // Не устанавливаем Content-Type для FormData
+      headers: getAuthHeaders(),
       body: formData
     });
     const data = await res.json();
@@ -134,16 +108,11 @@ export const api = {
     return data;
   },
 
-  // === МИГРАЦИЯ ===
-
   previewMigration: async (productId, targetPlatform) => {
     const res = await fetch(`${API_URL}/migrate/preview`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ 
-        product_id: productId, 
-        target_marketplace: targetPlatform 
-      })
+      body: JSON.stringify({ product_id: productId, target_marketplace: targetPlatform })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Ошибка предпросмотра');
@@ -151,15 +120,8 @@ export const api = {
   },
 
   migrateProduct: async (productId, targetPlatform, editedData = null) => {
-    const body = {
-      product_id: productId,
-      target_marketplace: targetPlatform
-    };
-    
-    if (editedData) {
-      body.edited_data = editedData;
-    }
-    
+    const body = { product_id: productId, target_marketplace: targetPlatform };
+    if (editedData) body.edited_data = editedData;
     const res = await fetch(`${API_URL}/migrate`, {
       method: 'POST',
       headers: getHeaders(),
@@ -174,10 +136,7 @@ export const api = {
     const res = await fetch(`${API_URL}/migrate/batch`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ 
-        product_ids: productIds, 
-        target_marketplace: targetPlatform 
-      })
+      body: JSON.stringify({ product_ids: productIds, target_marketplace: targetPlatform })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Ошибка пакетной миграции');
@@ -185,28 +144,20 @@ export const api = {
   },
 
   getTaskProgress: async (taskId) => {
-    const res = await fetch(`${API_URL}/tasks/${taskId}/progress`, {
-      headers: getHeaders()
-    });
+    const res = await fetch(`${API_URL}/tasks/${taskId}/progress`, { headers: getHeaders() });
     const data = await res.json();
     if (!res.ok) throw new Error('Не удалось получить прогресс');
     return data.progress || data;
   },
 
-  // === ЭКСПОРТ ===
-
   exportReport: async () => {
-    const res = await fetch(`${API_URL}/export/report`, {
-      headers: getHeaders()
-    });
+    const res = await fetch(`${API_URL}/export/report`, { headers: getHeaders() });
     if (!res.ok) throw new Error('Не удалось сформировать отчет');
-    
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const dateStr = new Date().toISOString().slice(0, 10);
-    a.download = `migration_report_${dateStr}.xlsx`;
+    a.download = `migration_report_${new Date().toISOString().slice(0, 10)}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
