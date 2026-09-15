@@ -57,8 +57,23 @@ export const api = {
     return res.json();
   },
 
-  getProducts: async () => {
-    const res = await fetch(`${API_URL}/products`, { headers: getHeaders() });
+  getProducts: async (params = {}) => {
+    const queryParams = new URLSearchParams();
+    
+    if (params.search) queryParams.append('search', params.search);
+    if (params.status) queryParams.append('status', params.status);
+    if (params.source) queryParams.append('source', params.source);
+    if (params.sort_by) queryParams.append('sort_by', params.sort_by);
+    if (params.sort_order) queryParams.append('sort_order', params.sort_order);
+    if (params.skip !== undefined) queryParams.append('skip', params.skip);
+    if (params.limit !== undefined) queryParams.append('limit', params.limit);
+    
+    const queryString = queryParams.toString();
+    const url = `${API_URL}/products${queryString ? '?' + queryString : ''}`;
+    
+    const res = await fetch(url, {
+      headers: getHeaders()
+    });
     if (!res.ok) throw new Error('Не удалось загрузить товары');
     return res.json();
   },

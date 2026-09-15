@@ -1,13 +1,27 @@
-version: '3.8'
-
 services:
+  db:
+    image: postgres:15-alpine
+    container_name: marketplace_db
+    environment:
+      POSTGRES_USER: migrator_user
+      POSTGRES_PASSWORD: migrator_password_2026
+      POSTGRES_DB: marketplace_migrator
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
+    container_name: marketplace_redis
     ports:
       - "6379:6379"
+    restart: unless-stopped
 
   backend:
     build: ./backend
+    container_name: marketplace_backend
     ports:
       - "8000:8000"
     volumes:
@@ -15,22 +29,29 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - CELERY_BROKER_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://migrator_user:migrator_password_2026@db:5432/marketplace_migrator
     depends_on:
+      - db
       - redis
+    restart: unless-stopped
 
   celery_worker:
     build: ./backend
+    container_name: marketplace_celery
     command: celery -A celery_app worker --loglevel=info --pool=solo
     volumes:
       - ./backend:/app
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://migrator_user:migrator_password_2026@db:5432/marketplace_migrator
     depends_on:
       - redis
       - backend
+    restart: unless-stopped
 
   frontend:
     build: ./frontend
+    container_name: marketplace_frontend
     ports:
       - "5173:5173"
     volumes:
@@ -38,3 +59,7 @@ services:
       - /app/node_modules
     depends_on:
       - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

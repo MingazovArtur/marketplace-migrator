@@ -1,11 +1,13 @@
 """
 Репозиторий для работы с товарами в базе данных.
-Все методы теперь принимают user_id для изоляции данных пользователей.
+Поддерживает фильтрацию, сортировку и пагинацию.
 """
 from sqlalchemy.orm import Session
+from sqlalchemy import desc, asc
 from database.models import Product
 from database.session import SessionLocal, engine
 from database.models import Base
+from typing import Optional, List, Dict
 
 # Создаем таблицы при старте, если их нет
 Base.metadata.create_all(bind=engine)
@@ -15,36 +17,81 @@ class ProductRepository:
     def __init__(self):
         pass
 
-    def get_all(self, user_id: int = None, is_admin: bool = False):
+    def get_all(
+        self, 
+        user_id: int = None, 
+        is_admin: bool = False,
+        search: Optional[str] = None,
+        status: Optional[str] = None,
+        source: Optional[str] = None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        skip: int = 0,
+        limit: int = 50
+    ):
         """
-        Получить все товары.
-        - Если is_admin=True: возвращает все товары всех пользователей
-        - Если user_id указан: возвращает только товары этого пользователя
+        Получить товары с фильтрацией, сортировкой и пагинацией.
         """
         with SessionLocal() as db:
             query = db.query(Product)
             
-            # Если не админ и указан user_id — фильтруем
+            # Фильтрация по пользователю
             if not is_admin and user_id is not None:
                 query = query.filter(Product.user_id == user_id)
             
-            products = query.all()
-            return [
-                {
-                    "id": p.id, "name": p.name, "source": p.source,
-                    "price": p.price, "status": p.status, "description": p.description,
-                    "photos_count": p.photos_count, "category": p.category,
-                    "mapped_category": p.mapped_category, "user_id": p.user_id
-                }
-                for p in products
-            ]
+            # Поиск по названию
+            if search:
+                query = query.filter(Product.name.ilike(f"%{search}%"))
+            
+            # Фильтр по статусу
+            if status:
+                query = query.filter(Product.status == status)
+            
+            # Фильтр по источнику
+            if source:
+                query = query.filter(Product.source.ilike(f"%{source}%"))
+            
+            # Сортировка
+            sort_column = getattr(Product, sort_by, Product.created_at)
+            if sort_order == "asc":
+                query = query.order_by(asc(sort_column))
+            else:
+                query = query.order_by(desc(sort_column))
+            
+            # Пагинация
+            products = query.offset(skip).limit(limit).all()
+            
+            # Получаем общее количество для пагинации
+            total_query = db.query(Product)
+            if not is_admin and user_id is not None:
+                total_query = total_query.filter(Product.user_id == user_id)
+            if search:
+                total_query = total_query.filter(Product.name.ilike(f"%{search}%"))
+            if status:
+                total_query = total_query.filter(Product.status == status)
+            if source:
+                total_query = total_query.filter(Product.source.ilike(f"%{source}%"))
+            total = total_query.count()
+            
+            return {
+                "total": total,
+                "products": [
+                    {
+                        "id": p.id, "name": p.name, "source": p.source,
+                        "price": p.price, "status": p.status, "description": p.description,
+                        "photos_count": p.photos_count, "category": p.category,
+                        "mapped_category": p.mapped_category, "user_id": p.user_id,
+                        "created_at": p.created_at.isoformat() if p.created_at else None
+                    }
+                    for p in products
+                ]
+            }
 
     def get_by_id(self, product_id: int, user_id: int = None):
         """Получить товар по ID. Если указан user_id — проверяет владельца."""
         with SessionLocal() as db:
             query = db.query(Product).filter(Product.id == product_id)
             
-            # Если передан user_id — добавляем проверку владельца
             if user_id is not None:
                 query = query.filter(Product.user_id == user_id)
             
@@ -61,26 +108,21 @@ class ProductRepository:
     def add(self, product_data):
         """Добавить новый товар. product_data должен содержать user_id."""
         with SessionLocal() as db:
-            # Если передана Pydantic-модель, конвертируем её в словарь
             if hasattr(product_data, "model_dump"):
                 data_dict = product_data.model_dump()
             else:
                 data_dict = product_data
             
-            # Убираем 'id', чтобы SQLAlchemy сама сгенерировала его
             data_dict.pop("id", None)
             
-            # Проверяем, что user_id присутствует
             if "user_id" not in data_dict or data_dict["user_id"] is None:
                 raise ValueError("user_id обязателен при создании товара")
             
-            # Создаем запись в БД
             new_product = Product(**data_dict)
             db.add(new_product)
             db.commit()
             db.refresh(new_product)
             
-            # Возвращаем как словарь
             return {
                 "id": new_product.id, 
                 "name": new_product.name, 
@@ -99,7 +141,6 @@ class ProductRepository:
         with SessionLocal() as db:
             query = db.query(Product).filter(Product.id == product_id)
             
-            # Если передан user_id — добавляем проверку владельца
             if user_id is not None:
                 query = query.filter(Product.user_id == user_id)
             
@@ -134,15 +175,10 @@ class ProductRepository:
             return False
 
     def get_stats(self, user_id: int = None, is_admin: bool = False):
-        """
-        Получить статистику по товарам.
-        - Если is_admin=True: статистика по всем товарам
-        - Если user_id указан: статистика только по товарам этого пользователя
-        """
+        """Получить статистику по товарам."""
         with SessionLocal() as db:
             query = db.query(Product)
             
-            # Если не админ и указан user_id — фильтруем
             if not is_admin and user_id is not None:
                 query = query.filter(Product.user_id == user_id)
             

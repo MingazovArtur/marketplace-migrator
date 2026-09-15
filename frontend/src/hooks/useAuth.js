@@ -1,6 +1,3 @@
-/**
- * Hook для управления авторизацией
- */
 import { useState, useCallback } from 'react';
 import { api } from '../api';
 
@@ -17,11 +14,9 @@ export const useAuth = () => {
     setToken(null);
   }, []);
 
-  const isAuthenticated = !!token;
-
   return {
     token,
-    isAuthenticated,
+    isAuthenticated: !!token,
     handleLogin,
     handleLogout,
     setToken

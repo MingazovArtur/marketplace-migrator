@@ -1,6 +1,3 @@
-/**
- * Hook для управления миграцией товаров с polling и блокировкой
- */
 import { useState, useCallback, useRef } from 'react';
 import { api } from '../api';
 
@@ -19,7 +16,7 @@ export const useMigration = (loadData, onMessage) => {
   const migrateProduct = useCallback(async (productId, targetPlatform, editedData = null) => {
     // Блокируем товар сразу на фронтенде
     setIsMigratingProductId(productId);
-    onMessage?.(' Идет перенос товара...');
+    onMessage?.('⏳ Идет перенос товара...');
 
     try {
       const data = await api.migrateProduct(productId, targetPlatform, editedData);
@@ -75,7 +72,7 @@ export const useMigration = (loadData, onMessage) => {
       const data = await api.migrateBatch(productIds, targetPlatform);
       return data;
     } catch (err) {
-      onMessage?.('❌ ' + err.message);
+      onMessage?.(' ' + err.message);
       throw err;
     }
   }, [onMessage]);
@@ -85,6 +82,7 @@ export const useMigration = (loadData, onMessage) => {
       try {
         const progress = await api.getTaskProgress(taskId);
         onProgress?.(progress);
+        
         if (progress.status === 'completed' || progress.status === 'error') {
           clearInterval(interval);
           onComplete?.(progress);
@@ -92,10 +90,12 @@ export const useMigration = (loadData, onMessage) => {
         }
       } catch (err) {
         clearInterval(interval);
+        onMessage?.('❌ Ошибка получения прогресса');
       }
     }, 1000);
+
     return () => clearInterval(interval);
-  }, [loadData]);
+  }, [loadData, onMessage]);
 
   return {
     isMigratingProductId,

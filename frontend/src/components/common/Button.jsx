@@ -1,36 +1,33 @@
 import React from 'react';
+import Spinner from './Spinner';
 
 const Button = ({ 
   children, 
   variant = 'primary', 
-  size = 'md', 
   disabled = false, 
+  loading = false,
   onClick, 
-  className = '',
+  className = '', 
   type = 'button',
   ...props 
 }) => {
-  const baseClasses = 'btn';
   const variantClasses = {
     primary: 'btn-primary',
     secondary: 'btn-secondary',
-    outline: 'btn-outline',
-    success: 'btn-success'
+    outline: 'btn-outline'
   };
-  const sizeClasses = {
-    sm: 'btn-sm',
-    md: '',
-    lg: 'btn-lg'
-  };
+
+  const isLoading = loading || disabled;
 
   return (
     <button
       type={type}
-      className={`${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
-      disabled={disabled}
+      className={`btn ${variantClasses[variant]} ${isLoading ? 'btn-loading' : ''} ${className}`}
+      disabled={isLoading}
       onClick={onClick}
       {...props}
     >
+      {loading && <Spinner />}
       {children}
     </button>
   );
