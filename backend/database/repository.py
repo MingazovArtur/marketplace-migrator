@@ -46,7 +46,10 @@ class ProductRepository:
             
             # 2. Убираем 'id', чтобы SQLAlchemy сама сгенерировала его (autoincrement)
             data_dict.pop("id", None)
-            
+
+            if "user_id" not in data_dict or data_dict["user_id"] is None:
+                data_dict["user_id"] = 1 
+                
             # 3. Создаем запись в БД
             new_product = Product(**data_dict)
             db.add(new_product)
