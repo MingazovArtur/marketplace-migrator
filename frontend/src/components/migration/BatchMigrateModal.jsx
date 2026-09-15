@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Button from '../common/Button';
+import AnimatedCounter from '../common/AnimatedCounter';
 import { PLATFORMS, getUnavailablePlatforms } from '../../utils/platformUtils';
 
 const BatchMigrateModal = ({ isOpen, onClose, selectedIds, products, onStartMigration, pollProgress, loading }) => {
@@ -32,23 +33,16 @@ const BatchMigrateModal = ({ isOpen, onClose, selectedIds, products, onStartMigr
       pollProgress(data.task_id, setProgress, (finalProgress) => {
         setProgress(finalProgress);
         setCompleted(true);
-        window.dispatchEvent(new CustomEvent('clearSelection'));
       });
     }
   };
 
-  const handleClose = () => {
-    setTaskId(null);
-    setCompleted(false);
-    onClose();
-  };
-
   return (
-    <div className="modal-overlay" onClick={() => !completed && handleClose()}>
+    <div className="modal-overlay" onClick={() => !completed && onClose()}>
       <div className="modal modal-batch" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>🔄 Пакетная миграция</h2>
-          {completed && <button className="close-btn" onClick={handleClose}>✕</button>}
+          <h2 className="modal-title">🔄 Пакетная миграция</h2>
+          {completed && <button className="close-btn" onClick={onClose}></button>}
         </div>
 
         {!taskId ? (
@@ -65,8 +59,8 @@ const BatchMigrateModal = ({ isOpen, onClose, selectedIds, products, onStartMigr
                   data-platform={p.id}
                 >
                   <div className="platform-logo" style={{
-                    backgroundColor: selectedPlatform === p.id ? p.color : '#f1f5f9',
-                    color: selectedPlatform === p.id ? 'white' : '#64748b'
+                    backgroundColor: selectedPlatform === p.id ? p.color : 'var(--bg-tertiary)',
+                    color: selectedPlatform === p.id ? 'white' : 'var(--text-muted)'
                   }}>
                     {p.logoText}
                   </div>
@@ -79,7 +73,7 @@ const BatchMigrateModal = ({ isOpen, onClose, selectedIds, products, onStartMigr
               <p>Миграция будет выполняться в фоновом режиме. Вы сможете наблюдать за прогрессом в реальном времени.</p>
             </div>
             <div className="modal-actions">
-              <Button variant="outline" onClick={handleClose}>Отмена</Button>
+              <Button variant="outline" onClick={onClose}>Отмена</Button>
               <Button onClick={handleStart} disabled={loading || !selectedPlatform}>
                 🚀 Запустить миграцию
               </Button>
@@ -89,15 +83,33 @@ const BatchMigrateModal = ({ isOpen, onClose, selectedIds, products, onStartMigr
           <>
             <div className="batch-progress-container">
               <div className="progress-stats">
-                <div className="stat-item"><div className="stat-label">Всего</div><div className="stat-value">{progress.total}</div></div>
-                <div className="stat-item"><div className="stat-label">Обработано</div><div className="stat-value">{progress.current}</div></div>
-                <div className="stat-item success"><div className="stat-label">Успешно</div><div className="stat-value">{progress.success || 0}</div></div>
-                <div className="stat-item error"><div className="stat-label">Ошибок</div><div className="stat-value">{progress.errors || 0}</div></div>
+                <div className="stat-item">
+                  <div className="stat-label">Всего</div>
+                  <div className="stat-value"><AnimatedCounter target={progress.total} duration={500} /></div>
+                </div>
+                <div className="stat-item">
+                  <div className="stat-label">Обработано</div>
+                  <div className="stat-value"><AnimatedCounter target={progress.current} duration={300} /></div>
+                </div>
+                <div className="stat-item success">
+                  <div className="stat-label">Успешно</div>
+                  <div className="stat-value"><AnimatedCounter target={progress.success || 0} duration={300} /></div>
+                </div>
+                <div className="stat-item error">
+                  <div className="stat-label">Ошибок</div>
+                  <div className="stat-value"><AnimatedCounter target={progress.errors || 0} duration={300} /></div>
+                </div>
               </div>
+              
+              {/* Плавный прогресс-бар с shine-эффектом */}
               <div className="progress-bar-wrapper">
-                <div className="progress-bar-fill" style={{ width: `${progress.percent}%` }}></div>
-                <div className="progress-bar-text">{progress.percent}%</div>
+                <div 
+                  className="progress-bar-fill" 
+                  style={{ width: `${progress.percent || 0}%` }}
+                />
+                <div className="progress-bar-text">{Math.round(progress.percent || 0)}%</div>
               </div>
+              
               <div className="progress-status">
                 {progress.status === 'pending' && <span>⏳ Ожидание запуска...</span>}
                 {progress.status === 'processing' && <span>⚙️ Обработка товаров...</span>}
@@ -108,6 +120,7 @@ const BatchMigrateModal = ({ isOpen, onClose, selectedIds, products, onStartMigr
                 )}
                 {progress.status === 'error' && <span className="error-text">❌ Произошла ошибка</span>}
               </div>
+              
               {progress.error_details && progress.error_details.length > 0 && (
                 <div className="error-details">
                   <h4>Детали ошибок:</h4>

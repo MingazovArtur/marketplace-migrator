@@ -1,17 +1,8 @@
 import React, { memo } from 'react';
 import Badge from '../common/Badge';
 
-const ProductRow = memo(({ 
-  product, 
-  isSelected, 
-  isMigrating, 
-  loading,
-  onSelect,
-  onMigrate 
-}) => {
-  const isMigratable = product.status !== 'success' && 
-                       product.status !== 'processing' && 
-                       !isMigrating;
+const ProductRow = memo(({ product, isSelected, isMigrating, loading, onSelect, onMigrate }) => {
+  const isMigratable = product.status !== 'success' && product.status !== 'processing' && !isMigrating;
 
   return (
     <tr className={isSelected ? 'row-selected' : ''}>
@@ -56,7 +47,7 @@ const ProductRow = memo(({
             onClick={() => onMigrate(product.id)}
             disabled={loading || isMigrating}
           >
-            {isMigrating ? '...' : 'Перенести'}
+            {isMigrating ? '⏳...' : 'Перенести'}
           </button>
         )}
       </td>
@@ -65,5 +56,4 @@ const ProductRow = memo(({
 });
 
 ProductRow.displayName = 'ProductRow';
-
 export default ProductRow;

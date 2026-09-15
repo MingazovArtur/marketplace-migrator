@@ -40,6 +40,7 @@ function Auth({ onLogin }) {
         // Сохраняем токен
         localStorage.setItem('token', data.access_token);
         onLogin(data.access_token);
+        window.location.reload();
       } else {
         // После регистрации автоматически входим
         const loginRes = await fetch(`${API_URL}/auth/login`, {
