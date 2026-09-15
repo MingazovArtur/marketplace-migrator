@@ -19,10 +19,11 @@ category_mapper = CategoryMapper()
 
 @router.post("/migrate/preview")
 async def preview_migration(
-    request: MigrateRequest,
+    request: MigrateRequest, 
     current_user: User = Depends(get_current_user)
 ):
     """Предпросмотр миграции товара"""
+    # Проверяем, что товар принадлежит текущему пользователю
     product = repo.get_by_id(request.product_id, user_id=current_user.id)
     if not product:
         raise HTTPException(status_code=404, detail="Товар не найден или не принадлежит вам")
@@ -33,13 +34,14 @@ async def preview_migration(
     elif 'wildberries' in source_platform or 'wb' in source_platform: source_platform = 'wildberries'
     elif 'яндекс' in source_platform or 'yandex' in source_platform: source_platform = 'yandex'
 
+    # Проверяем ручной маппинг
     mapping = category_service.get_mapping_for_product(
         source_platform, product.get("category"), target, current_user.id
     )
 
     if mapping and mapping.get("is_manual"):
         target_category_name = mapping["target_category_name"]
-        reason = "Использован ваш ручной маппинг"
+        reason = f"Использован ваш ручной маппинг"
     else:
         auto_map = category_mapper.auto_map_by_text(product.get("category") or "Дом и сад", target)
         target_category_name = auto_map["name"]
@@ -69,18 +71,19 @@ async def preview_migration(
 
 @router.post("/migrate")
 async def migrate_product(
-    request: MigrateRequest,
+    request: MigrateRequest, 
     current_user: User = Depends(get_current_user)
 ):
     """Запустить миграцию одного товара"""
+    # Проверяем, что товар принадлежит текущему пользователю
     product = repo.get_by_id(request.product_id, user_id=current_user.id)
     if not product:
         raise HTTPException(status_code=404, detail="Товар не найден или не принадлежит вам")
     
-    # ✅ Убрано дублирование — одна проверка вместо двух
+    # Проверяем статус
     if product.get("status") == "processing":
         raise HTTPException(
-            status_code=400,
+            status_code=400, 
             detail="Товар уже находится в процессе переноса. Дождитесь завершения."
         )
     
@@ -92,8 +95,9 @@ async def migrate_product(
     if target in source_platform and "→" not in source_platform:
         raise HTTPException(status_code=400, detail=f"Нельзя перенести товар с {target} на {target}")
 
+    # Передаем user_id в задачу!
     task = migrate_product_task.delay(
-        request.product_id,
+        request.product_id, 
         target,
         current_user.id,
         request.dict().get("edited_data")
@@ -109,7 +113,7 @@ async def migrate_product(
 
 @router.post("/migrate/batch")
 async def migrate_batch(
-    request: BatchMigrateRequest,
+    request: BatchMigrateRequest, 
     current_user: User = Depends(get_current_user)
 ):
     """Запустить пакетную миграцию товаров"""
@@ -118,6 +122,7 @@ async def migrate_batch(
     if len(request.product_ids) > 100:
         raise HTTPException(status_code=400, detail="Максимум 100 товаров за раз")
     
+    # Проверяем, что все товары принадлежат текущему пользователю
     available_ids = []
     for pid in request.product_ids:
         product = repo.get_by_id(pid, user_id=current_user.id)
@@ -126,7 +131,7 @@ async def migrate_batch(
     
     if not available_ids:
         raise HTTPException(
-            status_code=400,
+            status_code=400, 
             detail="Все выбранные товары уже находятся в процессе переноса или не принадлежат вам"
         )
     
@@ -134,6 +139,7 @@ async def migrate_batch(
     if target not in Platform.all_values():
         raise HTTPException(status_code=400, detail=f"Неизвестная платформа")
 
+    # Передаем user_id в пакетную задачу!
     task = migrate_batch_task.delay(available_ids, target, current_user.id)
 
     return {

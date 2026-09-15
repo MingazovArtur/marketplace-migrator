@@ -1,18 +1,32 @@
+"""
+Настройка подключения к базе данных
+Поддерживает PostgreSQL (production) и SQLite (development)
+"""
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from core.config import BASE_DIR
+from core.config import BASE_DIR, DATABASE_URL
 
-# Используем SQLite для простоты разработки. 
-# Для перехода на PostgreSQL достаточно заменить эту строку на:
-# "postgresql://user:password@localhost/dbname"
-SQLALCHEMY_DATABASE_URL = f"sqlite:///{BASE_DIR}/migrator.db"
+# Настройки подключения
+if DATABASE_URL.startswith("postgresql"):
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,
+        pool_recycle=3600
+    )
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False}
+    )
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+
 def get_db():
+    """Dependency для получения сессии БД"""
     db = SessionLocal()
     try:
         yield db

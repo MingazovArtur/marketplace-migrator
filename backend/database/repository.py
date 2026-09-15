@@ -15,10 +15,20 @@ class ProductRepository:
     def __init__(self):
         pass
 
-    def get_all(self, user_id: int):
-        """Получить все товары конкретного пользователя"""
+    def get_all(self, user_id: int = None, is_admin: bool = False):
+        """
+        Получить все товары.
+        - Если is_admin=True: возвращает все товары всех пользователей
+        - Если user_id указан: возвращает только товары этого пользователя
+        """
         with SessionLocal() as db:
-            products = db.query(Product).filter(Product.user_id == user_id).all()
+            query = db.query(Product)
+            
+            # Если не админ и указан user_id — фильтруем
+            if not is_admin and user_id is not None:
+                query = query.filter(Product.user_id == user_id)
+            
+            products = query.all()
             return [
                 {
                     "id": p.id, "name": p.name, "source": p.source,
@@ -51,26 +61,26 @@ class ProductRepository:
     def add(self, product_data):
         """Добавить новый товар. product_data должен содержать user_id."""
         with SessionLocal() as db:
-            # 1. Если передана Pydantic-модель, конвертируем её в словарь
+            # Если передана Pydantic-модель, конвертируем её в словарь
             if hasattr(product_data, "model_dump"):
                 data_dict = product_data.model_dump()
             else:
                 data_dict = product_data
             
-            # 2. Убираем 'id', чтобы SQLAlchemy сама сгенерировала его
+            # Убираем 'id', чтобы SQLAlchemy сама сгенерировала его
             data_dict.pop("id", None)
             
-            # 3. Проверяем, что user_id присутствует (КРИТИЧНО!)
+            # Проверяем, что user_id присутствует
             if "user_id" not in data_dict or data_dict["user_id"] is None:
                 raise ValueError("user_id обязателен при создании товара")
             
-            # 4. Создаем запись в БД
+            # Создаем запись в БД
             new_product = Product(**data_dict)
             db.add(new_product)
             db.commit()
             db.refresh(new_product)
             
-            # 5. Возвращаем как словарь
+            # Возвращаем как словарь
             return {
                 "id": new_product.id, 
                 "name": new_product.name, 
@@ -123,16 +133,24 @@ class ProductRepository:
                 return True
             return False
 
-    def get_stats(self, user_id: int):
-        """Получить статистику по товарам конкретного пользователя"""
+    def get_stats(self, user_id: int = None, is_admin: bool = False):
+        """
+        Получить статистику по товарам.
+        - Если is_admin=True: статистика по всем товарам
+        - Если user_id указан: статистика только по товарам этого пользователя
+        """
         with SessionLocal() as db:
-            base_query = db.query(Product).filter(Product.user_id == user_id)
+            query = db.query(Product)
             
-            total = base_query.count()
-            pending = base_query.filter(Product.status == "pending").count()
-            success = base_query.filter(Product.status == "success").count()
-            error = base_query.filter(Product.status == "error").count()
-            processing = base_query.filter(Product.status == "processing").count()
+            # Если не админ и указан user_id — фильтруем
+            if not is_admin and user_id is not None:
+                query = query.filter(Product.user_id == user_id)
+            
+            total = query.count()
+            pending = query.filter(Product.status == "pending").count()
+            success = query.filter(Product.status == "success").count()
+            error = query.filter(Product.status == "error").count()
+            processing = query.filter(Product.status == "processing").count()
             
             return {
                 "total": total, "pending": pending, "success": success, 
