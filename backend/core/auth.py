@@ -57,27 +57,33 @@ def decode_token(token: str) -> Optional[dict]:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> User:
-    """Dependency для получения текущего пользователя из токена"""
     token = credentials.credentials
-    
     payload = decode_token(token)
     if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Недействительный токен",
+            detail="Недействительный или просроченный токен",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    user_id = int(payload.get("sub"))
-    if user_id is None:
+
+    sub = payload.get("sub")
+    if sub is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Недействительный токен",
+            detail="Недействительный токен: отсутствует sub",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+    try:
+        user_id = int(sub)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Недействительный токен: некорректный sub",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.id == user_id).first()

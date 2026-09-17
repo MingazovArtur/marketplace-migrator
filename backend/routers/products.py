@@ -8,9 +8,41 @@ from models.schemas import Stats
 from core.auth import get_current_user
 from database.models import User
 from typing import Optional
+from models.schemas import Stats, ProductBulkUpdate
+
 
 router = APIRouter(prefix="/api", tags=["Products"])
 
+@router.put("/products/bulk-update")
+def bulk_update_products(
+    request: ProductBulkUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    """Массовое обновление цены/бренда/категории для выбранных товаров."""
+    if not request.product_ids:
+        raise HTTPException(status_code=400, detail="Не указаны товары")
+    if all(v is None for v in (request.price, request.price_percent, request.brand, request.category)):
+        raise HTTPException(status_code=400, detail="Не указаны поля для обновления")
+
+    updated = 0
+    for pid in request.product_ids:
+        p = repo.get_by_id(pid, user_id=current_user.id)
+        if not p:
+            continue
+        upd = {}
+        if request.price_percent is not None:
+            upd["price"] = round((p["price"] or 0) * (1 + request.price_percent / 100), 2)
+        elif request.price is not None:
+            upd["price"] = request.price
+        if request.brand is not None:
+            upd["brand"] = request.brand
+        if request.category is not None:
+            upd["category"] = request.category
+        if upd:
+            repo.update(pid, upd, user_id=current_user.id)
+            updated += 1
+
+    return {"success": True, "updated": updated}
 
 @router.get("/products")
 def get_products(

@@ -1,6 +1,6 @@
 import logging
 from typing import List, Dict
-from services.yml_parser import YmlParser
+from backend.parsers.yml_parser import YmlParser
 
 logger = logging.getLogger(__name__)
 

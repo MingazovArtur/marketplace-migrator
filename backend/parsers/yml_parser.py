@@ -4,6 +4,7 @@ Docs: https://yandex.ru/support/partner2/yml/yml-format.html
 """
 import logging
 import requests
+import re
 from xml.etree import ElementTree
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
@@ -161,8 +162,7 @@ class YmlParser:
             description_elem = offer_elem.find('description')
             description = ""
             if description_elem is not None and description_elem.text:
-                # Убираем HTML-теги из описания
-                import re
+                # Убираем HTML-теги из описания                
                 description = re.sub(r'<[^>]+>', ' ', description_elem.text).strip()
                 description = description[:500]  # Ограничиваем длину
             
@@ -214,3 +214,9 @@ class YmlParser:
         except Exception as e:
             logger.warning(f"⚠️  Ошибка парсинга offer {offer_elem.get('id')}: {e}")
             return None
+        
+def parse_yml_url(url: str, max_offers: int = 50) -> List[Dict]:
+    """Удобная обёртка для роутеров: список товаров из YML-фида."""
+    parser = YmlParser(max_offers=max_offers)
+    result = parser.fetch_and_parse(url)
+    return result["offers"]
