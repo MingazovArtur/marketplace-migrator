@@ -1,33 +1,77 @@
-# 🚀 Marketplace Migrator v3.1
+#  Marketplace Migrator
 
-[![Python 3.12+](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com/)
-[![React 19](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
+**Универсальный инструмент для переноса карточек товаров между маркетплейсами**
 
-**Профессиональный инструмент для автоматической миграции карточек товаров** между Ozon, Wildberries и Яндекс Маркетом.
-
-> 💡 **Ключевая особенность:** Production-ready архитектура (SQLAlchemy, Celery, Redis, Docker) с возможностью редактирования данных перед переносом и пакетной обработкой с прогресс-баром.
-
----
-
-## ✨ Основные возможности (v3.1)
-
-- 🔄 **Мультиплатформенность:** Импорт и экспорт для Ozon, Wildberries, Яндекс Маркет.
-- 📥 **Гибкий импорт:** По API-ключам, через YML-фиды (без регистрации) или из Excel/CSV.
-- ✏️ **Редактирование перед переносом:** Изменение названия, цены и категории в окне предпросмотра.
-- ⚡ **Пакетная миграция:** Перенос десятков товаров одной кнопкой с live-прогресс-баром.
-- 📊 **Экспорт отчетов:** Генерация Excel-файла с историей миграций и расчетом новых цен.
-- 🧠 **Умный маппинг:** Автоматическое определение категорий целевой площадки.
-- 🏗️ **Архитектура:** SQLAlchemy (SQLite/PostgreSQL), Celery + Redis для фоновых задач, Repository Pattern.
+[![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://python.org)
+[![React](https://img.shields.io/badge/React-19.2+-61dafb.svg)](https://react.dev)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791.svg)](https://postgresql.org)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ed.svg)](https://docker.com)
 
 ---
 
-## 🚀 Быстрый старт (Docker)
+## 📖 О проекте
 
-Самый простой способ запустить всё сразу (Backend, Frontend, Redis, Celery):
+**Marketplace Migrator** — это веб-приложение для автоматизации переноса карточек товаров между популярными маркетплейсами: **Ozon**, **Wildberries** и **Яндекс Маркет**.
 
-```bash
-git clone https://github.com/ВАШ_НИК/marketplace-migrator.git
-cd marketplace-migrator
-docker compose up --build
+### 🎯 Основные возможности
+
+- ✅ **Импорт товаров** из Excel/CSV файлов или по API ключу
+- ✅ **Автоматический маппинг категорий** между площадками
+- ✅ **Пакетная миграция** с отслеживанием прогресса в реальном времени
+- ✅ **Предпросмотр изменений** перед переносом (название, цена, категория)
+- ✅ **Экспорт отчётов** в Excel с историей миграций
+- ✅ **Многопользовательский режим** с изоляцией данных
+- ✅ **Роли пользователей** (Admin/User)
+- ✅ **Современный UI** с тёмной темой и анимациями
+
+### 🚀 Для кого этот проект?
+
+- **Селлеры маркетплейсов**, которые продают на нескольких площадках одновременно
+- **Менеджеры по маркетплейсам**, отвечающие за расширение ассортимента
+- **E-commerce компании**, автоматизирующие процессы переноса товаров
+
+---
+
+## ️ Технологический стек
+
+### Backend
+- **FastAPI** — современный асинхронный фреймворк
+- **SQLAlchemy 2.0** — ORM для работы с базой данных
+- **PostgreSQL 15** — production-ready база данных
+- **Celery + Redis** — фоновые задачи и очереди
+- **Alembic** — миграции схемы БД
+- **Pydantic** — валидация данных
+- **Pandas + OpenPyXL** — работа с Excel/CSV
+- **bcrypt** — хэширование паролей
+- **JWT** — аутентификация
+
+### Frontend
+- **React 19** — UI библиотека
+- **Vite** — сборщик
+- **Custom Hooks** — управление состоянием
+- **CSS Variables** — темизация
+- **SVG Icons** — векторные иконки
+
+### Инфраструктура
+- **Docker + Docker Compose** — контейнеризация
+- **PostgreSQL** — база данных
+- **Redis** — брокер задач
+
+---
+
+##  Установка и запуск
+
+### Требования
+
+- **Docker** и **Docker Compose** (версия 2.0+)
+- **Git**
+- Минимум **4 GB RAM**
+- **10 GB** свободного места на диске
+
+### Быстрый старт
+
+1. **Клонируйте репозиторий:**
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/marketplace-migrator.git
+   cd marketplace-migrator
