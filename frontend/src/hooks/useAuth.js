@@ -1,8 +1,25 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 
 export const useAuth = () => {
   const [token, setToken] = useState(localStorage.getItem('token'));
+  const [user, setUser] = useState(null);
+
+  const loadUser = useCallback(async () => {
+    try {
+      const me = await api.getMe();
+      setUser(me);
+    } catch {
+      localStorage.removeItem('token');
+      setToken(null);
+      setUser(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (token) loadUser();
+    else setUser(null);
+  }, [token, loadUser]);
 
   const handleLogin = useCallback((newToken) => {
     localStorage.setItem('token', newToken);
@@ -10,15 +27,10 @@ export const useAuth = () => {
   }, []);
 
   const handleLogout = useCallback(() => {
-    api.logout();
+    localStorage.removeItem('token');
     setToken(null);
+    setUser(null);
   }, []);
 
-  return {
-    token,
-    isAuthenticated: !!token,
-    handleLogin,
-    handleLogout,
-    setToken
-  };
+  return { token, isAuthenticated: !!token, user, handleLogin, handleLogout };
 };
