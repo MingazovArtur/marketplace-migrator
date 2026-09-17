@@ -1,104 +1,123 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import Auth from './Auth';
 import CategoryMapping from './CategoryMapping';
 import { useAuth } from './hooks/useAuth';
 import { useProducts } from './hooks/useProducts';
 import { useMigration } from './hooks/useMigration';
-import { useApi } from './hooks/useApi';
-import { detectPlatform, PLATFORMS, getUnavailablePlatforms } from './utils/platformUtils';
+import TopBar from './components/layout/TopBar';
+import Sidebar from './components/layout/Sidebar';
+import Landing from './components/layout/Landing';
+import AuthModal from './components/auth/AuthModal';
 import Alert from './components/common/Alert';
 import Button from './components/common/Button';
 import StatsGrid from './components/products/StatsGrid';
 import ProductTable from './components/products/ProductTable';
+import SearchBar from './components/common/SearchBar';
+import Pagination from './components/common/Pagination';
 import ImportModal from './components/import/ImportModal';
 import MigrateModal from './components/migration/MigrateModal';
 import BatchMigrateModal from './components/migration/BatchMigrateModal';
-import Sidebar from './components/layout/Sidebar';
+import ExportModal from './components/export/ExportModal';
+import BulkEditModal from './components/products/BulkEditModal';
+import AttributesModal from './components/products/AttributesModal';
+import VariantsModal from './components/products/VariantsModal';
+import PhotosModal from './components/products/PhotosModal';   // ← НОВОЕ (Шаг 6.4)
+import HistoryView from './components/history/HistoryView';
 import { api } from './api';
 import './App.css';
 
 function App() {
-  const { token, isAuthenticated, handleLogin, handleLogout } = useAuth();
+  const { token, isAuthenticated, user, handleLogin, handleLogout } = useAuth();
+
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
+  const [authTab, setAuthTab] = useState(null); // null | 'login' | 'register'
   const [message, setMessage] = useState('');
   const [currentView, setCurrentView] = useState('products');
-  
+
   const [showImportModal, setShowImportModal] = useState(false);
-  const [showCategoryMapping, setShowCategoryMapping] = useState(false);
-  const [migrateProductId, setMigrateProductId] = useState(null);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
+  const [migrateProductId, setMigrateProductId] = useState(null);
   const [selectedProductIds, setSelectedProductIds] = useState([]);
 
+  const [editAttributesProduct, setEditAttributesProduct] = useState(null);
+  const [editVariantsProduct, setEditVariantsProduct] = useState(null);
+  const [editPhotosProduct, setEditPhotosProduct] = useState(null);   // ← НОВОЕ (Шаг 6.4)
+
+  // Тема применяется к <html> — фон body всегда совпадает с темой (нет чёрных полос)
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  // Сброс состояния при выходе
   useEffect(() => {
     if (!token) {
       setMessage('');
       setSelectedProductIds([]);
       setShowImportModal(false);
-      setShowCategoryMapping(false);
-      setMigrateProductId(null);
+      setShowExportModal(false);
+      setShowBulkModal(false);
       setShowBatchModal(false);
+      setMigrateProductId(null);
+      setEditAttributesProduct(null);
+      setEditVariantsProduct(null);
+      setEditPhotosProduct(null);   // ← НОВОЕ (Шаг 6.4)
+      setCurrentView('products');
     }
   }, [token]);
 
   const {
-    products,
-    stats,
-    loading: productsLoading,
-    loadData,
-    availableForBatch,
-    getProductById,
-    totalProducts,
-    filters,
-    updateFilters,
-    setPage
+    products, stats, loading: productsLoading, loadData, availableForBatch,
+    getProductById, totalProducts, filters, updateFilters, setPage,
   } = useProducts(token, handleLogout);
 
-  const {
-    isMigratingProductId,
-    migrateProduct,
-    migrateBatch,
-    pollBatchProgress
-  } = useMigration(loadData, setMessage);
+  const { isMigratingProductId, migrateProduct, migrateBatch, pollBatchProgress } =
+    useMigration(loadData, setMessage);
 
+  /* ---------- обработчики ---------- */
   const handleImport = useCallback(async (fullKey) => {
     try {
       const data = await api.importProducts(fullKey);
       if (data.success) {
-        setMessage(`✅ Импортировано ${data.imported} товаров с ${data.platform_name}${data.is_mock ? ' (тест)' : ''}`);
+        setMessage(`✅ Импортировано ${data.imported} товаров${data.is_mock ? ' (тест)' : ''}`);
         setShowImportModal(false);
         loadData();
-      }
-    } catch (error) {
-      setMessage('❌ ' + error.message);
-    }
+      } else setMessage('❌ Ошибка импорта: ' + (data.detail || 'неизвестно'));
+    } catch (e) { setMessage('❌ ' + e.message); }
   }, [loadData]);
 
-  const handleFileImport = useCallback(async (platform, file) => {
+  const handleFileImport = useCallback(async (platform, file, mode = 'create') => {
     try {
-      const data = await api.importFromFile(platform, file);
+      const data = await api.importFromFile(platform, file, mode);
       if (data.success) {
-        setMessage(`✅ ${data.message}`);
+        let msg = `✅ ${data.message || `Импортировано ${data.imported} товаров`}`;
+        if (data.updated) msg += ` · обновлено: ${data.updated}`;
+        setMessage(msg);
         setShowImportModal(false);
         loadData();
-      }
-    } catch (error) {
-      setMessage('❌ ' + error.message);
-    }
+      } else setMessage('❌ ' + (data.detail || 'Ошибка импорта'));
+    } catch (e) { setMessage('❌ ' + e.message); }
   }, [loadData]);
 
-  const handleOpenMigrateModal = useCallback((productId) => {
-    setMigrateProductId(productId);
-  }, []);
+  const handleOpenMigrateModal = useCallback((id) => setMigrateProductId(id), []);
 
-  const handleConfirmMigrate = useCallback(async (productId, targetPlatform, editedData) => {
+  const handleConfirmMigrate = useCallback(async (id, platform, edited) => {
     setMigrateProductId(null);
-    await migrateProduct(productId, targetPlatform, editedData);
+    await migrateProduct(id, platform, edited);
   }, [migrateProduct]);
 
+  const toggleProductSelection = useCallback((id) => {
+    setSelectedProductIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    if (selectedProductIds.length === availableForBatch && availableForBatch > 0) setSelectedProductIds([]);
+    else setSelectedProductIds(products.filter(p => p.status !== 'success' && p.status !== 'processing').map(p => p.id));
+  }, [selectedProductIds.length, availableForBatch, products]);
+
   const handleOpenBatchModal = useCallback(() => {
-    if (selectedProductIds.length === 0) {
-      setMessage('⚠️ Выберите хотя бы один товар');
-      return;
-    }
+    if (!selectedProductIds.length) { setMessage('⚠️ Выберите хотя бы один товар'); return; }
     setShowBatchModal(true);
   }, [selectedProductIds.length]);
 
@@ -111,242 +130,206 @@ function App() {
   const handleStartBatchMigration = useCallback(async (ids, platform) => {
     try {
       return await migrateBatch(ids, platform);
-    } catch (err) {
-      setMessage('❌ ' + (err.message || 'Ошибка'));
+    } catch (e) {
+      setMessage('❌ ' + e.message);
       setShowBatchModal(false);
       setSelectedProductIds([]);
       return null;
     }
   }, [migrateBatch]);
 
-  const toggleProductSelection = useCallback((productId) => {
-    setSelectedProductIds(prev =>
-      prev.includes(productId) ? prev.filter(id => id !== productId) : [...prev, productId]
-    );
-  }, []);
-
-  const toggleSelectAll = useCallback(() => {
-    if (selectedProductIds.length === availableForBatch) {
+  const handleBulkEdit = useCallback(async (payload) => {
+    try {
+      const data = await api.bulkUpdateProducts(payload);
+      setMessage(`✅ Обновлено товаров: ${data.updated}`);
+      setShowBulkModal(false);
       setSelectedProductIds([]);
-    } else {
-      const availableProducts = products
-        .filter(p => p.status !== 'success' && p.status !== 'processing')
-        .map(p => p.id);
-      setSelectedProductIds(availableProducts);
-    }
-  }, [selectedProductIds.length, availableForBatch, products]);
+      loadData();
+    } catch (e) { setMessage('❌ ' + e.message); }
+  }, [loadData]);
 
-  const handleExport = useCallback(async () => {
-    if (stats.total === 0) {
-      setMessage('⚠️ Нет товаров для экспорта.');
-      return;
-    }
+  const handleExportReport = useCallback(async () => {
+    if (stats.total === 0) { setMessage('⚠️ Нет товаров для экспорта.'); return; }
     try {
       await api.exportReport();
-      setMessage('✅ Отчет скачан!');
-    } catch (error) {
-      setMessage('❌ Ошибка: ' + error.message);
-    }
+      setMessage('✅ Отчет успешно скачан!');
+    } catch (e) { setMessage('❌ Ошибка при скачивании отчета: ' + e.message); }
   }, [stats.total]);
 
-  if (!isAuthenticated) {
-    return <Auth onLogin={handleLogin} />;
-  }
+  const handleExportForPlatform = useCallback(async (platform, status) => {
+    try {
+      await api.exportForPlatform(platform, status);
+      setMessage(`✅ Файл для ${platform} скачан. Загрузите его в кабинете площадки.`);
+      setShowExportModal(false);
+    } catch (e) { setMessage('❌ ' + e.message); }
+  }, []);
 
-  if (showCategoryMapping) {
-    return <CategoryMapping onBack={() => setShowCategoryMapping(false)} />;
-  }
+  const openAuth = useCallback((tab) => setAuthTab(tab || 'login'), []);
 
-  const productToMigrate = getProductById(migrateProductId);
+  // ← НОВОЕ (Шаг 6.4): обработчики модалок карточки
+  const handleEditAttributes = useCallback((product) => setEditAttributesProduct(product), []);
+  const handleEditVariants = useCallback((product) => setEditVariantsProduct(product), []);
+  const handleEditPhotos = useCallback((product) => setEditPhotosProduct(product), []);
 
-  // === РЕНДЕР КОНТЕНТА ДЛЯ КАЖДОЙ ВКЛАДКИ ===
-  const renderContent = () => {
+  /* ---------- виды ---------- */
+  const renderDashboard = () => (
+    <>
+      <header className="header">
+        <div>
+          <h1 className="header-title">Дашборд</h1>
+          <p className="header-subtitle">Обзор миграции товаров</p>
+        </div>
+      </header>
+      <StatsGrid stats={stats} />
+      <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
+        <h3 style={{ marginBottom: '0.75rem' }}>Сводка</h3>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
+          Всего карточек: <b>{stats.total}</b> · Готовы к переносу: <b>{stats.pending}</b> ·
+          Перенесено: <b>{stats.success}</b> · Ошибки: <b>{stats.error}</b>
+        </p>
+        <Button onClick={() => setCurrentView('products')}>Перейти к товарам →</Button>
+      </div>
+    </>
+  );
+
+  const renderProducts = () => (
+    <>
+      <header className="header">
+        <div>
+          <h1 className="header-title">Товары</h1>
+          <p className="header-subtitle">Управление карточками товаров</p>
+        </div>
+        <div className="header-actions">
+          <Button onClick={() => setShowImportModal(true)}>📥 Импорт</Button>
+          <Button variant="secondary" onClick={() => setShowExportModal(true)}>📤 Выгрузка</Button>
+          <Button variant="secondary" onClick={handleExportReport} disabled={stats.total === 0}>📊 Отчет (Excel)</Button>
+        </div>
+      </header>
+
+      <StatsGrid stats={stats} />
+      <SearchBar filters={filters} updateFilters={updateFilters} />
+
+      <div className="products-toolbar">
+        <Button variant="secondary" onClick={() => setShowBulkModal(true)} disabled={!selectedProductIds.length}>
+          ✏️ Редактировать ({selectedProductIds.length})
+        </Button>
+        <Button onClick={handleOpenBatchModal} disabled={!selectedProductIds.length}>
+          🔄 Перенести выбранные ({selectedProductIds.length})
+        </Button>
+      </div>
+
+      <ProductTable
+        products={products}
+        selectedIds={selectedProductIds}
+        isMigratingProductId={isMigratingProductId}
+        loading={productsLoading}
+        availableForBatch={availableForBatch}
+        onSelect={toggleProductSelection}
+        onSelectAll={toggleSelectAll}
+        onMigrate={handleOpenMigrateModal}
+        onEditAttributes={handleEditAttributes}
+        onEditVariants={handleEditVariants}
+        onEditPhotos={handleEditPhotos}   // ← НОВОЕ (Шаг 6.4)
+      />
+
+      <Pagination total={totalProducts} skip={filters.skip} limit={filters.limit} onPageChange={setPage} />
+
+      <AttributesModal
+        isOpen={!!editAttributesProduct}
+        onClose={() => setEditAttributesProduct(null)}
+        product={editAttributesProduct}
+        onSave={loadData}
+      />
+
+      <VariantsModal
+        isOpen={!!editVariantsProduct}
+        onClose={() => setEditVariantsProduct(null)}
+        product={editVariantsProduct}
+        onSave={loadData}
+      />
+
+      {/* ← НОВОЕ (Шаг 6.4): модалка фото */}
+      <PhotosModal
+        isOpen={!!editPhotosProduct}
+        onClose={() => setEditPhotosProduct(null)}
+        product={editPhotosProduct}
+        onSave={loadData}
+        onNotify={setMessage}
+      />
+    </>
+  );
+
+  const renderImport = () => (
+    <>
+      <header className="header">
+        <div>
+          <h1 className="header-title">Импорт товаров</h1>
+          <p className="header-subtitle">Загрузка карточек из файлов или по API</p>
+        </div>
+      </header>
+      <div className="import-quick-actions">
+        <div className="card import-card" onClick={() => setShowImportModal(true)}>
+          <div className="import-card-icon">📁</div>
+          <h3>Из Excel / CSV</h3>
+          <p>Рекомендуемый способ: выгрузка из кабинета Ozon, WB, Яндекс Маркет или Магнит Маркет</p>
+          <Button>Выбрать файл</Button>
+        </div>
+        <div className="card import-card" onClick={() => setShowImportModal(true)}>
+          <div className="import-card-icon">🔑</div>
+          <h3>По API ключу / YML</h3>
+          <p>Ozon, Wildberries, Яндекс Маркет. Тест-ключ: test:test</p>
+          <Button>Ввести ключ</Button>
+        </div>
+      </div>
+    </>
+  );
+
+  const renderView = () => {
     switch (currentView) {
-      case 'dashboard':
-        return (
-          <div className="view-content">
-            <header className="header">
-              <div>
-                <h1 className="header-title">Дашборд</h1>
-                <p className="header-subtitle">Обзор статистики миграции</p>
-              </div>
-            </header>
-            <StatsGrid stats={stats} />
-            <div className="dashboard-summary card">
-              <h3>Краткая сводка</h3>
-              <div className="summary-grid">
-                <div className="summary-item">
-                  <span className="summary-label">Всего товаров</span>
-                  <span className="summary-value">{stats.total}</span>
-                </div>
-                <div className="summary-item">
-                  <span className="summary-label">Готово к переносу</span>
-                  <span className="summary-value">{stats.pending}</span>
-                </div>
-                <div className="summary-item">
-                  <span className="summary-label">Успешно перенесено</span>
-                  <span className="summary-value">{stats.success}</span>
-                </div>
-                <div className="summary-item">
-                  <span className="summary-label">Ошибок</span>
-                  <span className="summary-value">{stats.error}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'products':
-        return (
-          <div className="view-content">
-            <header className="header">
-              <div>
-                <h1 className="header-title">Товары</h1>
-                <p className="header-subtitle">Управление карточками товаров</p>
-              </div>
-              <div className="header-actions">
-                <Button onClick={() => setShowImportModal(true)}>Импорт</Button>
-                <Button variant="secondary" onClick={handleExport} disabled={stats.total === 0}>Экспорт</Button>
-              </div>
-            </header>
-            <Alert message={message} onClose={() => setMessage('')} />
-            <StatsGrid stats={stats} />
-            <div className="table-container">
-              <div className="table-header">
-                <h2 className="table-title">Список товаров</h2>
-                <Button
-                  variant="secondary"
-                  onClick={handleOpenBatchModal}
-                  disabled={selectedProductIds.length === 0}
-                >
-                  Перенести выбранные ({selectedProductIds.length})
-                </Button>
-              </div>
-              <ProductTable
-                products={products}
-                selectedIds={selectedProductIds}
-                isMigratingProductId={isMigratingProductId}
-                loading={productsLoading}
-                availableForBatch={availableForBatch}
-                onSelect={toggleProductSelection}
-                onSelectAll={toggleSelectAll}
-                onMigrate={handleOpenMigrateModal}
-              />
-            </div>
-          </div>
-        );
-
-      case 'import':
-        return (
-          <div className="view-content">
-            <header className="header">
-              <div>
-                <h1 className="header-title">Импорт товаров</h1>
-                <p className="header-subtitle">Загрузка карточек с маркетплейсов</p>
-              </div>
-            </header>
-            <div className="import-quick-actions">
-              <div className="card import-card" onClick={() => setShowImportModal(true)}>
-                <div className="import-card-icon">📥</div>
-                <h3>Импорт по API ключу</h3>
-                <p>Загрузка через API Ozon, Wildberries или Яндекс Маркет</p>
-                <Button variant="primary">Начать импорт</Button>
-              </div>
-              <div className="card import-card" onClick={() => setShowImportModal(true)}>
-                <div className="import-card-icon">📁</div>
-                <h3>Импорт из файла</h3>
-                <p>Загрузка из Excel (.xlsx) или CSV файла</p>
-                <Button variant="primary">Выбрать файл</Button>
-              </div>
-              <div className="card import-card" onClick={() => setShowImportModal(true)}>
-                <div className="import-card-icon"></div>
-                <h3>Импорт по YML-ссылке</h3>
-                <p>Парсинг YML-фида Яндекс Маркета</p>
-                <Button variant="primary">Вставить ссылку</Button>
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'mapping':
-        return (
-          <div className="view-content">
-            <header className="header">
-              <div>
-                <h1 className="header-title">Маппинг категорий</h1>
-                <p className="header-subtitle">Настройка соответствия категорий между площадками</p>
-              </div>
-            </header>
-            <div className="mapping-quick-start card">
-              <h3>Настроить маппинг</h3>
-              <p>Свяжите категории между маркетплейсами для автоматического переноса товаров</p>
-              <Button onClick={() => setShowCategoryMapping(true)}>Открыть маппинг</Button>
-            </div>
-          </div>
-        );
-
-      case 'history':
-        return (
-          <div className="view-content">
-            <header className="header">
-              <div>
-                <h1 className="header-title">История миграций</h1>
-                <p className="header-subtitle">Журнал всех операций переноса</p>
-              </div>
-            </header>
-            <div className="card empty-history">
-              <div className="empty-state-icon">📜</div>
-              <h3>История пуста</h3>
-              <p>Здесь будут отображаться все выполненные миграции товаров</p>
-              <p className="empty-state-hint">Функция будет доступна после добавления системы логирования</p>
-            </div>
-          </div>
-        );
-
-      default:
-        return null;
+      case 'dashboard': return renderDashboard();
+      case 'import': return renderImport();
+      case 'mapping': return <CategoryMapping onBack={() => setCurrentView('products')} />;
+      case 'history': return <HistoryView />;
+      default: return renderProducts();
     }
   };
 
+  /* ---------- гостевой режим ---------- */
+  if (!isAuthenticated) {
+    return (
+      <div className="public-layout">
+        <TopBar isAuthenticated={false} onOpenAuth={openAuth} />
+        <Landing onOpenAuth={openAuth} />
+        <AuthModal isOpen={!!authTab} initialTab={authTab || 'login'} onClose={() => setAuthTab(null)} onLogin={handleLogin} />
+      </div>
+    );
+  }
+
+  /* ---------- рабочий режим ---------- */
   return (
     <div className="app-layout">
-      <Sidebar
-        currentView={currentView}
-        setCurrentView={setCurrentView}
+      <TopBar
+        isAuthenticated
+        user={user}
+        onOpenAuth={openAuth}
         onLogout={handleLogout}
-        userRole="user"
+        onOpenHistory={() => setCurrentView('history')}
       />
 
-      <main className="main-content">
-        {renderContent()}
-      </main>
+      <div className="app-body">
+        <Sidebar currentView={currentView} setCurrentView={setCurrentView} theme={theme} setTheme={setTheme} />
+        <main className="main-content">
+          <Alert message={message} onClose={() => setMessage('')} />
+          {renderView()}
+        </main>
+      </div>
 
-      {/* Модалки */}
-      <ImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        onImport={handleImport}
-        onFileImport={handleFileImport}
-        loading={productsLoading}
-      />
-
-      <MigrateModal
-        isOpen={!!migrateProductId}
-        onClose={() => setMigrateProductId(null)}
-        product={productToMigrate}
-        onConfirm={handleConfirmMigrate}
-        loading={isMigratingProductId === migrateProductId}
-      />
-
-      <BatchMigrateModal
-        isOpen={showBatchModal}
-        onClose={handleCloseBatchModal}
-        selectedIds={selectedProductIds}
-        products={products}
-        onStartMigration={handleStartBatchMigration}
-        pollProgress={pollBatchProgress}
-        loading={productsLoading}
-      />
+      <ImportModal isOpen={showImportModal} onClose={() => setShowImportModal(false)} onImport={handleImport} onFileImport={handleFileImport} loading={productsLoading} />
+      <MigrateModal isOpen={!!migrateProductId} onClose={() => setMigrateProductId(null)} product={getProductById(migrateProductId)} onConfirm={handleConfirmMigrate} loading={isMigratingProductId === migrateProductId} />
+      <BatchMigrateModal isOpen={showBatchModal} onClose={handleCloseBatchModal} selectedIds={selectedProductIds} products={products} onStartMigration={handleStartBatchMigration} pollProgress={pollBatchProgress} loading={productsLoading} />
+      <ExportModal isOpen={showExportModal} onClose={() => setShowExportModal(false)} onExport={handleExportForPlatform} loading={productsLoading} />
+      <BulkEditModal isOpen={showBulkModal} onClose={() => setShowBulkModal(false)} selectedIds={selectedProductIds} onSubmit={handleBulkEdit} loading={productsLoading} />
+      <AuthModal isOpen={!!authTab} initialTab={authTab || 'login'} onClose={() => setAuthTab(null)} onLogin={handleLogin} />
     </div>
   );
 }

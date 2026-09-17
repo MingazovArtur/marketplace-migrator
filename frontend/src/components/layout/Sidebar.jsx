@@ -1,79 +1,48 @@
 import React from 'react';
-import {
-  DashboardIcon,
-  ProductsIcon,
-  ImportIcon,
-  MappingIcon,
-  HistoryIcon,
-  SettingsIcon,
-  LogoutIcon,
-  LogoIcon
-} from '../icons/Icons';
-import { useTheme } from '../../hooks/useTheme';
+import { DashboardIcon, ProductsIcon, ImportIcon, MappingIcon, HistoryIcon } from '../icons/Icons';
 
-const Sidebar = ({ 
-  currentView, 
-  setCurrentView, 
-  onLogout,
-  userRole 
-}) => {
-  const { theme, toggleTheme } = useTheme();
+const NAV = [
+  { id: 'dashboard', label: 'Дашборд', Icon: DashboardIcon },
+  { id: 'products', label: 'Товары', Icon: ProductsIcon },
+  { id: 'import', label: 'Импорт', Icon: ImportIcon },
+  { id: 'mapping', label: 'Маппинг', Icon: MappingIcon },
+  { id: 'history', label: 'История', Icon: HistoryIcon },
+];
 
-  const menuItems = [
-    { id: 'dashboard', label: 'Дашборд', icon: DashboardIcon },
-    { id: 'products', label: 'Товары', icon: ProductsIcon },
-    { id: 'import', label: 'Импорт', icon: ImportIcon },
-    { id: 'mapping', label: 'Маппинг', icon: MappingIcon },
-    { id: 'history', label: 'История', icon: HistoryIcon },
-  ];
-
-  if (userRole === 'admin') {
-    menuItems.push({ id: 'settings', label: 'Настройки', icon: SettingsIcon });
-  }
-
-  return (
-    <aside className="sidebar">
-      <div className="sidebar-logo">
-        <div className="sidebar-logo-icon">
-          <LogoIcon size={24} />
-        </div>
-        <div className="sidebar-logo-text">Migrator</div>
-      </div>
-
-      <nav className="sidebar-nav">
-        {menuItems.map(item => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-              className={`sidebar-item ${currentView === item.id ? 'active' : ''}`}
-              onClick={() => setCurrentView(item.id)}
-            >
-              <span className="sidebar-item-icon">
-                <Icon size={22} />
-              </span>
-              <span className="sidebar-item-text">{item.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-
-      <div className="sidebar-footer">
-        <div className="theme-toggle" onClick={toggleTheme}>
-          <span className="theme-toggle-label">
-            {theme === 'dark' ? '🌙' : '☀️'} Тема
-          </span>
-          <div className="theme-switch" />
-        </div>
-        <button className="sidebar-item" onClick={onLogout}>
-          <span className="sidebar-item-icon">
-            <LogoutIcon size={22} />
-          </span>
-          <span className="sidebar-item-text">Выйти</span>
+const Sidebar = ({ currentView, setCurrentView, theme, setTheme }) => (
+  <aside className="sidebar">
+    <nav className="sidebar-nav">
+      {NAV.map(({ id, label, Icon }) => (
+        <button
+          key={id}
+          className={`sidebar-item ${currentView === id ? 'active' : ''}`}
+          onClick={() => setCurrentView(id)}
+        >
+          <Icon size={18} />
+          <span>{label}</span>
         </button>
-      </div>
-    </aside>
-  );
-};
+      ))}
+    </nav>
+
+    <div className="sidebar-footer">
+      <button
+        type="button"
+        className={`theme-toggle ${theme === 'light' ? 'on' : ''}`}
+        onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+        title="Переключить тему"
+      >
+        <span className="theme-toggle-icon" aria-hidden="true">
+          {theme === 'light' ? '☀️' : '🌙'}
+        </span>
+        <span className="theme-toggle-text">
+          {theme === 'light' ? 'Светлая тема' : 'Тёмная тема'}
+        </span>
+        <span className="theme-toggle-switch" aria-hidden="true">
+          <span className="theme-toggle-knob" />
+        </span>
+      </button>
+    </div>
+  </aside>
+);
 
 export default Sidebar;
