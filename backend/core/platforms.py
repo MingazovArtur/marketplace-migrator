@@ -1,49 +1,52 @@
+"""
+Реестр поддерживаемых платформ.
+ЕДИНСТВЕННОЕ место регистрации новой площадки (backend).
+"""
 from enum import Enum
-from typing import Dict, Type
+
 
 class Platform(str, Enum):
-    """Все поддерживаемые маркетплейсы"""
     OZON = "ozon"
     WILDBERRIES = "wildberries"
     YANDEX = "yandex"
-    
+    MAGNIT = "magnit"
+
     @classmethod
-    def display_name(cls, platform: str) -> str:
-        """Человекочитаемое название"""
-        names = {
-            cls.OZON: "Ozon",
-            cls.WILDBERRIES: "Wildberries",
-            cls.YANDEX: "Яндекс Маркет"
-        }
-        return names.get(platform, platform)
-    
-    @classmethod
-    def all_values(cls) -> list:
-        """Список всех значений для UI"""
+    def all_values(cls):
         return [p.value for p in cls]
 
 
-# Конфигурация каждой платформы
-PLATFORM_CONFIG: Dict[str, Dict] = {
-    Platform.OZON: {
+# ❗ БЕЗ ПРОБЕЛОВ В КЛЮЧАХ И ЗНАЧЕНИЯХ
+PLATFORM_CONFIG = {
+    "ozon": {
         "name": "Ozon",
-        "auth_format": "CLIENT_ID:API_KEY",
-        "auth_hint": "Берется в настройках Ozon Seller → API ключи",
-        "mock_key": "test:test",
-        "color": "#005bff"
+        "color": "#005bff",
+        "logo": "O",
+        "import_methods": ["api", "file", "yml"],
     },
-    Platform.WILDBERRIES: {
+    "wildberries": {
         "name": "Wildberries",
-        "auth_format": "API_KEY",
-        "auth_hint": "Берется в настройках WB Seller → Доступ к API",
-        "mock_key": "mock_wb_key",
-        "color": "#cb11ab"
+        "color": "#cb11ab",
+        "logo": "WB",
+        "import_methods": ["api", "file"],
     },
-    Platform.YANDEX: {
+    "yandex": {
         "name": "Яндекс Маркет",
-        "auth_format": "CLIENT_ID:TOKEN",
-        "auth_hint": "Берется в кабинете Яндекс Маркет Партнер",
-        "mock_key": "test:test",
-        "color": "#fc3f1d"
-    }
+        "color": "#fc3f1d",
+        "logo": "Я",
+        "import_methods": ["api", "file", "yml"],
+    },
+    "magnit": {
+        "name": "Магнит Маркет",
+        "color": "#e31235",
+        "logo": "ММ",
+        "import_methods": ["file"],
+    },
+}
+
+PRICE_RULES = {
+    "ozon": 1.0,
+    "wildberries": 1.15,
+    "yandex": 1.0,
+    "magnit": 1.0,
 }
