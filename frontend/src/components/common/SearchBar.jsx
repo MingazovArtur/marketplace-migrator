@@ -1,69 +1,82 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
+import Icon from '../icons';
 
-const SearchBar = ({ filters, updateFilters }) => {
-  const [searchInput, setSearchInput] = useState(filters.search || '');
+const STATUS_OPTIONS = [
+  { value: 'all', label: 'Все статусы' },
+  { value: 'pending', label: 'Ожидают' },
+  { value: 'processing', label: 'В работе' },
+  { value: 'success', label: 'Успешно' },
+  { value: 'error', label: 'Ошибка' },
+];
 
-  // Debounce для поиска
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (searchInput !== filters.search) {
-        updateFilters({ search: searchInput, skip: 0 });
-      }
-    }, 300);
-    
-    return () => clearTimeout(timer);
-  }, [searchInput, filters.search, updateFilters]);
+const SORT_OPTIONS = [
+  { value: 'newest', label: 'Сначала новые' },
+  { value: 'oldest', label: 'Сначала старые' },
+  { value: 'name_asc', label: 'Название А→Я' },
+  { value: 'name_desc', label: 'Название Я→А' },
+  { value: 'price_asc', label: 'Цена: по возрастанию' },
+  { value: 'price_desc', label: 'Цена: по убыванию' },
+];
 
-  return (
-    <div className="search-bar">
+const SearchBar = ({ filters, updateFilters, sources = [] }) => (
+  <div className="search-bar">
+    {/* Поиск */}
+    <div className="search-wrap">
+      <Icon name="search" size={16} className="search-icon" />
       <input
-        type="text"
-        placeholder="🔍 Поиск по названию..."
-        value={searchInput}
-        onChange={(e) => setSearchInput(e.target.value)}
-        className="search-input"
+        className="form-input search-input"
+        placeholder="Поиск по названию, SKU, артикулу..."
+        value={filters.search || ''}
+        onChange={(e) => updateFilters({ search: e.target.value })}
       />
-      
-      <select
-        value={filters.status}
-        onChange={(e) => updateFilters({ status: e.target.value, skip: 0 })}
-        className="filter-select"
-      >
-        <option value="">Все статусы</option>
-        <option value="pending">Ожидает</option>
-        <option value="processing">В процессе</option>
-        <option value="success">Успешно</option>
-        <option value="error">Ошибка</option>
-      </select>
-
-      <select
-        value={filters.source}
-        onChange={(e) => updateFilters({ source: e.target.value, skip: 0 })}
-        className="filter-select"
-      >
-        <option value="">Все источники</option>
-        <option value="ozon">Ozon</option>
-        <option value="wildberries">Wildberries</option>
-        <option value="yandex">Яндекс Маркет</option>
-      </select>
-
-      <select
-        value={`${filters.sort_by}-${filters.sort_order}`}
-        onChange={(e) => {
-          const [sort_by, sort_order] = e.target.value.split('-');
-          updateFilters({ sort_by, sort_order, skip: 0 });
-        }}
-        className="filter-select"
-      >
-        <option value="created_at-desc">Сначала новые</option>
-        <option value="created_at-asc">Сначала старые</option>
-        <option value="price-desc">По цене (убывание)</option>
-        <option value="price-asc">По цене (возрастание)</option>
-        <option value="name-asc">По названию (А-Я)</option>
-        <option value="name-desc">По названию (Я-А)</option>
-      </select>
+      {filters.search && (
+        <button
+          type="button"
+          className="search-clear"
+          title="Очистить"
+          onClick={() => updateFilters({ search: '' })}
+        >
+          <Icon name="close" size={14} />
+        </button>
+      )}
     </div>
-  );
-};
+
+    {/* Статус */}
+    <select
+      className="form-input select-small"
+      value={filters.status || 'all'}
+      onChange={(e) => updateFilters({ status: e.target.value })}
+    >
+      {STATUS_OPTIONS.map((o) => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
+    </select>
+
+    {/* Источник (появляется, когда есть товары) */}
+    {sources.length > 0 && (
+      <select
+        className="form-input select-small"
+        value={filters.source || 'all'}
+        onChange={(e) => updateFilters({ source: e.target.value })}
+      >
+        <option value="all">Все источники</option>
+        {sources.map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
+    )}
+
+    {/* Сортировка */}
+    <select
+      className="form-input select-small"
+      value={filters.sort || 'newest'}
+      onChange={(e) => updateFilters({ sort: e.target.value })}
+    >
+      {SORT_OPTIONS.map((o) => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
+    </select>
+  </div>
+);
 
 export default SearchBar;

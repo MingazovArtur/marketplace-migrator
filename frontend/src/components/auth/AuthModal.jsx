@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Button from '../common/Button';
 import { api } from '../../api';
+import Icon from '../icons';
 
 const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
   const [tab, setTab] = useState(initialTab);
@@ -86,7 +87,9 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
       <div className="modal modal-auth" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">{tab === 'login' ? ' Вход' : '✨ Регистрация'}</h2>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
+            <Icon name="close" size={16} />
+          </button>
         </div>
 
         <div className="import-method-toggle" style={{ marginBottom: '1rem' }}>

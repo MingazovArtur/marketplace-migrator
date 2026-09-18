@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Button from '../common/Button';
 import { PLATFORMS } from '../../utils/platformUtils';
+import Icon from '../icons';
 
 const API_URL = 'http://localhost:8000/api';
 
@@ -169,7 +170,9 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">📥 Импорт товаров</h2>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
+            <Icon name="close" size={16} />
+          </button>
         </div>
 
         {/* 1. Площадка */}

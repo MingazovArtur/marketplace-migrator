@@ -1,18 +1,37 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Button from '../common/Button';
+import Icon from '../icons';
 import { api } from '../../api';
 
 const TYPE_META = {
-  import:    { label: 'Импорт',   icon: '📥', cls: 'badge-pending' },
-  export:    { label: 'Экспорт',  icon: '📤', cls: 'badge-processing' },
-  migration: { label: 'Миграция', icon: '🔄', cls: 'badge-success' },
-  media: { label: 'Медиа', icon: '💾', cls: 'badge-processing' },
+  import:    { label: 'Импорт',   icon: 'import' },
+  export:    { label: 'Экспорт',  icon: 'export' },
+  migration: { label: 'Миграция', icon: 'migrate' },
+  media:     { label: 'Медиа',    icon: 'photo' },
 };
 
 const STATUS_META = {
   success: { label: 'Успешно',  cls: 'badge-success' },
   partial: { label: 'Частично', cls: 'badge-pending' },
   error:   { label: 'Ошибка',   cls: 'badge-error' },
+};
+
+const FILTERS = [
+  { id: '',          label: 'Все' },
+  { id: 'import',    label: 'Импорт',   icon: 'import' },
+  { id: 'migration', label: 'Миграции', icon: 'migrate' },
+  { id: 'export',    label: 'Экспорт',  icon: 'export' },
+];
+
+const formatDate = (iso) => {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 };
 
 const HistoryView = () => {
@@ -23,7 +42,7 @@ const HistoryView = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.getHistory(filter ? { operation: filter, limit: 100 } : { limit: 100 });
+      const data = await api.getHistory({ operation: filter || undefined, limit: 100 });
       setHistory(data.history || []);
     } catch (e) {
       console.error('Ошибка загрузки истории:', e);
@@ -33,7 +52,9 @@ const HistoryView = () => {
     }
   }, [filter]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <>
@@ -43,61 +64,66 @@ const HistoryView = () => {
           <p className="header-subtitle">Журнал импортов, миграций и экспортов</p>
         </div>
         <div className="header-actions">
-          <Button variant="secondary" onClick={load} disabled={loading}>🔄 Обновить</Button>
+          <Button variant="secondary" onClick={load} disabled={loading}>
+            <Icon name="refresh" size={16} /> Обновить
+          </Button>
         </div>
       </header>
 
+      {/* Фильтры по типу операции */}
       <div className="products-toolbar">
-        {[
-          { id: '', label: 'Все' },
-          { id: 'import', label: '📥 Импорт' },
-          { id: 'migration', label: '🔄 Миграции' },
-          { id: 'export', label: '📤 Экспорт' },
-        ].map(f => (
+        {FILTERS.map((f) => (
           <Button
-            key={f.id}
+            key={f.id || 'all'}
             variant={filter === f.id ? 'primary' : 'secondary'}
             onClick={() => setFilter(f.id)}
           >
-            {f.label}
+            {f.icon && <Icon name={f.icon} size={16} />} {f.label}
           </Button>
         ))}
       </div>
 
+      {/* Таблица истории */}
       <div className="table-container">
         {loading ? (
           <div className="progress-status">⏳ Загрузка истории...</div>
         ) : history.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">📜</div>
-            <p className="empty-state-text">История пуста. Выполните импорт или миграцию.</p>
+            <p className="empty-state-text">
+              История пуста. Выполните импорт, миграцию или выгрузку — операции появятся здесь.
+            </p>
           </div>
         ) : (
           <div className="table-scroll">
             <table>
               <thead>
                 <tr>
-                  <th style={{ width: '170px' }}>Дата</th>
-                  <th style={{ width: '110px' }}>Тип</th>
+                  <th style={{ width: 160 }}>Дата</th>
+                  <th style={{ width: 150 }}>Тип</th>
                   <th>Описание</th>
-                  <th style={{ width: '220px' }}>Показатели</th>
-                  <th style={{ width: '120px' }}>Статус</th>
+                  <th style={{ width: 240 }}>Показатели</th>
+                  <th style={{ width: 120 }}>Статус</th>
                 </tr>
               </thead>
               <tbody>
-                {history.map(h => {
+                {history.map((h) => {
                   const t = TYPE_META[h.type] || TYPE_META.import;
                   const s = STATUS_META[h.status] || STATUS_META.error;
                   return (
                     <tr key={h.id}>
-                      <td style={{ color: 'var(--text-secondary)' }}>
-                        {h.created_at ? new Date(h.created_at).toLocaleString('ru-RU') : '—'}
+                      <td style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                        {formatDate(h.created_at)}
                       </td>
                       <td>
-                        <span className={`badge ${t.cls}`}>{t.icon} {t.label}</span>
+                        <span className="type-badge">
+                          <Icon name={t.icon} size={18} /> {t.label}
+                        </span>
                       </td>
                       <td>
-                        <div className="product-name" title={h.description}>{h.description}</div>
+                        <div className="product-name" title={h.description}>
+                          {h.description}
+                        </div>
                         {h.error_message && (
                           <div className="product-sub" style={{ color: 'var(--accent-danger)' }}>
                             {h.error_message}

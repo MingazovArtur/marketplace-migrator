@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Button from '../common/Button';
 import { PLATFORMS } from '../../utils/platformUtils';
 import { api } from '../../api';
+import Icon from '../icons';
 
 const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
   const [platform, setPlatform] = useState('ozon');
@@ -38,7 +39,9 @@ const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">📤 Выгрузка для площадки</h2>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
+            <Icon name="close" size={16} />
+          </button>
         </div>
 
         {/* 1. Площадка, статус, шаблон */}

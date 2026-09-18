@@ -1,25 +1,25 @@
 import React from 'react';
-import { DashboardIcon, ProductsIcon, ImportIcon, MappingIcon, HistoryIcon } from '../icons/Icons';
+import Icon from '../icons';
 
 const NAV = [
-  { id: 'dashboard', label: 'Дашборд', Icon: DashboardIcon },
-  { id: 'products', label: 'Товары', Icon: ProductsIcon },
-  { id: 'import', label: 'Импорт', Icon: ImportIcon },
-  { id: 'mapping', label: 'Маппинг', Icon: MappingIcon },
-  { id: 'history', label: 'История', Icon: HistoryIcon },
+  { id: 'dashboard', label: 'Дашборд', icon: 'dashboard' },
+  { id: 'products', label: 'Товары', icon: 'products' },
+  { id: 'import', label: 'Импорт', icon: 'import' },
+  { id: 'mapping', label: 'Маппинг', icon: 'mapping' },
+  { id: 'history', label: 'История', icon: 'history' },
 ];
 
 const Sidebar = ({ currentView, setCurrentView, theme, setTheme }) => (
   <aside className="sidebar">
     <nav className="sidebar-nav">
-      {NAV.map(({ id, label, Icon }) => (
+      {NAV.map(({ id, label, icon }) => (
         <button
           key={id}
           className={`sidebar-item ${currentView === id ? 'active' : ''}`}
           onClick={() => setCurrentView(id)}
         >
-          <Icon size={18} />
-          <span>{label}</span>
+          <Icon name={icon} size={20} />
+          <span className="sidebar-item-text">{label}</span>
         </button>
       ))}
     </nav>
@@ -29,15 +29,12 @@ const Sidebar = ({ currentView, setCurrentView, theme, setTheme }) => (
         type="button"
         className={`theme-toggle ${theme === 'light' ? 'on' : ''}`}
         onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-        title="Переключить тему"
       >
-        <span className="theme-toggle-icon" aria-hidden="true">
-          {theme === 'light' ? '☀️' : '🌙'}
-        </span>
+        <Icon name={theme === 'light' ? 'sun' : 'moon'} size={18} />
         <span className="theme-toggle-text">
           {theme === 'light' ? 'Светлая тема' : 'Тёмная тема'}
         </span>
-        <span className="theme-toggle-switch" aria-hidden="true">
+        <span className="theme-toggle-switch">
           <span className="theme-toggle-knob" />
         </span>
       </button>

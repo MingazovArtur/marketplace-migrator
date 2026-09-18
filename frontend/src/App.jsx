@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import CategoryMapping from './CategoryMapping';
 import { useAuth } from './hooks/useAuth';
 import { useProducts } from './hooks/useProducts';
@@ -9,6 +9,7 @@ import Landing from './components/layout/Landing';
 import AuthModal from './components/auth/AuthModal';
 import Alert from './components/common/Alert';
 import Button from './components/common/Button';
+import Icon from './components/icons';
 import StatsGrid from './components/products/StatsGrid';
 import ProductTable from './components/products/ProductTable';
 import SearchBar from './components/common/SearchBar';
@@ -20,8 +21,9 @@ import ExportModal from './components/export/ExportModal';
 import BulkEditModal from './components/products/BulkEditModal';
 import AttributesModal from './components/products/AttributesModal';
 import VariantsModal from './components/products/VariantsModal';
-import PhotosModal from './components/products/PhotosModal';   // ← НОВОЕ (Шаг 6.4)
+import PhotosModal from './components/products/PhotosModal';
 import HistoryView from './components/history/HistoryView';
+import StatsDashboard from './components/dashboard/StatsDashboard';
 import { api } from './api';
 import './App.css';
 
@@ -42,9 +44,9 @@ function App() {
 
   const [editAttributesProduct, setEditAttributesProduct] = useState(null);
   const [editVariantsProduct, setEditVariantsProduct] = useState(null);
-  const [editPhotosProduct, setEditPhotosProduct] = useState(null);   // ← НОВОЕ (Шаг 6.4)
+  const [editPhotosProduct, setEditPhotosProduct] = useState(null);
 
-  // Тема применяется к <html> — фон body всегда совпадает с темой (нет чёрных полос)
+  // Тема применяется к <html> — фон body всегда совпадает с темой
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
@@ -62,10 +64,17 @@ function App() {
       setMigrateProductId(null);
       setEditAttributesProduct(null);
       setEditVariantsProduct(null);
-      setEditPhotosProduct(null);   // ← НОВОЕ (Шаг 6.4)
+      setEditPhotosProduct(null);
       setCurrentView('products');
     }
   }, [token]);
+
+  // Сообщение само исчезает через 6 секунд
+  useEffect(() => {
+    if (!message) return undefined;
+    const t = setTimeout(() => setMessage(''), 6000);
+    return () => clearTimeout(t);
+  }, [message]);
 
   const {
     products, stats, loading: productsLoading, loadData, availableForBatch,
@@ -75,7 +84,14 @@ function App() {
   const { isMigratingProductId, migrateProduct, migrateBatch, pollBatchProgress } =
     useMigration(loadData, setMessage);
 
-  /* ---------- обработчики ---------- */
+  // Уникальные источники для фильтра в SearchBar
+  const sources = useMemo(
+    () => Array.from(new Set(products.map((p) => p.source).filter(Boolean))).sort(),
+    [products]
+  );
+
+  /* ================= обработчики ================= */
+
   const handleImport = useCallback(async (fullKey) => {
     try {
       const data = await api.importProducts(fullKey);
@@ -83,8 +99,12 @@ function App() {
         setMessage(`✅ Импортировано ${data.imported} товаров${data.is_mock ? ' (тест)' : ''}`);
         setShowImportModal(false);
         loadData();
-      } else setMessage('❌ Ошибка импорта: ' + (data.detail || 'неизвестно'));
-    } catch (e) { setMessage('❌ ' + e.message); }
+      } else {
+        setMessage('❌ Ошибка импорта: ' + (data.detail || 'неизвестно'));
+      }
+    } catch (e) {
+      setMessage('❌ ' + e.message);
+    }
   }, [loadData]);
 
   const handleFileImport = useCallback(async (platform, file, mode = 'create') => {
@@ -96,8 +116,12 @@ function App() {
         setMessage(msg);
         setShowImportModal(false);
         loadData();
-      } else setMessage('❌ ' + (data.detail || 'Ошибка импорта'));
-    } catch (e) { setMessage('❌ ' + e.message); }
+      } else {
+        setMessage('❌ ' + (data.detail || 'Ошибка импорта'));
+      }
+    } catch (e) {
+      setMessage('❌ ' + e.message);
+    }
   }, [loadData]);
 
   const handleOpenMigrateModal = useCallback((id) => setMigrateProductId(id), []);
@@ -108,18 +132,40 @@ function App() {
   }, [migrateProduct]);
 
   const toggleProductSelection = useCallback((id) => {
-    setSelectedProductIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    setSelectedProductIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
   }, []);
 
   const toggleSelectAll = useCallback(() => {
-    if (selectedProductIds.length === availableForBatch && availableForBatch > 0) setSelectedProductIds([]);
-    else setSelectedProductIds(products.filter(p => p.status !== 'success' && p.status !== 'processing').map(p => p.id));
+    if (selectedProductIds.length === availableForBatch && availableForBatch > 0) {
+      setSelectedProductIds([]);
+    } else {
+      setSelectedProductIds(
+        products
+          .filter(p => p.status !== 'success' && p.status !== 'processing')
+          .map(p => p.id)
+      );
+    }
   }, [selectedProductIds.length, availableForBatch, products]);
 
   const handleOpenBatchModal = useCallback(() => {
-    if (!selectedProductIds.length) { setMessage('⚠️ Выберите хотя бы один товар'); return; }
+    if (!selectedProductIds.length) {
+      setMessage('⚠️ Выберите хотя бы один товар');
+      return;
+    }
     setShowBatchModal(true);
   }, [selectedProductIds.length]);
+
+  const hasActiveFilters =
+  (filters.status && filters.status !== 'all') ||
+  (filters.source && filters.source !== 'all') ||
+  !!filters.search ||
+  (filters.sort && filters.sort !== 'newest');
+
+  const resetFilters = useCallback(() => {
+    updateFilters({ status: 'all', source: 'all', search: '', sort: 'newest' });
+  }, [updateFilters]);
 
   const handleCloseBatchModal = useCallback(() => {
     setShowBatchModal(false);
@@ -145,33 +191,42 @@ function App() {
       setShowBulkModal(false);
       setSelectedProductIds([]);
       loadData();
-    } catch (e) { setMessage('❌ ' + e.message); }
+    } catch (e) {
+      setMessage('❌ ' + e.message);
+    }
   }, [loadData]);
 
   const handleExportReport = useCallback(async () => {
-    if (stats.total === 0) { setMessage('⚠️ Нет товаров для экспорта.'); return; }
+    if (!stats || stats.total === 0) {
+      setMessage('⚠️ Нет товаров для экспорта.');
+      return;
+    }
     try {
       await api.exportReport();
       setMessage('✅ Отчет успешно скачан!');
-    } catch (e) { setMessage('❌ Ошибка при скачивании отчета: ' + e.message); }
-  }, [stats.total]);
+    } catch (e) {
+      setMessage('❌ Ошибка при скачивании отчета: ' + e.message);
+    }
+  }, [stats]);
 
   const handleExportForPlatform = useCallback(async (platform, status) => {
     try {
       await api.exportForPlatform(platform, status);
       setMessage(`✅ Файл для ${platform} скачан. Загрузите его в кабинете площадки.`);
       setShowExportModal(false);
-    } catch (e) { setMessage('❌ ' + e.message); }
+    } catch (e) {
+      setMessage('❌ ' + e.message);
+    }
   }, []);
 
   const openAuth = useCallback((tab) => setAuthTab(tab || 'login'), []);
 
-  // ← НОВОЕ (Шаг 6.4): обработчики модалок карточки
   const handleEditAttributes = useCallback((product) => setEditAttributesProduct(product), []);
   const handleEditVariants = useCallback((product) => setEditVariantsProduct(product), []);
   const handleEditPhotos = useCallback((product) => setEditPhotosProduct(product), []);
 
-  /* ---------- виды ---------- */
+  /* ================= виды ================= */
+
   const renderDashboard = () => (
     <>
       <header className="header">
@@ -181,14 +236,7 @@ function App() {
         </div>
       </header>
       <StatsGrid stats={stats} />
-      <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
-        <h3 style={{ marginBottom: '0.75rem' }}>Сводка</h3>
-        <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
-          Всего карточек: <b>{stats.total}</b> · Готовы к переносу: <b>{stats.pending}</b> ·
-          Перенесено: <b>{stats.success}</b> · Ошибки: <b>{stats.error}</b>
-        </p>
-        <Button onClick={() => setCurrentView('products')}>Перейти к товарам →</Button>
-      </div>
+      <StatsDashboard />
     </>
   );
 
@@ -200,21 +248,35 @@ function App() {
           <p className="header-subtitle">Управление карточками товаров</p>
         </div>
         <div className="header-actions">
-          <Button onClick={() => setShowImportModal(true)}>📥 Импорт</Button>
-          <Button variant="secondary" onClick={() => setShowExportModal(true)}>📤 Выгрузка</Button>
-          <Button variant="secondary" onClick={handleExportReport} disabled={stats.total === 0}>📊 Отчет (Excel)</Button>
+          <Button onClick={() => setShowImportModal(true)}>
+            <Icon name="import" size={16} /> Импорт
+          </Button>
+          <Button variant="secondary" onClick={() => setShowExportModal(true)}>
+            <Icon name="export" size={16} /> Выгрузка
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={handleExportReport}
+            disabled={!stats || stats.total === 0}
+          >
+            <Icon name="report" size={16} /> Отчет (Excel)
+          </Button>
         </div>
       </header>
 
       <StatsGrid stats={stats} />
-      <SearchBar filters={filters} updateFilters={updateFilters} />
+      <SearchBar filters={filters} updateFilters={updateFilters} sources={sources} />
 
       <div className="products-toolbar">
-        <Button variant="secondary" onClick={() => setShowBulkModal(true)} disabled={!selectedProductIds.length}>
-          ✏️ Редактировать ({selectedProductIds.length})
+        <Button
+          variant="secondary"
+          onClick={() => setShowBulkModal(true)}
+          disabled={!selectedProductIds.length}
+        >
+          <Icon name="edit" size={16} /> Редактировать ({selectedProductIds.length})
         </Button>
         <Button onClick={handleOpenBatchModal} disabled={!selectedProductIds.length}>
-          🔄 Перенести выбранные ({selectedProductIds.length})
+          <Icon name="migrate" size={16} /> Перенести выбранные ({selectedProductIds.length})
         </Button>
       </div>
 
@@ -229,10 +291,16 @@ function App() {
         onMigrate={handleOpenMigrateModal}
         onEditAttributes={handleEditAttributes}
         onEditVariants={handleEditVariants}
-        onEditPhotos={handleEditPhotos}   // ← НОВОЕ (Шаг 6.4)
+        onEditPhotos={handleEditPhotos}
+        hasActiveFilters={hasActiveFilters}
+        onResetFilters={resetFilters}
       />
-
-      <Pagination total={totalProducts} skip={filters.skip} limit={filters.limit} onPageChange={setPage} />
+      <Pagination
+        total={totalProducts}
+        skip={filters.skip}
+        limit={filters.limit}
+        onPageChange={setPage}
+      />
 
       <AttributesModal
         isOpen={!!editAttributesProduct}
@@ -240,15 +308,12 @@ function App() {
         product={editAttributesProduct}
         onSave={loadData}
       />
-
       <VariantsModal
         isOpen={!!editVariantsProduct}
         onClose={() => setEditVariantsProduct(null)}
         product={editVariantsProduct}
         onSave={loadData}
       />
-
-      {/* ← НОВОЕ (Шаг 6.4): модалка фото */}
       <PhotosModal
         isOpen={!!editPhotosProduct}
         onClose={() => setEditPhotosProduct(null)}
@@ -268,13 +333,27 @@ function App() {
         </div>
       </header>
       <div className="import-quick-actions">
-        <div className="card import-card" onClick={() => setShowImportModal(true)}>
-          <div className="import-card-icon">📁</div>
+        <div
+          className="card import-card"
+          role="button"
+          tabIndex={0}
+          onClick={() => setShowImportModal(true)}
+          onKeyDown={(e) => e.key === 'Enter' && setShowImportModal(true)}
+        >
+          <div className="import-card-icon">
+            <Icon name="import" size={44} />
+          </div>
           <h3>Из Excel / CSV</h3>
           <p>Рекомендуемый способ: выгрузка из кабинета Ozon, WB, Яндекс Маркет или Магнит Маркет</p>
           <Button>Выбрать файл</Button>
         </div>
-        <div className="card import-card" onClick={() => setShowImportModal(true)}>
+        <div
+          className="card import-card"
+          role="button"
+          tabIndex={0}
+          onClick={() => setShowImportModal(true)}
+          onKeyDown={(e) => e.key === 'Enter' && setShowImportModal(true)}
+        >
           <div className="import-card-icon">🔑</div>
           <h3>По API ключу / YML</h3>
           <p>Ozon, Wildberries, Яндекс Маркет. Тест-ключ: test:test</p>
@@ -294,18 +373,25 @@ function App() {
     }
   };
 
-  /* ---------- гостевой режим ---------- */
+  /* ================= гостевой режим ================= */
+
   if (!isAuthenticated) {
     return (
       <div className="public-layout">
         <TopBar isAuthenticated={false} onOpenAuth={openAuth} />
         <Landing onOpenAuth={openAuth} />
-        <AuthModal isOpen={!!authTab} initialTab={authTab || 'login'} onClose={() => setAuthTab(null)} onLogin={handleLogin} />
+        <AuthModal
+          isOpen={!!authTab}
+          initialTab={authTab || 'login'}
+          onClose={() => setAuthTab(null)}
+          onLogin={handleLogin}
+        />
       </div>
     );
   }
 
-  /* ---------- рабочий режим ---------- */
+  /* ================= рабочий режим ================= */
+
   return (
     <div className="app-layout">
       <TopBar
@@ -317,19 +403,61 @@ function App() {
       />
 
       <div className="app-body">
-        <Sidebar currentView={currentView} setCurrentView={setCurrentView} theme={theme} setTheme={setTheme} />
+        <Sidebar
+          currentView={currentView}
+          setCurrentView={setCurrentView}
+          theme={theme}
+          setTheme={setTheme}
+        />
         <main className="main-content">
           <Alert message={message} onClose={() => setMessage('')} />
           {renderView()}
         </main>
       </div>
 
-      <ImportModal isOpen={showImportModal} onClose={() => setShowImportModal(false)} onImport={handleImport} onFileImport={handleFileImport} loading={productsLoading} />
-      <MigrateModal isOpen={!!migrateProductId} onClose={() => setMigrateProductId(null)} product={getProductById(migrateProductId)} onConfirm={handleConfirmMigrate} loading={isMigratingProductId === migrateProductId} />
-      <BatchMigrateModal isOpen={showBatchModal} onClose={handleCloseBatchModal} selectedIds={selectedProductIds} products={products} onStartMigration={handleStartBatchMigration} pollProgress={pollBatchProgress} loading={productsLoading} />
-      <ExportModal isOpen={showExportModal} onClose={() => setShowExportModal(false)} onExport={handleExportForPlatform} loading={productsLoading} />
-      <BulkEditModal isOpen={showBulkModal} onClose={() => setShowBulkModal(false)} selectedIds={selectedProductIds} onSubmit={handleBulkEdit} loading={productsLoading} />
-      <AuthModal isOpen={!!authTab} initialTab={authTab || 'login'} onClose={() => setAuthTab(null)} onLogin={handleLogin} />
+      {/* модалки операций */}
+      <ImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImport={handleImport}
+        onFileImport={handleFileImport}
+        loading={productsLoading}
+      />
+      <MigrateModal
+        isOpen={!!migrateProductId}
+        onClose={() => setMigrateProductId(null)}
+        product={getProductById(migrateProductId)}
+        onConfirm={handleConfirmMigrate}
+        loading={isMigratingProductId === migrateProductId}
+      />
+      <BatchMigrateModal
+        isOpen={showBatchModal}
+        onClose={handleCloseBatchModal}
+        selectedIds={selectedProductIds}
+        products={products}
+        onStartMigration={handleStartBatchMigration}
+        pollProgress={pollBatchProgress}
+        loading={productsLoading}
+      />
+      <ExportModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        onExport={handleExportForPlatform}
+        loading={productsLoading}
+      />
+      <BulkEditModal
+        isOpen={showBulkModal}
+        onClose={() => setShowBulkModal(false)}
+        selectedIds={selectedProductIds}
+        onSubmit={handleBulkEdit}
+        loading={productsLoading}
+      />
+      <AuthModal
+        isOpen={!!authTab}
+        initialTab={authTab || 'login'}
+        onClose={() => setAuthTab(null)}
+        onLogin={handleLogin}
+      />
     </div>
   );
 }

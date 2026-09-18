@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Button from '../common/Button';
 import AnimatedCounter from '../common/AnimatedCounter';
 import { PLATFORMS, getUnavailablePlatforms } from '../../utils/platformUtils';
+import Icon from '../icons';
 
 const BatchMigrateModal = ({ isOpen, onClose, selectedIds, products, onStartMigration, pollProgress, loading }) => {
   const [selectedPlatform, setSelectedPlatform] = useState('');
@@ -42,7 +43,7 @@ const BatchMigrateModal = ({ isOpen, onClose, selectedIds, products, onStartMigr
       <div className="modal modal-batch" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">🔄 Пакетная миграция</h2>
-          {completed && <button className="close-btn" onClick={onClose}></button>}
+          {completed && <button type="button" className="close-btn" onClick={onClose} title="Закрыть"><Icon name="close" size={16} /></button>}
         </div>
 
         {!taskId ? (
