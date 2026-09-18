@@ -1,13 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Icon from '../icons';
 import { api } from '../../api';
 
-const STATUS_CLS = { success: 'badge-success', partial: 'badge-pending', error: 'badge-error' };
+const STATUS_CLS = {
+  success: 'badge-success',
+  partial: 'badge-pending',
+  error: 'badge-error',
+};
+
+const STATUS_SIGN = {
+  success: '✓',
+  partial: '!',
+  error: '✕',
+};
 
 const ProfileMenu = ({ user, onLogout, onOpenHistory }) => {
   const [open, setOpen] = useState(false);
   const [history, setHistory] = useState([]);
   const ref = useRef(null);
 
+  // Закрытие по клику вне меню
   useEffect(() => {
     const onClick = (e) => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
@@ -16,6 +28,7 @@ const ProfileMenu = ({ user, onLogout, onOpenHistory }) => {
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
+  // Подгрузка последних операций при открытии
   useEffect(() => {
     if (open) {
       api.getHistory({ limit: 5 })
@@ -28,14 +41,20 @@ const ProfileMenu = ({ user, onLogout, onOpenHistory }) => {
 
   return (
     <div className="profile-menu" ref={ref}>
-      <button className="profile-btn" onClick={() => setOpen((o) => !o)}>
+      <button
+        type="button"
+        className="profile-btn"
+        onClick={() => setOpen((o) => !o)}
+        title="Профиль"
+      >
         <span className="profile-avatar">{initials}</span>
-        <span className="profile-name">{user?.username || 'Профиль'}</span>
+        <span className="profile-name">{user?.username}</span>
         <span className="profile-caret">▾</span>
       </button>
 
       {open && (
         <div className="profile-dropdown">
+          {/* Шапка профиля */}
           <div className="profile-dd-head">
             <div className="profile-avatar big">{initials}</div>
             <div>
@@ -44,6 +63,7 @@ const ProfileMenu = ({ user, onLogout, onOpenHistory }) => {
             </div>
           </div>
 
+          {/* Последние операции */}
           <div className="profile-dd-section">
             <div className="profile-dd-title">Последние операции</div>
             {history.length === 0 ? (
@@ -51,21 +71,32 @@ const ProfileMenu = ({ user, onLogout, onOpenHistory }) => {
             ) : (
               history.map((h) => (
                 <div key={h.id} className="profile-dd-item">
-                  <span className="profile-dd-desc" title={h.description}>{h.description}</span>
+                  <span className="profile-dd-desc" title={h.description}>
+                    {h.description}
+                  </span>
                   <span className={`badge ${STATUS_CLS[h.status] || 'badge-error'}`}>
-                    {h.status === 'success' ? '✓' : h.status === 'partial' ? '!' : '✕'}
+                    {STATUS_SIGN[h.status] || '✕'}
                   </span>
                 </div>
               ))
             )}
           </div>
 
+          {/* Действия */}
           <div className="profile-dd-actions">
-            <button className="profile-dd-link" onClick={() => { setOpen(false); onOpenHistory(); }}>
-              📜 Вся история
+            <button
+              type="button"
+              className="profile-dd-link"
+              onClick={() => { setOpen(false); onOpenHistory(); }}
+            >
+              <Icon name="history" size={16} /> Вся история
             </button>
-            <button className="profile-dd-link danger" onClick={onLogout}>
-              🚪 Выйти
+            <button
+              type="button"
+              className="profile-dd-link danger"
+              onClick={onLogout}
+            >
+              <Icon name="logout" size={16} /> Выйти
             </button>
           </div>
         </div>

@@ -1,18 +1,37 @@
 import React from 'react';
 import Button from '../common/Button';
+import Icon from '../icons';
 
 const FEATURES = [
-  { icon: '📥', title: 'Импорт из файлов', text: 'XLSX/CSV из кабинетов Ozon, WB, Яндекс Маркета и Магнит Маркета — с предпросмотром и валидацией.' },
-  { icon: '🔄', title: 'Миграция карточек', text: 'Перенос товаров между площадками с автомаппингом категорий и пересчётом цен.' },
-  { icon: '📤', title: 'Экспорт под формат ЛК', text: 'Готовые файлы для загрузки в кабинет площадки + проверка карточек перед выгрузкой.' },
-  { icon: '📜', title: 'История операций', text: 'Полный журнал импортов, миграций и экспортов — в профиле и во вкладке «История».' },
+  {
+    icon: 'import',
+    title: 'Импорт из файлов',
+    text: 'XLSX/CSV из кабинетов Ozon, WB, Яндекс Маркета и Магнит Маркета — с предпросмотром и валидацией.',
+  },
+  {
+    icon: 'migrate',
+    title: 'Миграция карточек',
+    text: 'Перенос товаров между площадками с автомаппингом категорий и пересчётом цен.',
+  },
+  {
+    icon: 'export',
+    title: 'Экспорт под формат ЛК',
+    text: 'Готовые файлы для загрузки в кабинет площадки + проверка карточек перед выгрузкой.',
+  },
+  {
+    icon: 'history',
+    title: 'История операций',
+    text: 'Полный журнал импортов, миграций и экспортов — в профиле и во вкладке «История».',
+  },
 ];
 
 const Landing = ({ onOpenAuth }) => (
   <div className="landing">
     <section className="landing-hero">
       <h1>Универсальный перенос карточек товаров</h1>
-      <p>Импортируйте товары из одного маркетплейса и выгружайте в другой — без ручного копирования.</p>
+      <p>
+        Импортируйте товары из одного маркетплейса и выгружайте в другой — без ручного копирования.
+      </p>
       <div className="landing-cta">
         <Button onClick={() => onOpenAuth('register')}>Создать аккаунт</Button>
         <Button variant="secondary" onClick={() => onOpenAuth('login')}>Войти</Button>
@@ -22,7 +41,9 @@ const Landing = ({ onOpenAuth }) => (
     <section className="landing-features">
       {FEATURES.map((f) => (
         <div key={f.title} className="card landing-card">
-          <div className="landing-card-icon">{f.icon}</div>
+          <div className="landing-card-icon">
+            <Icon name={f.icon} size={40} />
+          </div>
           <h3>{f.title}</h3>
           <p>{f.text}</p>
         </div>

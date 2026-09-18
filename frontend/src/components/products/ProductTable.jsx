@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import Button from '../common/Button';
+import Icon from '../icons';
 
 const STATUS_BADGE = {
   pending: { label: 'Ожидает', cls: 'badge-pending' },
@@ -19,10 +20,11 @@ const ProductTable = ({
   onMigrate,
   onEditAttributes,
   onEditVariants,
-  onEditPhotos,    
+  onEditPhotos,
+  hasActiveFilters = false,   // ✅ добавлено: есть ли активные фильтры
+  onResetFilters = null,      // ✅ добавлено: колбэк сброса фильтров
 }) => {
-  const allSelected =
-    availableForBatch > 0 && selectedIds.length === availableForBatch;
+  const allSelected = availableForBatch > 0 && selectedIds.length === availableForBatch;
 
   const emptyRows = useMemo(() => {
     if (products.length >= 10) return [];
@@ -46,8 +48,15 @@ const ProductTable = ({
         <div className="empty-state">
           <div className="empty-state-icon">📦</div>
           <p className="empty-state-text">
-            Нет товаров для отображения. Импортируйте товары, чтобы начать миграцию.
+            {hasActiveFilters
+              ? 'По выбранным фильтрам ничего не найдено.'
+              : 'Нет товаров для отображения. Импортируйте товары, чтобы начать миграцию.'}
           </p>
+          {hasActiveFilters && typeof onResetFilters === 'function' && (
+            <Button variant="secondary" onClick={onResetFilters}>
+              Сбросить фильтры
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -65,15 +74,15 @@ const ProductTable = ({
                   checked={allSelected}
                   onChange={onSelectAll}
                   disabled={availableForBatch === 0}
-                  title="Выбрать все"
+                  title="Выбрать все доступные для переноса"
                 />
               </th>
               <th>Название</th>
               <th style={{ width: 110 }}>Цена</th>
-              <th style={{ width: 140 }}>Источник</th>
+              <th style={{ width: 150 }}>Источник</th>
               <th style={{ width: 200 }}>Характеристики</th>
               <th style={{ width: 110 }}>Статус</th>
-              <th style={{ width: 380, textAlign: 'right' }}>Действия</th>
+              <th style={{ width: 300, textAlign: 'right' }}>Действия</th>
             </tr>
           </thead>
           <tbody>
@@ -84,6 +93,7 @@ const ProductTable = ({
               const canSelect = product.status !== 'success' && product.status !== 'processing';
               const attrs = product.attributes || [];
               const variants = product.variants || [];
+              const photos = product.photos || [];
 
               return (
                 <tr key={product.id} className={isSelected ? 'selected' : ''}>
@@ -97,31 +107,29 @@ const ProductTable = ({
                     />
                   </td>
                   <td>
-                    <div className="product-name" title={product.name}>
-                      {product.name}
-                    </div>
+                    <div className="product-name" title={product.name}>{product.name}</div>
                     <div className="product-sub">
-                      {product.sku && <>SKU: {product.sku} · </>}
+                      {product.sku && <>арт: {product.sku}</>}
+                      {product.sku && product.brand && <> · </>}
                       {product.brand && <>{product.brand}</>}
+                      {product.sku_count > 1 && <> · SKU: {product.sku_count}</>}
                     </div>
                   </td>
                   <td className="price-cell">
-                    {product.price ? `${product.price.toLocaleString('ru-RU')} ₽` : '—'}
+                    {product.price
+                      ? `${Number(product.price).toLocaleString('ru-RU')} ₽`
+                      : <span className="price-missing">не задана</span>}
                   </td>
                   <td>
-                    <span className="source-badge" title={product.source}>
-                      {product.source}
-                    </span>
+                    <span className="source-badge" title={product.source}>{product.source}</span>
                   </td>
                   <td>
                     {attrs.length === 0 ? (
-                      <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                        Не указаны
-                      </span>
+                      <span className="cell-muted">Не указаны</span>
                     ) : (
                       <div className="attributes-preview">
                         {attrs.slice(0, 2).map((attr, i) => (
-                          <span key={i} className="attr-chip" title={`${attr.name}: ${attr.value}`}>
+                          <span key={attr.id ?? i} className="attr-chip" title={`${attr.name}: ${attr.value}`}>
                             {attr.name}: {attr.value}
                           </span>
                         ))}
@@ -142,32 +150,36 @@ const ProductTable = ({
                     </span>
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                    <div className="row-actions">
                       <Button
                         variant="secondary"
                         size="small"
-                        onClick={() => onEditPhotos(product)}
                         title="Фото товара"
+                        onClick={() => onEditPhotos && onEditPhotos(product)}
                       >
-                        🖼 {(product.photos || []).length || ''}
+                        <Icon name="photo" size={15} />
+                        {photos.length > 0 && <span className="btn-count">{photos.length}</span>}
                       </Button>
                       <Button
                         variant="secondary"
                         size="small"
-                        onClick={() => onEditVariants(product)}
-                        title="Редактировать вариации (SKU)"
+                        title="Характеристики"
+                        onClick={() => onEditAttributes && onEditAttributes(product)}
                       >
-                        📦 {variants.length || ''}
+                        <Icon name="tag" size={15} />
                       </Button>
                       <Button
                         variant="secondary"
                         size="small"
-                        onClick={() => onEditAttributes(product)}
-                        title="Редактировать характеристики"
+                        title="Вариации (SKU)"
+                        onClick={() => onEditVariants && onEditVariants(product)}
                       >
-                        🏷 Характеристики
+                        <Icon name="variants" size={15} />
+                        {variants.length > 0 && <span className="btn-count">{variants.length}</span>}
                       </Button>
                       <Button
+                        size="small"
+                        title="Перенести на площадку"
                         onClick={() => onMigrate(product.id)}
                         disabled={
                           product.status === 'processing' ||
@@ -175,9 +187,8 @@ const ProductTable = ({
                           isProcessing
                         }
                         loading={isProcessing}
-                        size="small"
                       >
-                        🚀 Мигрировать
+                        <Icon name="migrate" size={15} /> Мигрировать
                       </Button>
                     </div>
                   </td>
@@ -185,10 +196,8 @@ const ProductTable = ({
               );
             })}
             {emptyRows.map((_, i) => (
-              <tr key={`empty-${i}`}>
-                <td colSpan={7} style={{ height: 48, opacity: 0 }}>
-                  &nbsp;
-                </td>
+              <tr key={`empty-${i}`} className="empty-row">
+                <td colSpan={7} style={{ height: 48, opacity: 0 }}>&nbsp;</td>
               </tr>
             ))}
           </tbody>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Button from '../common/Button';
+import Icon from '../icons';
 import { api } from '../../api';
 
 const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
@@ -10,10 +11,18 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
   const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
-    if (isOpen && product) setPhotos(product.photos || []);
+    if (isOpen) {
+      setPhotos(product?.photos || []);
+      setNewUrl('');
+      setDragIdx(null);
+    }
   }, [isOpen, product]);
 
   if (!isOpen || !product) return null;
+
+  const notify = (msg) => onNotify && onNotify(msg);
+
+  /* ---------- drag-and-drop сортировка ---------- */
 
   const handleDragStart = (idx) => setDragIdx(idx);
 
@@ -28,6 +37,8 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
   };
 
   const handleDragEnd = () => setDragIdx(null);
+
+  /* ---------- операции ---------- */
 
   const handleMakeMain = (idx) => {
     const updated = [...photos];
@@ -49,11 +60,11 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
     setLoading(true);
     try {
       await api.setPhotos(product.id, photos);
-      onNotify && onNotify('✅ Порядок и состав фото сохранены');
-      onSave && onSave();
+      notify('✅ Порядок и состав фото сохранены');
+      if (onSave) onSave();
       onClose();
     } catch (e) {
-      onNotify && onNotify('❌ ' + e.message);
+      notify('❌ ' + e.message);
     } finally {
       setLoading(false);
     }
@@ -63,20 +74,26 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
     setDownloading(true);
     try {
       const data = await api.downloadPhotos(product.id);
-      onNotify && onNotify(`💾 Скачивание запущено в фоне (${data.photos} фото)`);
+      notify(`💾 Скачивание запущено в фоне (${data.photos} фото)`);
     } catch (e) {
-      onNotify && onNotify('❌ ' + e.message);
+      notify('❌ ' + e.message);
     } finally {
       setDownloading(false);
     }
   };
 
+  /* ---------- рендер ---------- */
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">🖼 Фото: {product.name}</h2>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <h2 className="modal-title">
+            <Icon name="photo" size={22} /> Фото: {product.name}
+          </h2>
+          <button className="close-btn" onClick={onClose} title="Закрыть">
+            <Icon name="close" size={14} />
+          </button>
         </div>
 
         <p style={{ color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
@@ -108,10 +125,21 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
                 <span className="photo-idx">{idx + 1}</span>
                 {idx === 0 && <span className="photo-main-badge">Главное</span>}
                 <div className="photo-actions">
-                  <button title="Сделать главным" onClick={() => handleMakeMain(idx)} disabled={idx === 0}>
-                    ⭐
+                  <button
+                    type="button"
+                    title="Сделать главным"
+                    disabled={idx === 0}
+                    onClick={() => handleMakeMain(idx)}
+                  >
+                    <Icon name="star" size={13} />
                   </button>
-                  <button title="Удалить" onClick={() => handleRemove(idx)}>🗑</button>
+                  <button
+                    type="button"
+                    title="Удалить"
+                    onClick={() => handleRemove(idx)}
+                  >
+                    <Icon name="trash" size={13} />
+                  </button>
                 </div>
               </div>
             ))}
@@ -125,8 +153,12 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
             onChange={(e) => setNewUrl(e.target.value)}
             placeholder="https://example.com/photo.jpg"
           />
-          <Button variant="secondary" onClick={handleAdd} disabled={!newUrl.trim().startsWith('http')}>
-            + Добавить
+          <Button
+            variant="secondary"
+            onClick={handleAdd}
+            disabled={!newUrl.trim().startsWith('http')}
+          >
+            <Icon name="plus" size={14} /> Добавить
           </Button>
         </div>
 
@@ -137,12 +169,12 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
             disabled={downloading || photos.length === 0}
             loading={downloading}
           >
-            💾 Скачать копии
+            <Icon name="import" size={16} /> Скачать копии
           </Button>
           <div style={{ flex: 1 }} />
           <Button variant="outline" onClick={onClose}>Отмена</Button>
           <Button onClick={handleSave} disabled={loading} loading={loading}>
-            Сохранить ({photos.length})
+            <Icon name="check" size={16} /> Сохранить ({photos.length})
           </Button>
         </div>
       </div>

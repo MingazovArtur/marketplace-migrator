@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Button from '../common/Button';
+import Icon from '../icons';
 
 const BulkEditModal = ({ isOpen, onClose, selectedIds, onSubmit, loading }) => {
   const [applyPrice, setApplyPrice] = useState(true);
@@ -36,7 +37,9 @@ const BulkEditModal = ({ isOpen, onClose, selectedIds, onSubmit, loading }) => {
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">✏️ Массовое редактирование</h2>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
+            <Icon name="close" size={16} />
+          </button>
         </div>
 
         <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>

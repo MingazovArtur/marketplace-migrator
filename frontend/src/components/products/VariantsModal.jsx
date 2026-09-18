@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Button from '../common/Button';
 import { api } from '../../api';
+import Icon from '../icons';
 
 const VariantsModal = ({ isOpen, onClose, product, onSave }) => {
   const [variants, setVariants] = useState([]);
@@ -60,7 +61,9 @@ const VariantsModal = ({ isOpen, onClose, product, onSave }) => {
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">📦 Вариации: {product.name}</h2>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
+            <Icon name="close" size={16} />
+          </button>
         </div>
 
         <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
