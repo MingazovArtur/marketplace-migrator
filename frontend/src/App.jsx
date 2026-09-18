@@ -158,10 +158,10 @@ function App() {
   }, [selectedProductIds.length]);
 
   const hasActiveFilters =
-  (filters.status && filters.status !== 'all') ||
-  (filters.source && filters.source !== 'all') ||
-  !!filters.search ||
-  (filters.sort && filters.sort !== 'newest');
+    (filters.status && filters.status !== 'all') ||
+    (filters.source && filters.source !== 'all') ||
+    !!filters.search ||
+    (filters.sort && filters.sort !== 'newest');
 
   const resetFilters = useCallback(() => {
     updateFilters({ status: 'all', source: 'all', search: '', sort: 'newest' });
