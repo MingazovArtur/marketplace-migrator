@@ -12,6 +12,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     username: str
     password: str
+    consent: bool = False 
 
     class Config:
         json_schema_extra = {

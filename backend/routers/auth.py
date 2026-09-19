@@ -2,18 +2,16 @@
 Роутер аутентификации (регистрация, вход, профиль)
 """
 import logging
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer
-from pydantic import EmailStr
-
 from database.session import SessionLocal
 from database.models import User
+from database.access_log import log_access, get_client_ip
 from core.auth import (
-    get_current_user, 
-    create_access_token, 
-    get_password_hash,  # ← ИСПРАВЛЕНО: импортируем из core.auth
-    verify_password     # ← ИСПРАВЛЕНО: импортируем из core.auth
+    get_current_user,
+    create_access_token,
+    get_password_hash,
+    verify_password,
 )
 from models.schemas import UserCreate, UserLogin, UserResponse, Token
 
@@ -23,8 +21,8 @@ security = HTTPBearer()
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(payload: UserCreate):
-    """Регистрация нового пользователя"""
+async def register(payload: UserCreate, request: Request):
+    """Регистрация нового пользователя с логированием доступа"""
     if len(payload.password) < 6:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -59,6 +57,13 @@ async def register(payload: UserCreate):
         db.commit()
         db.refresh(user)
 
+        # ✅ Логирование регистрации и согласия
+        ip = get_client_ip(request)
+        ua = request.headers.get("user-agent")
+        log_access(user_id=user.id, username=user.username, action="register", ip=ip, user_agent=ua)
+        if payload.consent:
+            log_access(user_id=user.id, username=user.username, action="consent_accepted", ip=ip, user_agent=ua)
+
         logger.info(f"✅ Зарегистрирован пользователь: {user.username} (id={user.id})")
         return user
 
@@ -76,12 +81,16 @@ async def register(payload: UserCreate):
 
 
 @router.post("/login", response_model=Token)
-async def login(payload: UserLogin):
-    """Вход: возвращает JWT-токен"""
+async def login(payload: UserLogin, request: Request):
+    """Вход: возвращает JWT-токен с логированием"""
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == payload.username).first()
+        ip = get_client_ip(request)
+        ua = request.headers.get("user-agent")
+
         if not user or not verify_password(payload.password, user.hashed_password):
+            log_access(username=payload.username, action="login_failed", ip=ip, user_agent=ua)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Неверный логин или пароль",
@@ -92,12 +101,23 @@ async def login(payload: UserLogin):
                 detail="Аккаунт деактивирован",
             )
 
+        log_access(user_id=user.id, username=user.username, action="login_success", ip=ip, user_agent=ua)
         token = create_access_token({"sub": str(user.id), "role": user.role})
         logger.info(f"✅ Вход выполнен: {user.username}")
         return {"access_token": token, "token_type": "bearer"}
 
     finally:
         db.close()
+
+
+@router.post("/logout")
+async def logout(current_user: User = Depends(get_current_user), request: Request):
+    """Выход с логированием"""
+    ip = get_client_ip(request)
+    ua = request.headers.get("user-agent")
+    log_access(user_id=current_user.id, username=current_user.username, action="logout", ip=ip, user_agent=ua)
+    logger.info(f"👋 Выход: {current_user.username}")
+    return {"message": "Вы вышли из системы"}
 
 
 @router.get("/me", response_model=UserResponse)
