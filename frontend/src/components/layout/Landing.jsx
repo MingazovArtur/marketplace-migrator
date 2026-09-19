@@ -49,6 +49,25 @@ const Landing = ({ onOpenAuth }) => (
         </div>
       ))}
     </section>
+
+    {/* ✅ Юридический футер */}
+    <footer style={{
+      marginTop: '3rem',
+      paddingTop: '1.5rem',
+      borderTop: '1px solid var(--border)',
+      display: 'flex',
+      justifyContent: 'center',
+      gap: '1.5rem',
+      fontSize: '0.85rem',
+      flexWrap: 'wrap',
+    }}>
+      <a href="#/privacy" style={{ color: 'var(--text-muted)' }}>
+        Политика конфиденциальности
+      </a>
+      <a href="#/terms" style={{ color: 'var(--text-muted)' }}>
+        Пользовательское соглашение
+      </a>
+    </footer>
   </div>
 );
 

@@ -26,8 +26,10 @@ import HistoryView from './components/history/HistoryView';
 import StatsDashboard from './components/dashboard/StatsDashboard';
 import { api } from './api';
 import './App.css';
+import { PrivacyPolicyPage, TermsOfUsePage } from './pages/Legal';
 
 function App() {
+  const [hash, setHash] = useState(window.location.hash);
   const { token, isAuthenticated, user, handleLogin, handleLogout } = useAuth();
 
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
@@ -45,6 +47,15 @@ function App() {
   const [editAttributesProduct, setEditAttributesProduct] = useState(null);
   const [editVariantsProduct, setEditVariantsProduct] = useState(null);
   const [editPhotosProduct, setEditPhotosProduct] = useState(null);
+
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  if (hash === '#/privacy') return <PrivacyPolicyPage />;
+  if (hash === '#/terms') return <TermsOfUsePage />;
 
   // Тема применяется к <html> — фон body всегда совпадает с темой
   useEffect(() => {
