@@ -22,6 +22,17 @@ class User(Base):
 
     products = relationship("Product", back_populates="owner")
 
+class AccessLog(Base):
+    """Журнал доступа: кто, когда, с какого IP (152-ФЗ / безопасность)."""
+    __tablename__ = "access_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    username = Column(String(100), nullable=True)
+    action = Column(String(50), nullable=False)   # register | consent_accepted | login_success | login_failed | logout
+    ip = Column(String(64), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
 
 class Category(Base):
     """Справочник категорий маркетплейсов"""
