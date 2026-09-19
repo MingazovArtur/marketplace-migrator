@@ -1,0 +1,127 @@
+name: marketplace-prod
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 1g
+    cpus: 1.0
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --maxmemory 200mb --maxmemory-policy allkeys-lru --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 300m
+    cpus: 0.5
+    networks: [internal]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    volumes:
+      - media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    mem_limit: 1g
+    cpus: 1.5
+    networks: [internal]
+
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    command: celery -A celery_app worker --concurrency=4 --max-tasks-per-child=100 --loglevel=info
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+    volumes:
+      - media:/app/media
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 1536m
+    cpus: 1.5
+    networks: [internal]
+
+  nginx:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
+      - certs:/etc/letsencrypt:ro
+      - webroot:/var/www/certbot
+      - media:/var/media:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 128m
+    cpus: 0.5
+    networks: [internal, edge]
+
+  certbot:
+    image: certbot/certbot
+    restart: unless-stopped
+    volumes:
+      - certs:/etc/letsencrypt
+      - webroot:/var/www/certbot
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done;'
+    networks: [edge]
+
+volumes:
+  pgdata:
+  redisdata:
+  media:
+  certs:
+  webroot:
+
+networks:
+  internal:
+  edge:

@@ -1,0 +1,22 @@
+# slim-образ + кэш слоёв + non-root + авто-миграции при старте
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# psycopg2-binary не требует gcc; если у вас psycopg2 (source) — оставьте libpq-dev+gcc
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+RUN useradd -m app && mkdir -p /app/media && chown -R app:app /app
+USER app
+
+EXPOSE 8000
+
+# ✅ Миграции применяются на каждый деплой ДО старта приложения
+CMD ["sh", "-c", "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --workers 3"]
