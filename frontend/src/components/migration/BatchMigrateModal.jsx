@@ -1,139 +1,192 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Button from '../common/Button';
-import AnimatedCounter from '../common/AnimatedCounter';
-import { PLATFORMS, getUnavailablePlatforms } from '../../utils/platformUtils';
 import Icon from '../icons';
+import { PLATFORMS } from '../../utils/platformUtils';
 
-const BatchMigrateModal = ({ isOpen, onClose, selectedIds, products, onStartMigration, pollProgress, loading }) => {
-  const [selectedPlatform, setSelectedPlatform] = useState('');
-  const [taskId, setTaskId] = useState(null);
-  const [progress, setProgress] = useState({ current: 0, total: 0, percent: 0, status: 'pending', success: 0, errors: 0 });
-  const [completed, setCompleted] = useState(false);
+const normalize = (p) => {
+  const total = p?.total ?? 0;
+  const done = p?.done ?? p?.processed ?? (p?.status === 'completed' ? total : 0) ?? 0;
+  return {
+    status: p?.status ?? 'pending',
+    total,
+    done,
+    success: p?.success ?? 0,
+    errors: p?.errors ?? 0,
+    percent: p?.percent ?? (total ? Math.round((done / total) * 100) : 0),
+    error: p?.error || '',
+  };
+};
+
+const isFinished = (n) =>
+  n.status === 'completed' || n.status === 'finished' || n.status === 'failed' ||
+  (n.total > 0 && n.done >= n.total);
+
+const BatchMigrateModal = ({
+  isOpen, onClose, selectedIds, products,
+  onStartMigration, pollProgress, loading, onAutoExport,
+}) => {
+  const [platform, setPlatform] = useState('ozon');
+  const [autoExport, setAutoExport] = useState(true);
+  const [batch, setBatch] = useState(null);
+  const [prog, setProg] = useState(null);
+  const [finished, setFinished] = useState(false);
+  const [error, setError] = useState('');
+  const [starting, setStarting] = useState(false);
+  const exportedRef = useRef(false);
 
   useEffect(() => {
-    if (isOpen && selectedIds.length > 0) {
-      const unavailable = getUnavailablePlatforms(products, selectedIds);
-      const available = PLATFORMS.filter(p => !unavailable.includes(p));
-      setSelectedPlatform(available[0]?.id || '');
-      setTaskId(null);
-      setCompleted(false);
-      setProgress({ current: 0, total: selectedIds.length, percent: 0, status: 'pending', success: 0, errors: 0 });
+    if (isOpen) {
+      setBatch(null); setProg(null); setFinished(false);
+      setError(''); setStarting(false); setAutoExport(true);
+      exportedRef.current = false;
     }
-  }, [isOpen, selectedIds, products]);
+  }, [isOpen]);
 
-  if (!isOpen || selectedIds.length === 0) return null;
+  /* Поллинг прогресса */
+  useEffect(() => {
+    const batchId = batch?.batch_id || batch?.id;
+    if (!batchId || finished) return undefined;
 
-  const unavailablePlatforms = getUnavailablePlatforms(products, selectedIds);
-  const availablePlatforms = PLATFORMS.filter(p => !unavailablePlatforms.includes(p));
+    const timer = setInterval(async () => {
+      try {
+        const raw = await pollProgress(batchId);
+        const n = normalize(raw);
+        setProg(n);
+        if (n.error) setError(n.error);
 
+        if (isFinished(n)) {
+          setFinished(true);
+          if (n.status !== 'failed' && autoExport && !exportedRef.current && onAutoExport) {
+            exportedRef.current = true;
+            onAutoExport(platform);
+          }
+        }
+      } catch (e) {
+        setError('Ошибка опроса прогресса: ' + e.message);
+      }
+    }, 1500);
+
+    return () => clearInterval(timer);
+  }, [batch, finished, autoExport, platform, pollProgress, onAutoExport]);
+
+  if (!isOpen) return null;
+
+  /* ✅ Запуск: ошибка остаётся ВНУТРИ модалки, окно не закрывается */
   const handleStart = async () => {
-    if (!selectedPlatform) return;
-    const data = await onStartMigration(selectedIds, selectedPlatform);
-    if (data && data.task_id) {
-      setTaskId(data.task_id);
-      pollProgress(data.task_id, setProgress, (finalProgress) => {
-        setProgress(finalProgress);
-        setCompleted(true);
-      });
+    setError('');
+    setStarting(true);
+    try {
+      const res = await onStartMigration(selectedIds, platform);
+      const batchId = res?.batch_id || res?.task_id || res?.id;
+      if (!batchId) throw new Error('Сервер не вернул ID задачи (batch_id)');
+      setBatch({ batch_id: batchId, total: res?.total ?? selectedIds.length });
+    } catch (e) {
+      setError(e.message || 'Не удалось запустить пакетную миграцию');
+    } finally {
+      setStarting(false);
     }
   };
 
+  const n = prog || { total: selectedIds.length, done: 0, success: 0, errors: 0, percent: 0 };
+  const percent = Math.min(100, n.percent || 0);
+
+  const stats = (
+    <div className="progress-stats">
+      <div className="stat-item"><div className="stat-label">Всего</div><div className="stat-value">{n.total}</div></div>
+      <div className="stat-item"><div className="stat-label">Готово</div><div className="stat-value">{n.done}</div></div>
+      <div className="stat-item"><div className="stat-label">Успешно</div><div className="stat-value success-text">{n.success}</div></div>
+      <div className="stat-item"><div className="stat-label">Ошибки</div><div className="stat-value error-text">{n.errors}</div></div>
+    </div>
+  );
+
   return (
-    <div className="modal-overlay" onClick={() => !completed && onClose()}>
-      <div className="modal modal-batch" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">🔄 Пакетная миграция</h2>
-          {completed && <button type="button" className="close-btn" onClick={onClose} title="Закрыть"><Icon name="close" size={16} /></button>}
+          <h2 className="modal-title">
+            <Icon name="migrate" size={22} /> Пакетная миграция ({selectedIds.length})
+          </h2>
+          <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
+            <Icon name="close" size={16} />
+          </button>
         </div>
 
-        {!taskId ? (
+        {/* Шаг 1: параметры */}
+        {!batch && (
           <>
-            <p className="modal-text">
-              Выбрано товаров: <b>{selectedIds.length}</b>. Выберите целевую платформу:
-            </p>
+            <label className="form-label">Целевая площадка:</label>
             <div className="platform-selector">
-              {availablePlatforms.map(p => (
+              {PLATFORMS.map((p) => (
                 <button
                   key={p.id}
-                  className={`platform-btn ${selectedPlatform === p.id ? 'platform-btn-active' : ''}`}
-                  onClick={() => setSelectedPlatform(p.id)}
-                  data-platform={p.id}
+                  type="button"
+                  className={`platform-btn ${platform === p.id ? 'platform-btn-active' : ''}`}
+                  onClick={() => setPlatform(p.id)}
                 >
-                  <div className="platform-logo" style={{
-                    backgroundColor: selectedPlatform === p.id ? p.color : 'var(--bg-tertiary)',
-                    color: selectedPlatform === p.id ? 'white' : 'var(--text-muted)'
-                  }}>
-                    {p.logoText}
-                  </div>
-                  <span>{p.name}</span>
+                  {p.name}
                 </button>
               ))}
             </div>
-            <div className="modal-hint-box">
-              <span className="hint-icon">⚡</span>
-              <p>Миграция будет выполняться в фоновом режиме. Вы сможете наблюдать за прогрессом в реальном времени.</p>
-            </div>
+
+            <label className="bulk-check">
+              <input
+                type="checkbox"
+                checked={autoExport}
+                onChange={(e) => setAutoExport(e.target.checked)}
+              />
+              После завершения сразу скачать файл для кабинета {platform}
+            </label>
+
+            {error && (
+              <div className="alert alert-error">
+                <div>{error}</div>
+              </div>
+            )}
+
             <div className="modal-actions">
               <Button variant="outline" onClick={onClose}>Отмена</Button>
-              <Button onClick={handleStart} disabled={loading || !selectedPlatform}>
-                🚀 Запустить миграцию
+              <Button onClick={handleStart} disabled={starting || loading} loading={starting || loading}>
+                <Icon name="migrate" size={16} /> Запустить перенос
               </Button>
             </div>
           </>
-        ) : (
+        )}
+
+        {/* Шаг 2: прогресс */}
+        {batch && !finished && (
           <>
-            <div className="batch-progress-container">
-              <div className="progress-stats">
-                <div className="stat-item">
-                  <div className="stat-label">Всего</div>
-                  <div className="stat-value"><AnimatedCounter target={progress.total} duration={500} /></div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-label">Обработано</div>
-                  <div className="stat-value"><AnimatedCounter target={progress.current} duration={300} /></div>
-                </div>
-                <div className="stat-item success">
-                  <div className="stat-label">Успешно</div>
-                  <div className="stat-value"><AnimatedCounter target={progress.success || 0} duration={300} /></div>
-                </div>
-                <div className="stat-item error">
-                  <div className="stat-label">Ошибок</div>
-                  <div className="stat-value"><AnimatedCounter target={progress.errors || 0} duration={300} /></div>
-                </div>
-              </div>
-              
-              {/* Плавный прогресс-бар с shine-эффектом */}
-              <div className="progress-bar-wrapper">
-                <div 
-                  className="progress-bar-fill" 
-                  style={{ width: `${progress.percent || 0}%` }}
-                />
-                <div className="progress-bar-text">{Math.round(progress.percent || 0)}%</div>
-              </div>
-              
-              <div className="progress-status">
-                {progress.status === 'pending' && <span>⏳ Ожидание запуска...</span>}
-                {progress.status === 'processing' && <span>⚙️ Обработка товаров...</span>}
-                {progress.status === 'completed' && (
-                  <span className="success-text">
-                    ✅ Миграция завершена! Успешно: {progress.success}, Ошибок: {progress.errors}
-                  </span>
-                )}
-                {progress.status === 'error' && <span className="error-text">❌ Произошла ошибка</span>}
-              </div>
-              
-              {progress.error_details && progress.error_details.length > 0 && (
-                <div className="error-details">
-                  <h4>Детали ошибок:</h4>
-                  <ul>{progress.error_details.map((err, i) => <li key={i}>Товар #{err.id}: {err.error}</li>)}</ul>
-                </div>
-              )}
+            <div className="progress-bar-wrapper">
+              <div className="progress-bar-fill" style={{ width: `${percent}%` }} />
+              <span className="progress-bar-text">{percent}%</span>
             </div>
-            {completed && (
-              <div className="modal-actions">
-                <Button onClick={onClose}>✅ Закрыть и обновить таблицу</Button>
-              </div>
-            )}
+            {stats}
+            {error && <div className="alert alert-error"><div>{error}</div></div>}
+            <p className="progress-status">
+              Переносим карточки… окно можно закрыть — процесс продолжится на сервере.
+            </p>
+          </>
+        )}
+
+        {/* Шаг 3: финал */}
+        {finished && (
+          <>
+            {stats}
+            <p
+              className={n.status === 'failed' ? 'error-text' : 'success-text'}
+              style={{ textAlign: 'center', margin: '1rem 0' }}
+            >
+              {n.status === 'failed'
+                ? `Пакетная миграция завершилась с ошибкой: ${n.error}`
+                : 'Пакетная миграция завершена.'}
+            </p>
+            <div className="modal-actions">
+              {n.status !== 'failed' && (
+                <Button variant="outline" onClick={() => onAutoExport && onAutoExport(platform)}>
+                  <Icon name="export" size={16} /> Скачать файл для кабинета
+                </Button>
+              )}
+              <Button onClick={onClose}>Готово</Button>
+            </div>
           </>
         )}
       </div>

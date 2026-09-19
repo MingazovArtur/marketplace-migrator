@@ -5,7 +5,7 @@ export const useMigration = (loadData, onMessage) => {
   const [isMigratingProductId, setIsMigratingProductId] = useState(null);
   const pollIntervalRef = useRef(null);
 
-  // Очистка polling при размонтировании
+  // Очистка polling одиночной миграции
   const cleanupPolling = useCallback(() => {
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
@@ -13,35 +13,38 @@ export const useMigration = (loadData, onMessage) => {
     }
   }, []);
 
+  // =====================================================================
+  // ОДИНОЧНАЯ МИГРАЦИЯ (polling внутри хука)
+  // =====================================================================
   const migrateProduct = useCallback(async (productId, targetPlatform, editedData = null) => {
-    // Блокируем товар сразу на фронтенде
     setIsMigratingProductId(productId);
     onMessage?.('⏳ Идет перенос товара...');
 
     try {
       const data = await api.migrateProduct(productId, targetPlatform, editedData);
-      
+
       if (!data.success || !data.task_id) {
         throw new Error('Ошибка запуска миграции');
       }
 
-      const platformName = targetPlatform;
-      
-      // Polling: проверяем статус задачи каждые 1 секунду
+      // Polling статуса задачи
       pollIntervalRef.current = setInterval(async () => {
         try {
           const progress = await api.getTaskProgress(data.task_id);
-          
-          if (progress.status === 'completed' || progress.status === 'error') {
+
+          if (
+            progress.status === 'completed' ||
+            progress.status === 'failed' ||
+            progress.status === 'error'
+          ) {
             cleanupPolling();
             setIsMigratingProductId(null);
-            
+
             if (progress.status === 'completed') {
-              onMessage?.(`✅ Товар успешно перенесён!`);
+              onMessage?.('✅ Товар успешно перенесён!');
             } else {
-              onMessage?.('❌ Ошибка при переносе товара');
+              onMessage?.('❌ Ошибка при переносе товара: ' + (progress.error || ''));
             }
-            
             loadData();
           }
         } catch (err) {
@@ -50,14 +53,14 @@ export const useMigration = (loadData, onMessage) => {
           onMessage?.('❌ Ошибка проверки статуса задачи');
           loadData();
         }
-      }, 1000);
+      }, 1500);
 
-      // Таймаут на случай зависания задачи (30 секунд)
+      // Страховочный таймаут (60 сек)
       setTimeout(() => {
         cleanupPolling();
         setIsMigratingProductId(null);
         loadData();
-      }, 30000);
+      }, 60000);
 
       return data;
     } catch (err) {
@@ -67,41 +70,34 @@ export const useMigration = (loadData, onMessage) => {
     }
   }, [loadData, onMessage, cleanupPolling]);
 
+  // =====================================================================
+  // ПАКЕТНАЯ МИГРАЦИЯ (просто старт — возвращает {batch_id, total})
+  // Polling прогресса делает сама BatchMigrateModal через pollBatchProgress
+  // =====================================================================
   const migrateBatch = useCallback(async (productIds, targetPlatform) => {
-    try {
-      const data = await api.migrateBatch(productIds, targetPlatform);
-      return data;
-    } catch (err) {
-      onMessage?.(' ' + err.message);
-      throw err;
+    const data = await api.migrateBatch(productIds, targetPlatform);
+    // ✅ принимаем batch_id / task_id / id — что вернул сервер
+    const batchId = data?.batch_id || data?.task_id || data?.id;
+    if (!batchId) {
+      throw new Error('Сервер не вернул ID задачи. Ответ: ' + JSON.stringify(data).slice(0, 150));
     }
-  }, [onMessage]);
+    return { ...data, batch_id: batchId };
+  }, []);
 
-  const pollBatchProgress = useCallback((taskId, onProgress, onComplete) => {
-    const interval = setInterval(async () => {
-      try {
-        const progress = await api.getTaskProgress(taskId);
-        onProgress?.(progress);
-        
-        if (progress.status === 'completed' || progress.status === 'error') {
-          clearInterval(interval);
-          onComplete?.(progress);
-          loadData();
-        }
-      } catch (err) {
-        clearInterval(interval);
-        onMessage?.('❌ Ошибка получения прогресса');
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [loadData, onMessage]);
+  // =====================================================================
+  // ПОЛУЧЕНИЕ ПРОГРЕССА ПАКЕТНОЙ МИГРАЦИИ
+  // Используется в BatchMigrateModal через await pollProgress(batchId)
+  // Это простая async-функция — без interval внутри
+  // =====================================================================
+  const pollBatchProgress = useCallback(async (taskId) => {
+    return await api.getTaskProgress(taskId);
+  }, []);
 
   return {
     isMigratingProductId,
     migrateProduct,
     migrateBatch,
     pollBatchProgress,
-    cleanupPolling
+    cleanupPolling,
   };
 };
