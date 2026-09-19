@@ -7,7 +7,7 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
   const [tab, setTab] = useState(initialTab);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
+  const [agree, setAgree] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [regEmail, setRegEmail] = useState('');
@@ -18,6 +18,12 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
     if (isOpen) {
       setTab(initialTab);
       setError('');
+      setAgree(false);          // ✅ сбрасываем согласие при открытии
+      setUsername('');
+      setPassword('');
+      setRegEmail('');
+      setRegUsername('');
+      setRegPassword('');
     }
   }, [isOpen, initialTab]);
 
@@ -27,9 +33,9 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    
+
     console.log('🔐 Вход:', { username, password: '***' });
-    
+
     try {
       const data = await api.login({ username: username.trim(), password });
       console.log('✅ Вход выполнен:', data);
@@ -47,7 +53,7 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    
+
     // Валидация на клиенте
     if (!regEmail || !regEmail.includes('@')) {
       setError('Введите корректный email');
@@ -64,14 +70,20 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
       setLoading(false);
       return;
     }
-    
+    if (!agree) {
+      setError('Необходимо принять условия оферты и политику конфиденциальности');
+      setLoading(false);
+      return;
+    }
+
     try {
       const result = await api.register({
         email: regEmail.trim(),
         username: regUsername.trim(),
         password: regPassword,
+        consent: agree,         // ✅ передаём согласие на сервер
       });
-      
+
       const data = await api.login({ username: regUsername.trim(), password: regPassword });
       onLogin(data.access_token);
       onClose();
@@ -86,7 +98,7 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-auth" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">{tab === 'login' ? ' Вход' : '✨ Регистрация'}</h2>
+          <h2 className="modal-title">{tab === 'login' ? '🔐 Вход' : '✨ Регистрация'}</h2>
           <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
             <Icon name="close" size={16} />
           </button>
@@ -120,9 +132,32 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
             <label className="form-label">Логин</label>
             <input className="form-input" value={regUsername} onChange={(e) => setRegUsername(e.target.value)} placeholder="seller123" required />
             <label className="form-label">Пароль</label>
-            <input className="form-input" type="password" value={regPassword} onChange={(e) => setRegPassword(e.target.value)} placeholder="Минимум 8 символов" required />
+            <input className="form-input" type="password" value={regPassword} onChange={(e) => setRegPassword(e.target.value)} placeholder="Минимум 6 символов" required />
+
+            {/* ✅ Checkbox согласия */}
+            <label className="bulk-check" style={{ margin: '0.75rem 0', fontWeight: 400, display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+              <input
+                type="checkbox"
+                checked={agree}
+                onChange={(e) => setAgree(e.target.checked)}
+                style={{ marginTop: '3px' }}
+              />
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                Я принимаю{' '}
+                <a href="#/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-primary)' }}>условия оферты</a>
+                {' '}и{' '}
+                <a href="#/privacy" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-primary)' }}>политику конфиденциальности</a>
+              </span>
+            </label>
+
             <div className="modal-actions">
-              <Button type="submit" disabled={loading} loading={loading}>Создать аккаунт</Button>
+              <Button
+                type="submit"
+                disabled={loading || !agree}
+                loading={loading}
+              >
+                Создать аккаунт
+              </Button>
             </div>
           </form>
         )}
