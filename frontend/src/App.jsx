@@ -126,10 +126,29 @@ function App() {
 
   const handleOpenMigrateModal = useCallback((id) => setMigrateProductId(id), []);
 
-  const handleConfirmMigrate = useCallback(async (id, platform, edited) => {
+  const handleConfirmMigrate = useCallback(async (id, platform, edited, autoExport = true) => {
     setMigrateProductId(null);
     await migrateProduct(id, platform, edited);
+    if (autoExport) {
+      try {
+        await api.exportForPlatform(platform, 'success');
+        setMessage(`✅ Карточка перенесена. Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
+      } catch (e) {
+        setMessage(`✅ Карточка перенесена, но файл не скачался: ${e.message}`);
+      }
+    }
   }, [migrateProduct]);
+
+    /* Автовыгрузка после пакетной миграции */
+  const handleAutoExport = useCallback(async (platform) => {
+    try {
+      await api.exportForPlatform(platform, 'success');
+      setMessage(`📥 Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
+      loadData();
+    } catch (e) {
+      setMessage('❌ Не удалось скачать файл: ' + e.message);
+    }
+  }, [loadData]);
 
   const toggleProductSelection = useCallback((id) => {
     setSelectedProductIds(prev =>
@@ -174,14 +193,8 @@ function App() {
   }, [loadData]);
 
   const handleStartBatchMigration = useCallback(async (ids, platform) => {
-    try {
-      return await migrateBatch(ids, platform);
-    } catch (e) {
-      setMessage('❌ ' + e.message);
-      setShowBatchModal(false);
-      setSelectedProductIds([]);
-      return null;
-    }
+    // ✅ НЕ закрываем модалку: ошибку покажет сама BatchMigrateModal
+    return await migrateBatch(ids, platform);
   }, [migrateBatch]);
 
   const handleBulkEdit = useCallback(async (payload) => {
@@ -432,6 +445,7 @@ function App() {
       />
       <BatchMigrateModal
         isOpen={showBatchModal}
+        onAutoExport={handleAutoExport}
         onClose={handleCloseBatchModal}
         selectedIds={selectedProductIds}
         products={products}

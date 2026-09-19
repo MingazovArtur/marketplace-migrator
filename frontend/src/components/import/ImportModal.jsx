@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Button from '../common/Button';
-import { PLATFORMS } from '../../utils/platformUtils';
 import Icon from '../icons';
+import { PLATFORMS } from '../../utils/platformUtils';
 
 const API_URL = 'http://localhost:8000/api';
 
@@ -14,8 +14,7 @@ const HINTS = {
   ozon: 'Тест: test:test · Реальный API: CLIENT_ID:API_KEY',
   wildberries: 'Тест: mock_wb_key (демо-режим)',
   yandex: 'Тест: test:test · API: campaign_id:oauth_token · или ссылка на YML-фид',
-  magnit:
-    'Магнит Маркет (экс-KazanExpress): только XLSX из личного кабинета, лист «SKU». Цен в файле нет — задайте их после импорта через «✏️ Редактировать».',
+  magnit: 'Магнит Маркет: только XLSX из личного кабинета, лист «SKU». Цен в файле нет — задайте их после импорта через «Редактировать».',
 };
 
 const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
@@ -29,48 +28,31 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
   const [upsert, setUpsert] = useState(false);
-  
-  // Новое состояние для блокировки после импорта
-  const [isImported, setIsImported] = useState(false); 
+  const [isImported, setIsImported] = useState(false);
   const fileInputRef = useRef(null);
 
   const platform = PLATFORMS.find((p) => p.id === selectedPlatform) || PLATFORMS[0];
   const availableMethods = platform.importMethods || ['key', 'file'];
 
-  // Если у площадки нет текущего способа — переключаем на первый доступный
   useEffect(() => {
-    if (!availableMethods.includes(importMethod)) {
-      setImportMethod(availableMethods[0]);
-    }
+    if (!availableMethods.includes(importMethod)) setImportMethod(availableMethods[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPlatform]);
 
-  // Полный сброс при каждом открытии
   useEffect(() => {
     if (isOpen) {
-      setAuthKey('');
-      setKeyError('');
-      setSelectedFile(null);
-      setPreview(null);
-      setPreviewError('');
-      setIsDragging(false);
-      setUpsert(false);
-      setIsImported(false); // Сбрасываем флаг при открытии
+      setAuthKey(''); setKeyError(''); setSelectedFile(null);
+      setPreview(null); setPreviewError(''); setIsDragging(false);
+      setUpsert(false); setIsImported(false);
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  /* ---------- логика ---------- */
-
   const changePlatform = (id) => {
     setSelectedPlatform(id);
-    setSelectedFile(null);
-    setPreview(null);
-    setPreviewError('');
-    setAuthKey('');
-    setKeyError('');
-    setIsImported(false); // Сбрасываем при смене площадки
+    setSelectedFile(null); setPreview(null); setPreviewError('');
+    setAuthKey(''); setKeyError(''); setIsImported(false);
   };
 
   const validateKey = (v) => {
@@ -81,25 +63,18 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
 
   const handleKeyImport = () => {
     const err = validateKey(authKey);
-    if (err) {
-      setKeyError(err);
-      return;
-    }
+    if (err) { setKeyError(err); return; }
     const k = authKey.trim();
-    const full =
-      k.includes(':') && k.split(':')[0].toLowerCase() === selectedPlatform
-        ? k
-        : `${selectedPlatform}:${k}`;
-    
-    setIsImported(true); // Блокируем кнопку
+    const full = k.includes(':') && k.split(':')[0].toLowerCase() === selectedPlatform
+      ? k
+      : `${selectedPlatform}:${k}`;
+    setIsImported(true);
     onImport(full);
   };
 
   const downloadTemplate = async () => {
     try {
-      const res = await fetch(`${API_URL}/templates/${selectedPlatform}`, {
-        headers: authHeaders(),
-      });
+      const res = await fetch(`${API_URL}/templates/${selectedPlatform}`, { headers: authHeaders() });
       if (!res.ok) throw new Error('шаблон не найден');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -116,11 +91,8 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
   };
 
   const loadPreview = async (file) => {
-    setSelectedFile(file);
-    setPreview(null);
-    setPreviewError('');
-    setPreviewLoading(true);
-    setIsImported(false); // Сбрасываем при загрузке нового файла
+    setSelectedFile(file); setPreview(null); setPreviewError('');
+    setPreviewLoading(true); setIsImported(false);
     try {
       const fd = new FormData();
       fd.append('file', file);
@@ -131,9 +103,7 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
         body: fd,
       });
       const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.detail || 'Не удалось прочитать файл');
-      }
+      if (!res.ok || !data.success) throw new Error(data.detail || 'Не удалось прочитать файл');
       setPreview(data.preview);
     } catch (e) {
       setPreviewError(e.message);
@@ -158,18 +128,18 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
   };
 
   const confirmFileImport = () => {
-    if (!selectedFile) return;
-    setIsImported(true); // Блокируем кнопку
+    if (!selectedFile || isImported) return;
+    setIsImported(true);
     onFileImport(selectedPlatform, selectedFile, upsert ? 'upsert' : 'create');
   };
-
-  /* ---------- рендер ---------- */
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">📥 Импорт товаров</h2>
+          <h2 className="modal-title">
+            <Icon name="import" size={22} /> Импорт товаров
+          </h2>
           <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
             <Icon name="close" size={16} />
           </button>
@@ -181,6 +151,7 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
           {PLATFORMS.map((p) => (
             <button
               key={p.id}
+              type="button"
               className={`platform-btn ${selectedPlatform === p.id ? 'platform-btn-active' : ''}`}
               onClick={() => changePlatform(p.id)}
             >
@@ -200,7 +171,7 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
 
         <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
           <Button variant="outline" onClick={downloadTemplate}>
-            📥 Скачать шаблон
+            <Icon name="template" size={16} /> Скачать шаблон
           </Button>
         </div>
 
@@ -209,21 +180,23 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
         {availableMethods.length > 1 ? (
           <div className="import-method-toggle">
             <button
+              type="button"
               className={`toggle-btn ${importMethod === 'key' ? 'active' : ''}`}
               onClick={() => setImportMethod('key')}
             >
-              🔑 API ключ / YML
+              <Icon name="key" size={16} /> API ключ / YML
             </button>
             <button
+              type="button"
               className={`toggle-btn ${importMethod === 'file' ? 'active' : ''}`}
               onClick={() => setImportMethod('file')}
             >
-              📁 Excel / CSV
+              <Icon name="file" size={16} /> Excel / CSV
             </button>
           </div>
         ) : (
           <div className="modal-hint-box">
-            <span className="hint-icon">📁</span>
+            <span className="hint-icon"><Icon name="file" size={18} /></span>
             <p>Для «{platform.name}» доступен только импорт из файла XLSX.</p>
           </div>
         )}
@@ -231,7 +204,7 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
         {importMethod === 'key' ? (
           <>
             <div className="modal-hint-box">
-              <span className="hint-icon">💡</span>
+              <span className="hint-icon"><Icon name="info" size={18} /></span>
               <p>{HINTS[selectedPlatform]}</p>
             </div>
             <label className="form-label">Ключ или ссылка</label>
@@ -239,25 +212,15 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
               className={`form-input ${keyError ? 'input-error' : ''}`}
               type="text"
               value={authKey}
-              onChange={(e) => {
-                setAuthKey(e.target.value);
-                setKeyError('');
-              }}
-              placeholder={
-                selectedPlatform === 'yandex'
-                  ? 'test:test или https://.../yml.xml'
-                  : 'test:test'
-              }
+              onChange={(e) => { setAuthKey(e.target.value); setKeyError(''); }}
+              placeholder={selectedPlatform === 'yandex' ? 'test:test или https://.../yml.xml' : 'test:test'}
             />
             {keyError && <div className="input-error-message">{keyError}</div>}
             <div className="modal-actions">
               <Button variant="outline" onClick={onClose}>Отмена</Button>
-              <Button 
-                onClick={handleKeyImport} 
-                disabled={loading || isImported} 
-                loading={loading || isImported}
-              >
-                {isImported ? '✅ Импортировано' : loading ? '⏳ Загрузка...' : '✅ Импортировать'}
+              <Button onClick={handleKeyImport} disabled={loading || isImported} loading={loading || isImported}>
+                {isImported ? <Icon name="check" size={16} /> : <Icon name="import" size={16} />}
+                {isImported ? 'Импортировано' : 'Импортировать'}
               </Button>
             </div>
           </>
@@ -266,7 +229,7 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
             {!preview && !previewLoading && (
               <>
                 <div className="modal-hint-box">
-                  <span className="hint-icon">💡</span>
+                  <span className="hint-icon"><Icon name="info" size={18} /></span>
                   <p>{HINTS[selectedPlatform]}</p>
                 </div>
 
@@ -277,7 +240,7 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
                   onDrop={onDrop}
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  <div className="drop-zone-icon">📄</div>
+                  <div className="drop-zone-icon"><Icon name="file" size={44} /></div>
                   <div className="drop-zone-text">
                     {selectedFile ? (
                       <>
@@ -311,12 +274,8 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
                           Попробовать другой файл
                         </Button>
                         {selectedFile && (
-                          <Button 
-                            onClick={confirmFileImport} 
-                            disabled={loading || isImported} 
-                            loading={loading || isImported}
-                          >
-                            {isImported ? '✅ Импортировано' : 'Импортировать без предпросмотра'}
+                          <Button onClick={confirmFileImport} disabled={loading || isImported}>
+                            <Icon name="import" size={16} /> Импорт без предпросмотра
                           </Button>
                         )}
                       </div>
@@ -340,7 +299,7 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
 
                 {preview.warnings?.length > 0 && (
                   <div className="modal-hint-box">
-                    <span className="hint-icon">⚠️</span>
+                    <span className="hint-icon"><Icon name="alert" size={18} /></span>
                     <p>{preview.warnings.map((w) => w.message).join(' ')}</p>
                   </div>
                 )}
@@ -348,11 +307,7 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
                 <div className="preview-table-wrap">
                   <table className="preview-table">
                     <thead>
-                      <tr>
-                        {(preview.columns || []).map((c) => (
-                          <th key={c}>{c}</th>
-                        ))}
-                      </tr>
+                      <tr>{(preview.columns || []).map((c) => (<th key={c}>{c}</th>))}</tr>
                     </thead>
                     <tbody>
                       {(preview.preview || []).map((row, i) => (
@@ -370,44 +325,36 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
 
                 {preview.errors?.length > 0 && (
                   <div className="preview-errors">
-                    <h4>⚠️ Ошибки в файле:</h4>
+                    <h4><Icon name="alert" size={16} /> Ошибки в файле:</h4>
                     <ul>
                       {preview.errors.slice(0, 5).map((er, i) => (
                         <li key={i}>Строка {er.row}: {er.error}</li>
                       ))}
-                      {preview.errors.length > 5 && (
-                        <li>…и ещё {preview.errors.length - 5}</li>
-                      )}
+                      {preview.errors.length > 5 && <li>…и ещё {preview.errors.length - 5}</li>}
                     </ul>
                   </div>
                 )}
 
                 <label className="bulk-check" style={{ margin: '0.75rem 0' }}>
-                  <input
-                    type="checkbox"
-                    checked={upsert}
-                    onChange={(e) => setUpsert(e.target.checked)}
-                  />
+                  <input type="checkbox" checked={upsert} onChange={(e) => setUpsert(e.target.checked)} />
                   Обновлять существующие товары по артикулу (upsert)
                 </label>
 
                 <div className="modal-actions">
                   <Button
                     variant="outline"
-                    onClick={() => { 
-                      setPreview(null); 
-                      setSelectedFile(null); 
-                      setIsImported(false); // Сбрасываем при выборе другого файла
-                    }}
+                    onClick={() => { setPreview(null); setSelectedFile(null); setIsImported(false); }}
                   >
-                    ← Другой файл
+                    <Icon name="chevron-left" size={16} /> Другой файл
                   </Button>
                   <Button
                     onClick={confirmFileImport}
                     disabled={loading || isImported || preview.valid_estimated === 0}
                     loading={loading || isImported}
                   >
-                    {isImported ? '✅ Импортировано' : loading ? '⏳ Импорт...' : `✅ Импортировать ${preview.valid_estimated}`}
+                    {isImported
+                      ? (<><Icon name="check" size={16} /> Импортировано</>)
+                      : (<><Icon name="import" size={16} /> Импортировать {preview.valid_estimated}</>)}
                   </Button>
                 </div>
               </div>

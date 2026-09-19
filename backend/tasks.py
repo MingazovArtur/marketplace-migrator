@@ -8,6 +8,10 @@ Celery задачи для фоновой миграции товаров.
   4. Ошибки пишутся в поле error_message товара
   5. Автомаппинг категорий: если категории нет — маппим по названию товара
   6. Все миграции логируются в таблицу migration_logs (Фаза 3)
+  7. ✅ Прогресс публикуется через self.update_state (работает с AsyncResult.info)
+  8. ✅ Унифицированные имена полей: status ∈ {pending, progress, completed, failed}, done
+  9. ✅ t0 в самом начале задач — защита от NameError в except
+ 10. ✅ Убрана искусственная задержка time.sleep(1) в пакетной миграции
 """
 import logging
 import time
@@ -22,47 +26,68 @@ logger = logging.getLogger(__name__)
 category_mapper = CategoryMapper()
 
 
-def update_progress(task_id, current, total, status="processing",
-                    success=0, errors=0, error_details=None):
-    """Обновляет прогресс задачи в Redis"""
-    try:
-        celery_app.backend.store_result(
-            task_id,
-            {
-                "current": current,
-                "total": total,
-                "percent": round((current / total) * 100, 1) if total > 0 else 0,
-                "status": status,
-                "success": success,
-                "errors": errors,
-                "error_details": error_details or [],
-            },
-            state="PROGRESS",
-        )
-    except Exception as e:
-        logger.warning(f"Не удалось обновить прогресс: {e}")
+# ---------------------------------------------------------------------------
+# Вспомогательные функции
+# ---------------------------------------------------------------------------
 
-
-def get_progress(task_id: str):
-    """Получает текущий прогресс задачи по её ID"""
+def get_progress(task_id: str) -> dict:
+    """
+    Возвращает текущий прогресс задачи по её ID в унифицированном формате:
+        status: 'pending' | 'progress' | 'completed' | 'failed'
+        + поля total, done, success, errors, percent, error (опц.)
+    """
     try:
         result = celery_app.AsyncResult(task_id)
+
         if result.state == "PROGRESS":
-            return result.info
-        elif result.state == "SUCCESS":
-            task_result = result.result
-            if isinstance(task_result, dict) and task_result.get("status") == "success":
-                task_result["status"] = "completed"
-            return task_result
-        elif result.state == "FAILURE":
-            return {"status": "error", "message": str(result.result)}
+            meta = result.info or {}
+            total = meta.get("total", 0)
+            done = meta.get("done", 0)
+            return {
+                "status": "progress",
+                "total": total,
+                "done": done,
+                "success": meta.get("success", 0),
+                "errors": meta.get("errors", 0),
+                "percent": meta.get("percent", int(done * 100 / total) if total else 0),
+                "error_details": meta.get("error_details", []),
+            }
+
+        if result.state == "SUCCESS":
+            r = result.result or {}
+            if isinstance(r, dict):
+                total = r.get("total", 0)
+                return {
+                    "status": "completed",
+                    "total": total,
+                    "done": total,
+                    "success": r.get("success", 0),
+                    "errors": r.get("errors", 0),
+                    "percent": 100,
+                    "error_details": r.get("error_details", []),
+                }
+            return {"status": "completed", "total": 0, "done": 0, "success": 0, "errors": 0, "percent": 100}
+
+        if result.state == "FAILURE":
+            return {
+                "status": "failed",
+                "total": 0, "done": 0, "success": 0, "errors": 0, "percent": 0,
+                "error": str(result.info) if result.info else "Неизвестная ошибка",
+            }
+
+        # PENDING / STARTED / RECEIVED
         return {
             "status": "pending",
-            "current": 0, "total": 0, "percent": 0,
-            "success": 0, "errors": 0, "error_details": [],
+            "total": 0, "done": 0, "success": 0, "errors": 0, "percent": 0,
         }
+
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        logger.warning(f"Не удалось получить прогресс задачи {task_id}: {e}")
+        return {
+            "status": "failed",
+            "total": 0, "done": 0, "success": 0, "errors": 0, "percent": 0,
+            "error": str(e),
+        }
 
 
 def _resolve_target_category(category_name: str, product_name: str, target_platform: str):
@@ -80,6 +105,10 @@ def _resolve_target_category(category_name: str, product_name: str, target_platf
     return auto_map.get("name", "Неизвестно"), map_text
 
 
+# ---------------------------------------------------------------------------
+# Одиночная миграция
+# ---------------------------------------------------------------------------
+
 @celery_app.task(bind=True, name="tasks.migrate_product_task")
 def migrate_product_task(self, product_id: int, target_platform: str,
                          user_id: int, edited_data: dict = None):
@@ -87,6 +116,9 @@ def migrate_product_task(self, product_id: int, target_platform: str,
     Фоновая задача для одиночной миграции товара.
     ВАЖНО: проверяет, что товар принадлежит user_id, перед обновлением.
     """
+    t0 = time.perf_counter()                 # ✅ t0 в самом начале
+    final_price = None                       # ✅ защита от NameError в except
+
     try:
         product = repo.get_by_id(product_id, user_id=user_id)
         if not product:
@@ -122,8 +154,8 @@ def migrate_product_task(self, product_id: int, target_platform: str,
         price_multiplier = PRICE_RULES.get(target_platform, 1.0)
         final_price = round(original_price * price_multiplier, 2)
 
-        # Заглушка для имитации работы с API (в prod убрать)
-        time.sleep(1)
+        # Небольшая задержка, чтобы было видно статус "processing" в UI
+        time.sleep(0.3)
 
         final_name = edited_data.get("name") if edited_data else product.get("name")
         new_source = f"{product['source']} → {PLATFORM_CONFIG[target_platform]['name']}"
@@ -138,11 +170,12 @@ def migrate_product_task(self, product_id: int, target_platform: str,
             "error_message": None,
         }, user_id=user_id)
 
-        t0 = time.perf_counter()
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+
         stats_repo.record(
             user_id=user_id, operation="migrate", platform=target_platform,
             status="success", total_items=1, success_items=1,
-            duration_ms=int((time.perf_counter() - t0) * 1000),
+            duration_ms=duration_ms,
         )
 
         # --- ✅ Журнал миграции ---
@@ -170,33 +203,58 @@ def migrate_product_task(self, product_id: int, target_platform: str,
 
     except Exception as e:
         logger.error(f"❌ Ошибка миграции товара {product_id}: {e}")
-        repo.update(product_id, {"status": "error", "error_message": str(e)}, user_id=user_id)
-        stats_repo.record(user_id=user_id, operation="migrate",
-            platform=target_platform, status="error", total_items=1,
-            failed_items=1,
-            duration_ms=int((time.perf_counter() - t0) * 1000))
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+        try:
+            repo.update(product_id, {"status": "error", "error_message": str(e)}, user_id=user_id)
+        except Exception:
+            pass
+        try:
+            stats_repo.record(
+                user_id=user_id, operation="migrate", platform=target_platform,
+                status="error", total_items=1, failed_items=1,
+                duration_ms=duration_ms,
+            )
+        except Exception:
+            pass
         # --- ✅ Журнал ошибки миграции ---
-        op_log.log_migration(
-            user_id=user_id,
-            product_id=product_id,
-            product_name=None,
-            source_platform=None,
-            target_platform=target_platform,
-            status="error",
-            error_message=str(e),
-            is_batch=False,
-            batch_id=self.request.id,
-        )
+        try:
+            op_log.log_migration(
+                user_id=user_id,
+                product_id=product_id,
+                product_name=None,
+                source_platform=None,
+                target_platform=target_platform,
+                status="error",
+                error_message=str(e),
+                is_batch=False,
+                batch_id=self.request.id,
+            )
+        except Exception:
+            pass
         return {"status": "error", "message": str(e)}
 
+
+# ---------------------------------------------------------------------------
+# Пакетная миграция
+# ---------------------------------------------------------------------------
 
 @celery_app.task(bind=True, name="tasks.migrate_batch_task")
 def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: int):
     """Пакетная миграция товаров с отслеживанием прогресса и журналом"""
+    t0 = time.perf_counter()                 # ✅ t0 в самом начале
     total = len(product_ids)
     success_count = 0
     error_count = 0
     errors = []
+
+    # Сразу публикуем "старт": 0%
+    self.update_state(
+        state="PROGRESS",
+        meta={
+            "total": total, "done": 0, "success": 0, "errors": 0,
+            "percent": 0, "error_details": [],
+        },
+    )
 
     for index, product_id in enumerate(product_ids, 1):
         try:
@@ -204,16 +262,24 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
             if not product:
                 error_count += 1
                 errors.append({"id": product_id, "error": "Товар не найден или не принадлежит вам"})
-
-                # --- ✅ Журнал: товар не найден ---
-                op_log.log_migration(
-                    user_id=user_id, product_id=product_id, product_name=None,
-                    source_platform=None, target_platform=target_platform,
-                    status="error", error_message="Товар не найден или не принадлежит вам",
-                    is_batch=True, batch_id=self.request.id,
+                try:
+                    op_log.log_migration(
+                        user_id=user_id, product_id=product_id, product_name=None,
+                        source_platform=None, target_platform=target_platform,
+                        status="error", error_message="Товар не найден или не принадлежит вам",
+                        is_batch=True, batch_id=self.request.id,
+                    )
+                except Exception:
+                    pass
+                self.update_state(
+                    state="PROGRESS",
+                    meta={
+                        "total": total, "done": index,
+                        "success": success_count, "errors": error_count,
+                        "percent": int(index * 100 / total) if total else 0,
+                        "error_details": errors[:10],
+                    },
                 )
-                update_progress(self.request.id, index, total, "processing",
-                                success_count, error_count, errors)
                 continue
 
             # --- Запоминаем старые значения ---
@@ -230,7 +296,7 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
             if mapping and mapping.get("is_manual"):
                 target_category_name = mapping["target_category_name"]
             else:
-                target_category_name, map_text = _resolve_target_category(
+                target_category_name, _ = _resolve_target_category(
                     category_name, product.get("name"), target_platform
                 )
 
@@ -239,34 +305,34 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
             price_multiplier = PRICE_RULES.get(target_platform, 1.0)
             final_price = round(original_price * price_multiplier, 2)
 
-            # Заглушка для имитации работы с API (в prod убрать)
-            time.sleep(1)
-
             new_source = f"{product['source']} → {PLATFORM_CONFIG[target_platform]['name']}"
             repo.update(product_id, {
                 "status": "success",
                 "source": new_source,
-                "price": final_price,               # ✅ обновляем цену
-                "mapped_category": target_category_name,  # ✅ сохраняем категорию
+                "price": final_price,
+                "mapped_category": target_category_name,
                 "error_message": None,
             }, user_id=user_id)
 
             # --- ✅ Журнал успешной миграции ---
-            op_log.log_migration(
-                user_id=user_id,
-                product_id=product_id,
-                product_name=product.get("name"),
-                source_platform=source_platform,
-                target_platform=target_platform,
-                old_price=old_price,
-                new_price=final_price,
-                old_category=old_category,
-                new_category=target_category_name,
-                status="success",
-                error_message=None,
-                is_batch=True,
-                batch_id=self.request.id,
-            )
+            try:
+                op_log.log_migration(
+                    user_id=user_id,
+                    product_id=product_id,
+                    product_name=product.get("name"),
+                    source_platform=source_platform,
+                    target_platform=target_platform,
+                    old_price=old_price,
+                    new_price=final_price,
+                    old_category=old_category,
+                    new_category=target_category_name,
+                    status="success",
+                    error_message=None,
+                    is_batch=True,
+                    batch_id=self.request.id,
+                )
+            except Exception:
+                pass
 
             success_count += 1
             logger.info(f"✅ Товар {product_id} мигрирован (цена: {old_price} → {final_price})")
@@ -274,44 +340,72 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
         except Exception as e:
             error_count += 1
             errors.append({"id": product_id, "error": str(e)})
-            repo.update(product_id, {"status": "error", "error_message": str(e)}, user_id=user_id)
+            try:
+                repo.update(product_id, {"status": "error", "error_message": str(e)}, user_id=user_id)
+            except Exception:
+                pass
+            try:
+                op_log.log_migration(
+                    user_id=user_id,
+                    product_id=product_id,
+                    product_name=None,
+                    source_platform=None,
+                    target_platform=target_platform,
+                    status="error",
+                    error_message=str(e),
+                    is_batch=True,
+                    batch_id=self.request.id,
+                )
+            except Exception:
+                pass
 
-            # --- ✅ Журнал ошибки миграции ---
-            op_log.log_migration(
-                user_id=user_id,
-                product_id=product_id,
-                product_name=None,
-                source_platform=None,
-                target_platform=target_platform,
-                status="error",
-                error_message=str(e),
-                is_batch=True,
-                batch_id=self.request.id,
+        # ✅ ПУБЛИКАЦИЯ ПРОГРЕССА после каждой итерации через self.update_state
+        try:
+            self.update_state(
+                state="PROGRESS",
+                meta={
+                    "total": total,
+                    "done": index,
+                    "success": success_count,
+                    "errors": error_count,
+                    "percent": int(index * 100 / total) if total else 0,
+                    "error_details": errors[:10],
+                },
             )
+        except Exception as e:
+            logger.warning(f"Не удалось опубликовать прогресс: {e}")
 
-        update_progress(self.request.id, index, total, "processing",
-                        success_count, error_count, errors)
+    duration_ms = int((time.perf_counter() - t0) * 1000)
+    logger.info(
+        f"✅ Пакетная миграция завершена пользователем {user_id}: "
+        f"{success_count}/{total} успешно за {duration_ms} мс"
+    )
 
-    result = {
+    try:
+        stats_repo.record(
+            user_id=user_id, operation="migrate", platform=target_platform,
+            status="success" if error_count == 0 else "partial",
+            total_items=total, success_items=success_count, failed_items=error_count,
+            duration_ms=duration_ms,
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось записать статистику пакета: {e}")
+
+    # ✅ Возвращаем финальный результат — Celery сам сохранит его в SUCCESS
+    return {
         "status": "completed",
         "total": total,
         "success": success_count,
         "errors": error_count,
         "error_details": errors[:10],
         "percent": 100,
+        "duration_ms": duration_ms,
     }
-    celery_app.backend.store_result(self.request.id, result, state="SUCCESS")
-    logger.info(
-        f"✅ Пакетная миграция завершена пользователем {user_id}: "
-        f"{success_count}/{total} успешно"
-    )
-    stats_repo.record(
-        user_id=user_id, operation="migrate", platform=target_platform,
-        status="success" if error_count == 0 else "partial",
-        total_items=total, success_items=success_count, failed_items=error_count,
-        duration_ms=int((time.perf_counter() - t0) * 1000),
-    )
-    return result
+
+
+# ---------------------------------------------------------------------------
+# Скачивание фото
+# ---------------------------------------------------------------------------
 
 @celery_app.task(bind=True, name="tasks.download_photos_task")
 def download_photos_task(self, product_id: int, user_id: int):
@@ -328,16 +422,19 @@ def download_photos_task(self, product_id: int, user_id: int):
 
     saved = download_photos(product_id, urls)
 
-    op_log.log_file_operation(
-        user_id=user_id,
-        operation="media_download",
-        platform=None,
-        filename=f"товар #{product_id}",
-        status="success" if saved else "error",
-        total_rows=len(urls),
-        imported=len(saved),
-        failed=len(urls) - len(saved),
-    )
+    try:
+        op_log.log_file_operation(
+            user_id=user_id,
+            operation="media_download",
+            platform=None,
+            filename=f"товар #{product_id}",
+            status="success" if saved else "error",
+            total_rows=len(urls),
+            imported=len(saved),
+            failed=len(urls) - len(saved),
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось записать лог скачивания фото: {e}")
 
     logger.info(f"💾 Товар {product_id}: скачано {len(saved)} из {len(urls)} фото")
     return {"status": "completed", "saved": len(saved), "total": len(urls)}

@@ -1,4 +1,25 @@
-const API_URL = 'http://localhost:8000/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+
+const authHeaders = () => {
+  const token = localStorage.getItem('token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+async function safeError(res, fallback) {
+  try {
+    const data = await res.json();
+    if (data.detail) {
+      return Array.isArray(data.detail)
+        ? data.detail.map(d => `${(d.loc || []).join('.')} — ${d.msg}`).join('; ')
+        : String(data.detail);
+    }
+    return data.message || fallback;
+  } catch {
+    return `${fallback} (HTTP ${res.status})`;
+  }
+}
+
+
 
 const getHeaders = () => {
   const token = localStorage.getItem('token');
@@ -201,17 +222,35 @@ export const api = {
     return data;
   },
 
-  migrateBatch: async (productIds, targetPlatform) => {
+  migrateBatch: async (productIds, platform) => {
+    const ids = productIds.map(id => Number(id)).filter(id => !isNaN(id) && id > 0);
+    if (ids.length === 0) throw new Error('Нет валидных товаров для миграции');
+
     const res = await fetch(`${API_URL}/migrate/batch`, {
       method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ product_ids: productIds, target_marketplace: targetPlatform })
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_ids: ids,        // ✅ массив чисел
+        platform: platform,      // ✅ строка: ozon | wildberries | yandex | magnit
+      }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Ошибка пакетной миграции');
-    return data;
-  },
 
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const errData = await res.json();
+        if (errData.detail) {
+          if (Array.isArray(errData.detail)) {
+            msg = errData.detail.map(d => `${d.loc?.join('.')} — ${d.msg}`).join('; ');
+          } else {
+            msg = errData.detail;
+          }
+        }
+      } catch { /* не JSON */ }
+      throw new Error(msg);
+    }
+    return res.json();
+  },
   getTaskProgress: async (taskId) => {
     const res = await fetch(`${API_URL}/tasks/${taskId}/progress`, { headers: getHeaders() });
     const data = await res.json();
@@ -336,6 +375,24 @@ export const api = {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Ошибка сохранения фото');
     return data;
+  },
+
+  startBatchMigration: async (ids, platform) => {
+    const res = await fetch(`${API_URL}/migrate/batch`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_ids: ids, platform }),
+    });
+    if (!res.ok) throw new Error('Не удалось запустить миграцию');
+    return res.json();
+  },
+
+  getBatchProgress: async (batchId) => {
+    const res = await fetch(`${API_URL}/migrate/batch/${batchId}/progress`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) throw new Error('Не удалось получить прогресс миграции');
+    return res.json();
   },
 
   downloadPhotos: async (productId) => {
