@@ -1,20 +1,28 @@
 """
 Роутер экспорта: выгрузка файлов для ЛК площадок, предпросмотр, валидация, шаблоны.
+
+Rate-limits (на идентификатор: user_id или IP):
+  - /export/preview/{platform}    : 30/min          (лёгкий предпросмотр)
+  - /export/template/{platform}   : 10/min          (шаблоны)
+  - /export/platform/{platform}   : 10/min, 100/day (генерация XLSX)
+  - /export/report                : 5/min, 50/day   (отчёт по всем товарам)
 """
 import io
 import logging
+import time
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+
 import pandas as pd
-from database.repository import repo, op_log
-from database.models import User
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
+
 from core.auth import get_current_user
 from core.platforms import Platform
+from core.rate_limit import limiter
+from database.models import User
+from database.repository import repo, op_log, stats_repo
 from services.export_builder import build_upload_file, build_rows
 from services.export_validator import validate_products, validate_product, has_errors
-import time
-from database.repository import repo, op_log, stats_repo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Export"])
@@ -31,8 +39,11 @@ def _get_products_for_export(current_user: User, status: str) -> list:
     return products
 
 
+# ==================== ПРЕДПРОСМОТР ВЫГРУЗКИ ====================
+@limiter.limit("30/minute")
 @router.get("/export/preview/{platform}")
 def export_preview(
+    request: Request,                                   # ← добавлен для slowapi
     platform: str,
     status: str = "success",
     current_user: User = Depends(get_current_user),
@@ -55,8 +66,11 @@ def export_preview(
     return {"success": True, "columns": columns, "rows": rows, "validation": validation}
 
 
+# ==================== ШАБЛОН ВЫГРУЗКИ ====================
+@limiter.limit("10/minute")
 @router.get("/export/template/{platform}")
 def export_template(
+    request: Request,                                   # ← добавлен для slowapi
     platform: str,
     current_user: User = Depends(get_current_user),
 ):
@@ -102,11 +116,15 @@ def export_template(
     )
 
 
+# ==================== ФАЙЛ ДЛЯ ЛК ПЛОЩАДКИ ====================
+@limiter.limit("10/minute;100/day")
 @router.get("/export/platform/{platform}")
 def export_for_platform(
+    request: Request,                                   # ← добавлен для slowapi
     platform: str,
     status: str = "success",
-    current_user: User = Depends(get_current_user),):
+    current_user: User = Depends(get_current_user),
+):
     """Файл XLSX для загрузки в ЛК площадки. Товары с ошибками валидации исключаются."""
     if platform not in Platform.all_values():
         raise HTTPException(status_code=404, detail=f"Платформа '{platform}' не найдена")
@@ -160,8 +178,13 @@ def export_for_platform(
     )
 
 
+# ==================== ОТЧЁТ ПО ВСЕМ ТОВАРАМ ====================
+@limiter.limit("5/minute;50/day")
 @router.get("/export/report")
-def export_migration_report(current_user: User = Depends(get_current_user)):
+def export_migration_report(
+    request: Request,                                   # ← добавлен для slowapi
+    current_user: User = Depends(get_current_user),
+):
     """Excel-отчёт по товарам текущего пользователя."""
     is_admin = current_user.role == "admin"
     result = repo.get_all(user_id=current_user.id, is_admin=is_admin, limit=10000)
