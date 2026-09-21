@@ -7,18 +7,32 @@
 
 Все операции логируются в file_operation_logs (журнал)
 и import_export_stats (статистика с замером времени).
+
+Rate-limits (на идентификатор: user_id или IP):
+  - /import/preview : 30/min
+  - /import (key/yml): 10/min, 100/day
+  - /import/file    : 10/min, 100/day
 """
 import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    UploadFile,
+    File,
+    Form,
+    Request,
+)
 from pydantic import BaseModel
 
-from database.repository import repo, op_log, stats_repo, variant_repo
-from database.models import User
-from models.schemas import ProductCreate
 from core.auth import get_current_user
 from core.platforms import PLATFORM_CONFIG
+from core.rate_limit import limiter
+from database.models import User
+from database.repository import repo, op_log, stats_repo, variant_repo
+from models.schemas import ProductCreate
 from parsers.file_parser import parse_file, preview_file
 from parsers.yml_parser import YmlParser
 
@@ -42,9 +56,10 @@ def _source_label(platform: str) -> str:
 
 
 # ==================== ПРЕДПРОСМОТР ФАЙЛА ====================
-
+@limiter.limit("30/minute")
 @router.post("/import/preview")
 async def preview_import(
+    request: Request,                                       # ← добавлен для slowapi
     platform: str = Form(...),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -71,15 +86,16 @@ async def preview_import(
 
 
 # ==================== ИМПОРТ ПО КЛЮЧУ / YML / МОК ====================
-
+@limiter.limit("10/minute;100/day")
 @router.post("/import")
 async def import_products(
-    request: ImportRequest,
+    request: Request,                                       # ← добавлен для slowapi
+    payload: ImportRequest,                                 # ← переименован (был request)
     current_user: User = Depends(get_current_user),
 ):
     """Импорт по API-ключу, мок-ключу или YML-ссылке."""
     t0 = time.perf_counter()
-    auth_key = request.get_key()
+    auth_key = payload.get_key()                            # ← использование нового имени
 
     if not auth_key:
         raise HTTPException(status_code=400, detail="Не указан API-ключ или YML-ссылка")
@@ -253,9 +269,10 @@ async def import_products(
 
 
 # ==================== ИМПОРТ ИЗ ФАЙЛА (XLSX / CSV) ====================
-
+@limiter.limit("10/minute;100/day")
 @router.post("/import/file")
 async def import_from_file(
+    request: Request,                                       # ← добавлен для slowapi
     platform: str = Form(...),
     mode: str = Form("create"),   # create | upsert
     file: UploadFile = File(...),
@@ -326,7 +343,7 @@ async def import_from_file(
     updated = 0
 
     for p_data in products_data:
-        payload = dict(
+        payload_dict = dict(
             name=p_data.get("name"),
             source=source_label,
             price=p_data.get("price", 0),
@@ -352,12 +369,12 @@ async def import_from_file(
             )
 
         if existing:
-            repo.update(existing["id"], payload, user_id=current_user.id)
+            repo.update(existing["id"], payload_dict, user_id=current_user.id)
             if variants:
                 variant_repo.set_variants(existing["id"], variants)
             updated += 1
         else:
-            product_obj = ProductCreate(user_id=current_user.id, **payload)
+            product_obj = ProductCreate(user_id=current_user.id, **payload_dict)
             created = repo.add(product_obj)
             if created and variants:
                 variant_repo.set_variants(created["id"], variants)
@@ -374,7 +391,7 @@ async def import_from_file(
     if warnings:
         message += ". " + " ".join(w["message"] for w in warnings)
 
-    status = "success" if not errors else "partial"
+    status_val = "success" if not errors else "partial"
 
     op_log.log_file_operation(
         user_id=current_user.id,
@@ -382,7 +399,7 @@ async def import_from_file(
         platform=platform,
         filename=file.filename,
         mode=mode,
-        status=status,
+        status=status_val,
         total_rows=result["total_rows"],
         imported=imported,
         updated=updated,
@@ -393,7 +410,7 @@ async def import_from_file(
         user_id=current_user.id,
         operation="import_file",
         platform=platform,
-        status=status,
+        status=status_val,
         total_items=result["total_rows"],
         success_items=imported + updated,
         failed_items=len(errors),
