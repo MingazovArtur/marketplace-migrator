@@ -36,6 +36,7 @@ class UserResponse(BaseModel):
     email: str
     username: str
     role: str = "user"
+    email_verified_at: datetime | None = None 
     is_active: bool
     created_at: datetime
 
@@ -167,3 +168,15 @@ class Stats(BaseModel):
     success: int
     error: int
     processing: int
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=6)
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str

@@ -1,28 +1,41 @@
 """
 Роутер аутентификации (регистрация, вход, профиль)
 """
+import asyncio
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
-from database.session import SessionLocal
-from database.models import User
-from database.access_log import log_access, get_client_ip
+
 from core.auth import (
-    get_current_user,
     create_access_token,
+    get_current_user,
     get_password_hash,
     verify_password,
 )
+from core.rate_limit import limiter
+from database.access_log import get_client_ip, log_access
+from database.models import User
+from database.session import SessionLocal
 from models.schemas import UserCreate, UserLogin, UserResponse, Token
+from services.email_service import send_verification_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 security = HTTPBearer()
 
 
+# ============================================================
+# Регистрация: 10 попыток в день на идентификатор (IP или user_id)
+# ============================================================
+@limiter.limit("10/day")
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(payload: UserCreate, request: Request):
-    """Регистрация нового пользователя с логированием доступа"""
+async def register(
+    payload: UserCreate,
+    request: Request,
+    background_tasks: BackgroundTasks,      # ← добавлено
+):
+    """Регистрация нового пользователя с логированием доступа и отправкой письма подтверждения."""
     if len(payload.password) < 6:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -65,6 +78,30 @@ async def register(payload: UserCreate, request: Request):
             log_access(user_id=user.id, username=user.username, action="consent_accepted", ip=ip, user_agent=ua)
 
         logger.info(f"✅ Зарегистрирован пользователь: {user.username} (id={user.id})")
+
+        # ✅ Отправка письма подтверждения (в фоне, после ответа клиенту)
+        # Детачим значения пользователя от сессии, чтобы background task работал после db.close()
+        user_snapshot = {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+        }
+
+        async def _safe_send():
+            try:
+                # Перечитываем пользователя в background-контексте (новая сессия)
+                bg_db = SessionLocal()
+                try:
+                    bg_user = bg_db.query(User).filter(User.id == user_snapshot["id"]).first()
+                    if bg_user:
+                        await send_verification_email(bg_user)
+                finally:
+                    bg_db.close()
+            except Exception as e:
+                logger.error(f"📧 ❌ Не удалось отправить письмо подтверждения {user_snapshot['email']}: {e}")
+
+        background_tasks.add_task(_safe_send)
+
         return user
 
     except HTTPException:
@@ -80,6 +117,10 @@ async def register(payload: UserCreate, request: Request):
         db.close()
 
 
+# ============================================================
+# Логин: 5 попыток в минуту (защита от брутфорса)
+# ============================================================
+@limiter.limit("5/minute")
 @router.post("/login", response_model=Token)
 async def login(payload: UserLogin, request: Request):
     """Вход: возвращает JWT-токен с логированием"""
@@ -110,8 +151,12 @@ async def login(payload: UserLogin, request: Request):
         db.close()
 
 
+# ============================================================
+# Логаут: 10 в минуту (защита от флуда)
+# ============================================================
+@limiter.limit("10/minute")
 @router.post("/logout")
-async def logout(current_user: User = Depends(get_current_user), request: Request):
+async def logout(request: Request, current_user: User = Depends(get_current_user)):
     """Выход с логированием"""
     ip = get_client_ip(request)
     ua = request.headers.get("user-agent")
@@ -120,6 +165,9 @@ async def logout(current_user: User = Depends(get_current_user), request: Reques
     return {"message": "Вы вышли из системы"}
 
 
+# ============================================================
+# Профиль: без лимитов (покрывается глобальным 100/min из middleware)
+# ============================================================
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
     """Текущий авторизованный пользователь"""
