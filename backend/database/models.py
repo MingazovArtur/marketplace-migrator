@@ -1,7 +1,7 @@
 """
 Модели базы данных SQLAlchemy
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Index, JSON
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, func, Index, JSON
 from sqlalchemy.orm import relationship, declarative_base
 from datetime import datetime
 
@@ -11,7 +11,7 @@ Base = declarative_base()
 class User(Base):
     """Модель пользователя"""
     __tablename__ = "users"
-
+    email_verified_at = Column(DateTime, nullable=True)   # когда подтвердил email
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     username = Column(String, unique=True, index=True, nullable=False)
@@ -70,7 +70,6 @@ class CategoryMapping(Base):
     __table_args__ = (
         Index('idx_mapping_lookup', 'source_platform', 'source_category_id', 'target_platform'),
     )
-
 
 class Product(Base):
     """Модель товара (расширенная под богатую модель данных)"""
@@ -195,3 +194,16 @@ class ImportExportStats(Base):
     failed_items = Column(Integer, default=0)
     duration_ms = Column(Integer, default=0)     # время обработки, мс
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class PasswordResetToken(Base):
+    """Одноразовый токен сброса пароля (TTL 1 час)."""
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    token_hash = Column(String(64), nullable=False, unique=True)   # SHA-256 от токена
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    user = relationship("User", backref="reset_tokens")

@@ -4,12 +4,14 @@
 Все секреты и параметры окружения читаются из переменных окружения
 и файла .env через pydantic-settings. В коде секретов НЕТ.
 """
+import json
 import logging
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
-from pydantic import model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -18,55 +20,112 @@ DEV_SECRET_FALLBACK = "dev-only-insecure-key-change-me"
 
 
 class Settings(BaseSettings):
-    """Настройки приложения. Приоритет: env-переменные > .env > дефолты."""
+    """Настройки приложения. Приоритет: env-переменные > .env > дефолты.
+    Все поля в UPPERCASE, чтобы совпадать с .env и обращениями в коде."""
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),  # ищем в backend/ и в корне проекта
         env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
+        case_sensitive=False,          # для env-чтения регистр не важен
+        extra="ignore",                # игнорируем лишние переменные из .env
     )
 
     # --- Окружение ---
-    environment: str = "development"  # development | production
+    ENVIRONMENT: str = "development"  # development | production
 
     # --- Безопасность (секреты) ---
-    secret_key: str = DEV_SECRET_FALLBACK
-    algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60 * 24  # 24 часа
+    SECRET_KEY: str = DEV_SECRET_FALLBACK
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 часа
 
     # --- База данных ---
-    database_url: str = ""  # пусто -> sqlite-fallback для разработки
+    DATABASE_URL: str = ""  # пусто -> sqlite-fallback для разработки
+    POSTGRES_USER: str = "migrator_user"
+    POSTGRES_PASSWORD: str = ""
+    POSTGRES_DB: str = "marketplace_migrator"
 
-    # --- CORS ---
-    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    # --- Redis (Celery + rate-limit) ---
+    REDIS_URL: str = "redis://redis:6379/0"
+
+        # --- Email (SMTP) ---
+    SMTP_HOST: str = ""             # smtp.yandex.ru | sandbox.smtp.mailtrap.io
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""             # noreply@kartovoz.ru
+    SMTP_PASSWORD: str = ""         # пароль приложения (не основной!)
+    SMTP_FROM_EMAIL: str = ""       # noreply@kartovoz.ru
+    SMTP_FROM_NAME: str = "Marketplace Migrator"
+    SMTP_TLS: bool = True
+
+    # --- Базовый URL для ссылок в письмах ---
+    PUBLIC_URL: str = "http://localhost:5173"   # в проде → https://kartovoz.ru
+
+    # --- Домен ---
+    APP_DOMAIN: str = ""
+
+    # --- CORS (all-eating: JSON-массив или CSV) ---
+    # NoDecode запрещает Pydantic парсить JSON самому — наш парсер ниже сделает это надёжнее
+    CORS_ORIGINS: Annotated[list[str], NoDecode] = []
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _parse_cors(cls, v):
+        """Принимает:
+          - Python list (из тестов)
+          - JSON-массив: '["https://a.ru","http://b.ru"]'
+          - CSV-строку: 'https://a.ru,http://b.ru'
+          - пустую строку → []
+        """
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return []
+            if v.startswith("["):
+                try:
+                    parsed = json.loads(v)
+                    return parsed if isinstance(parsed, list) else []
+                except json.JSONDecodeError:
+                    return []
+            return [x.strip() for x in v.split(",") if x.strip()]
+        return []
+
+    # --- Sentry (опционально) ---
+    SENTRY_DSN: str = ""
+    SENTRY_ENVIRONMENT: str = "development"
+    SENTRY_RELEASE: str = "local"
+
+    # --- Админ-бутстрап (опционально) ---
+    ADMIN_USERNAME: str = ""
+    ADMIN_EMAIL: str = ""
+    ADMIN_PASSWORD: str = ""
 
     # --- Пути ---
-    base_dir: Path = Path(__file__).resolve().parent.parent
+    BASE_DIR: Path = Path(__file__).resolve().parent.parent
 
     @property
     def photos_dir(self) -> Path:
-        return self.base_dir / "photos"
+        return self.BASE_DIR / "photos"
 
     @property
     def data_dir(self) -> Path:
-        return self.base_dir / "data"
+        return self.BASE_DIR / "data"
 
     @property
     def resolved_database_url(self) -> str:
-        if self.database_url:
-            return self.database_url
-        return f"sqlite:///{self.base_dir / 'migrator.db'}"
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
+        return f"sqlite:///{self.BASE_DIR / 'migrator.db'}"
 
     @model_validator(mode="after")
     def _ensure_secret_is_set(self) -> "Settings":
         """Не даём запустить production без настоящего SECRET_KEY."""
-        if self.environment == "production" and self.secret_key == DEV_SECRET_FALLBACK:
+        if self.ENVIRONMENT == "production" and self.SECRET_KEY == DEV_SECRET_FALLBACK:
             raise ValueError(
                 "ENVIRONMENT=production, но SECRET_KEY не задан. "
                 "Укажите SECRET_KEY в .env или переменной окружения."
             )
-        if self.secret_key == DEV_SECRET_FALLBACK:
+        if self.SECRET_KEY == DEV_SECRET_FALLBACK:
             logger.warning("⚠️ Используется DEV-значение SECRET_KEY. Задайте SECRET_KEY в .env!")
         return self
 
@@ -86,10 +145,10 @@ settings.data_dir.mkdir(parents=True, exist_ok=True)
 # --- Обратная совместимость ---
 # Старые импорты вида `from core.config import SECRET_KEY, DATABASE_URL`
 # продолжают работать без правок auth.py / session.py.
-BASE_DIR = settings.base_dir
+BASE_DIR = settings.BASE_DIR
 PHOTOS_DIR = settings.photos_dir
 DATA_DIR = settings.data_dir
-SECRET_KEY = settings.secret_key
-ALGORITHM = settings.algorithm
-ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
+SECRET_KEY = settings.SECRET_KEY
+ALGORITHM = settings.JWT_ALGORITHM
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 DATABASE_URL = settings.resolved_database_url
