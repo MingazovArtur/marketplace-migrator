@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import Button from '../common/Button';
 import Icon from '../icons';
 
@@ -7,6 +7,41 @@ const STATUS_BADGE = {
   processing: { label: 'В работе', cls: 'badge-processing' },
   success: { label: 'Успешно', cls: 'badge-success' },
   error: { label: 'Ошибка', cls: 'badge-error' },
+};
+
+/* ✅ Ширины по умолчанию, подобранные под наполнение. */
+const DEFAULT_WIDTHS = {
+  check: 44,
+  name: 340,
+  price: 110,
+  source: 160,
+  attrs: 220,
+  status: 110,
+  actions: 280,   // ✅ расширено с 250 до 280 — добавилась кнопка "Логистика"
+};
+
+const WIDTHS_KEY = 'product_table_widths_v3';   // ✅ v3: сбрасывает ширины с v2
+
+/* ✅ Проверка готовности товара к экспорту (требования Ozon) */
+const getExportReadiness = (product) => {
+  const hasBarcode = !!product.barcode;
+  const hasDimensions = !!(
+    product.package_weight_grams &&
+    product.package_width_mm &&
+    product.package_height_mm &&
+    product.package_length_mm
+  );
+  const hasVat = !!product.vat_rate;
+  const filled = [hasBarcode, hasDimensions, hasVat].filter(Boolean).length;
+  return {
+    ready: filled === 3,
+    filled,
+    missing: {
+      barcode: !hasBarcode,
+      dimensions: !hasDimensions,
+      vat: !hasVat,
+    },
+  };
 };
 
 const ProductTable = ({
@@ -21,10 +56,69 @@ const ProductTable = ({
   onEditAttributes,
   onEditVariants,
   onEditPhotos,
-  hasActiveFilters = false,   // ✅ добавлено: есть ли активные фильтры
-  onResetFilters = null,      // ✅ добавлено: колбэк сброса фильтров
+  onEditLogistics,   // ✅ новый проп
+  hasActiveFilters = false,
+  onResetFilters = null,
 }) => {
   const allSelected = availableForBatch > 0 && selectedIds.length === availableForBatch;
+
+  /* ==================== Resize столбцов ==================== */
+  const [widths, setWidths] = useState(() => {
+    try {
+      const saved = localStorage.getItem(WIDTHS_KEY);
+      if (saved) return { ...DEFAULT_WIDTHS, ...JSON.parse(saved) };
+    } catch (e) { /* ignore */ }
+    return DEFAULT_WIDTHS;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(WIDTHS_KEY, JSON.stringify(widths));
+    } catch (e) { /* ignore */ }
+  }, [widths]);
+
+  const startResize = useCallback((e, key) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = e.currentTarget.closest('th');
+    const startX = e.pageX;
+    const startWidth = th.getBoundingClientRect().width;
+
+    const onMove = (ev) => {
+      const delta = ev.pageX - startX;
+      const newWidth = Math.max(60, Math.round(startWidth + delta));
+      setWidths((prev) => ({ ...prev, [key]: newWidth }));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, []);
+
+  const resetColumn = useCallback((key) => {
+    setWidths((prev) => {
+      const next = { ...prev };
+      if (key in DEFAULT_WIDTHS) next[key] = DEFAULT_WIDTHS[key];
+      else delete next[key];
+      return next;
+    });
+  }, []);
+
+  const colStyle = (key) =>
+    widths[key] ? { width: widths[key], minWidth: widths[key], maxWidth: widths[key] } : undefined;
+
+  const Resizer = ({ colKey }) => (
+    <span
+      className="col-resizer"
+      onMouseDown={(e) => startResize(e, colKey)}
+      onDoubleClick={() => resetColumn(colKey)}
+      title="Тяните для изменения ширины. Двойной клик — сброс."
+    />
+  );
 
   const emptyRows = useMemo(() => {
     if (products.length >= 10) return [];
@@ -46,7 +140,12 @@ const ProductTable = ({
     return (
       <div className="card">
         <div className="empty-state">
-          <div className="empty-state-icon">📦</div>
+          <div
+            className="empty-state-icon"
+            style={{ display: 'flex', justifyContent: 'center', color: 'var(--text-muted)' }}
+          >
+            <Icon name="products" size={56} />
+          </div>
           <p className="empty-state-text">
             {hasActiveFilters
               ? 'По выбранным фильтрам ничего не найдено.'
@@ -63,12 +162,12 @@ const ProductTable = ({
   }
 
   return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+    <div data-onboarding="products-table" className="card" style={{ padding: 0, overflow: 'hidden' }}>
       <div className="table-scroll">
-        <table>
+        <table className="product-table">
           <thead>
             <tr>
-              <th style={{ width: 48 }}>
+              <th style={colStyle('check')}>
                 <input
                   type="checkbox"
                   checked={allSelected}
@@ -76,13 +175,31 @@ const ProductTable = ({
                   disabled={availableForBatch === 0}
                   title="Выбрать все доступные для переноса"
                 />
+                <Resizer colKey="check" />
               </th>
-              <th>Название</th>
-              <th style={{ width: 110 }}>Цена</th>
-              <th style={{ width: 150 }}>Источник</th>
-              <th style={{ width: 200 }}>Характеристики</th>
-              <th style={{ width: 110 }}>Статус</th>
-              <th style={{ width: 300, textAlign: 'right' }}>Действия</th>
+              <th style={colStyle('name')}>
+                Название
+                <Resizer colKey="name" />
+              </th>
+              <th style={colStyle('price')}>
+                Цена
+                <Resizer colKey="price" />
+              </th>
+              <th style={colStyle('source')}>
+                Источник
+                <Resizer colKey="source" />
+              </th>
+              <th style={colStyle('attrs')}>
+                Характеристики
+                <Resizer colKey="attrs" />
+              </th>
+              <th style={colStyle('status')}>
+                Статус
+                <Resizer colKey="status" />
+              </th>
+              <th style={{ ...colStyle('actions'), textAlign: 'right' }}>
+                Действия
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -94,6 +211,17 @@ const ProductTable = ({
               const attrs = product.attributes || [];
               const variants = product.variants || [];
               const photos = product.photos || [];
+
+              // ✅ Индикатор готовности к экспорту
+              const readiness = getExportReadiness(product);
+              const missingLabels = [];
+              if (readiness.missing.barcode) missingLabels.push('штрихкод');
+              if (readiness.missing.dimensions) missingLabels.push('габариты упаковки');
+              if (readiness.missing.vat) missingLabels.push('ставка НДС');
+
+              const logisticsTitle = readiness.ready
+                ? `Логистика: штрихкод, габариты, НДС — заполнено (${readiness.filled}/3)`
+                : `Логистика: не заполнено: ${missingLabels.join(', ')} (${readiness.filled}/3)`;
 
               return (
                 <tr key={product.id} className={isSelected ? 'selected' : ''}>
@@ -146,7 +274,12 @@ const ProductTable = ({
                   </td>
                   <td>
                     <span className={`badge ${badge.cls}`}>
-                      {isProcessing ? '⏳ В работе' : badge.label}
+                      {isProcessing ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+                          В работе
+                        </span>
+                      ) : badge.label}
                     </span>
                   </td>
                   <td style={{ textAlign: 'right' }}>
@@ -177,6 +310,23 @@ const ProductTable = ({
                         <Icon name="variants" size={15} />
                         {variants.length > 0 && <span className="btn-count">{variants.length}</span>}
                       </Button>
+
+                      {/* ✅ Кнопка "Логистика" с индикатором готовности */}
+                      <Button
+                        variant="secondary"
+                        size="small"
+                        title={logisticsTitle}
+                        onClick={() => onEditLogistics && onEditLogistics(product)}
+                      >
+                        <Icon name="box" size={15} />
+                        <span
+                          className={`btn-count ${readiness.ready ? 'ready' : 'partial'}`}
+                          title={readiness.ready ? 'Готов к экспорту' : 'Требует заполнения'}
+                        >
+                          {readiness.filled}/3
+                        </span>
+                      </Button>
+
                       <Button
                         size="small"
                         title="Перенести на площадку"

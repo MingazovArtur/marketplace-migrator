@@ -8,6 +8,12 @@ from models.schemas import Stats, ProductBulkUpdate
 from core.auth import get_current_user
 from database.models import User
 from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from models.schemas import (
+    Product, ProductCreate, ProductBulkUpdate, ProductLogisticsUpdate
+)
+from database.session import get_db
 
 
 router = APIRouter(prefix="/api", tags=["Products"])
@@ -104,6 +110,29 @@ def get_stats(current_user: User = Depends(get_current_user)):
     is_admin = current_user.role == "admin"
     return repo.get_stats(user_id=current_user.id, is_admin=is_admin)
 
+@router.put("/products/{product_id}/logistics")
+def update_product_logistics(
+    product_id: int,
+    payload: ProductLogisticsUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    """Логистические данные товара: штрихкод, габариты упаковки, НДС, ОКПД."""
+    db = SessionLocal()
+    try:
+        product = (
+            db.query(Product)
+            .filter(Product.id == product_id, Product.user_id == current_user.id)
+            .first()
+        )
+        if not product:
+            raise HTTPException(status_code=404, detail="Товар не найден")
+
+        for field, value in payload.model_dump(exclude_unset=True).items():
+            setattr(product, field, value)
+        db.commit()
+        return {"success": True, "product_id": product.id}
+    finally:
+        db.close()
 
 @router.delete("/products/{product_id}")
 def delete_product(

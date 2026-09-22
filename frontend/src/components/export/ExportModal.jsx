@@ -3,6 +3,7 @@ import Button from '../common/Button';
 import Icon from '../icons';
 import { PLATFORMS } from '../../utils/platformUtils';
 import { api } from '../../api';
+import { ExportRequirementsChecklist, ExportValidationSummary } from './ExportSafety';
 
 const STATUS_OPTIONS = [
   { value: 'success', label: 'Только успешные' },
@@ -16,7 +17,7 @@ const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
   const [preview, setPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
-  const [downloaded, setDownloaded] = useState(false); // ✅ защита от повторных скачиваний
+  const [downloaded, setDownloaded] = useState(false);
 
   const loadPreview = useCallback(async () => {
     setPreviewLoading(true);
@@ -50,7 +51,7 @@ const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
   const downloadable = v ? v.ready + v.with_warnings : 0;
 
   const handleDownload = () => {
-    if (downloaded || loading) return;   // ✅ повторный клик игнорируется
+    if (downloaded || loading) return;
     setDownloaded(true);
     onExport(platform, status);
   };
@@ -92,13 +93,29 @@ const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
           </div>
         </div>
 
+        {/* ✅ Чек-лист требований площадки (из официальной документации) */}
+        <ExportRequirementsChecklist platform={platform} />
+
+        {/* ✅ Сводка готовности товаров к экспорту */}
+        <ExportValidationSummary platform={platform} />
+
         {/* Предпросмотр */}
-        {previewLoading && <div className="progress-status">⏳ Готовим предпросмотр...</div>}
+        {previewLoading && (
+          <div className="progress-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+            <div className="spinner spinner-dark" />
+            Готовим предпросмотр...
+          </div>
+        )}
         {previewError && <div className="alert alert-error"><div>{previewError}</div></div>}
 
         {v && v.total === 0 && (
           <div className="empty-state" style={{ padding: '1.5rem' }}>
-            <div className="empty-state-icon">📭</div>
+            <div
+              className="empty-state-icon"
+              style={{ display: 'flex', justifyContent: 'center', color: 'var(--text-muted)' }}
+            >
+              <Icon name="products" size={48} />
+            </div>
             <p className="empty-state-text">Нет товаров с выбранным статусом.</p>
           </div>
         )}
@@ -122,7 +139,7 @@ const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
 
             {v.issues && v.issues.length > 0 && (
               <div className="preview-errors">
-                <h4><Icon name="alert" size={16} /> Проблемные товары:</h4>
+                <h4><Icon name="warning" size={16} /> Проблемные товары:</h4>
                 <ul>
                   {v.issues.slice(0, 8).map((it) => (
                     <li key={it.product_id}>

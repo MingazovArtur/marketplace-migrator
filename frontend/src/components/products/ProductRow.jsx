@@ -39,7 +39,7 @@ const ProductRow = memo(({ product, isSelected, isMigrating, loading, onSelect, 
             onClick={() => onMigrate(product.id)}
             disabled={loading}
           >
-            🔄 Повторить
+            <Icon name="refresh" size={15} /> Повторить
           </button>
         ) : (
           <button
@@ -47,7 +47,12 @@ const ProductRow = memo(({ product, isSelected, isMigrating, loading, onSelect, 
             onClick={() => onMigrate(product.id)}
             disabled={loading || isMigrating}
           >
-            {isMigrating ? '⏳...' : 'Перенести'}
+            {isMigrating ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                <div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
+                В работе
+              </span>
+            ) : 'Перенести'}
           </button>
         )}
       </td>

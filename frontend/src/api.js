@@ -75,6 +75,48 @@ export const api = {
     return res.json();
   },
 
+  /* ==================== Email (верификация + восстановление) ==================== */
+
+  verifyEmail: async (token) => {
+    const res = await fetch(`${API_URL}/auth/verify-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось подтвердить email'));
+    return res.json();
+  },
+
+  resendVerification: async () => {
+    // требует авторизации — отправляем письмо текущему пользователю
+    const res = await fetch(`${API_URL}/auth/resend-verification`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось отправить письмо'));
+    return res.json();
+  },
+
+  forgotPassword: async (email) => {
+    const res = await fetch(`${API_URL}/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка запроса сброса'));
+    return res.json();
+  },
+
+  resetPassword: async (token, newPassword) => {
+    const res = await fetch(`${API_URL}/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, new_password: newPassword }),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось сбросить пароль'));
+    return res.json();
+  },
+
   /* ==================== Products ==================== */
 
   getProducts: async (params = {}) => {
@@ -314,6 +356,22 @@ export const api = {
   getStats: async () => {
     const res = await fetch(`${API_URL}/stats`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить статистику'));
+    return res.json();
+  },
+
+  updateLogistics: async (productId, payload) => {
+    const res = await fetch(`${API_URL}/products/${productId}/logistics`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка сохранения логистических данных'));
+    return res.json();
+  },
+
+  validateExport: async (platform) => {
+    const res = await fetch(`${API_URL}/export/validate/${platform}`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка проверки готовности к экспорту'));
     return res.json();
   },
 

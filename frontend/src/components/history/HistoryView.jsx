@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Button from '../common/Button';
 import Icon from '../icons';
 import { api } from '../../api';
+import EmptyState from '../common/EmptyState';
+
 
 const TYPE_META = {
   import:    { label: 'Импорт',   icon: 'import' },
@@ -56,6 +58,33 @@ const HistoryView = () => {
     load();
   }, [load]);
 
+  const renderEmptyState = () => {
+    // Сценарий 1: фильтр активен, но по нему ничего не найдено
+    if (filter) {
+      return (
+        <EmptyState
+          icon={<Icon name="search" size={56} />}
+          title="По выбранному фильтру ничего не найдено"
+          description="Попробуйте выбрать другой тип операции или сбросить фильтр."
+          actionLabel="Показать все операции"
+          onAction={() => setFilter('')}
+        />
+      );
+    }
+    // Сценарий 2: история полностью пуста
+    return (
+      <EmptyState
+        icon={<Icon name="history" size={56} />}
+        title="История операций пуста"
+        description="Здесь будут отображаться все ваши импорты, миграции и выгрузки. Импортируйте первый файл — и журнал заполнится."
+        actionLabel="Перейти к импорту"
+        onAction={() => { window.location.hash = '#/'; }}
+        secondaryLabel="Как это работает"
+        onSecondary={() => { window.location.hash = '#/help'; }}
+      />
+    );
+  };
+
   return (
     <>
       <header className="header">
@@ -86,14 +115,9 @@ const HistoryView = () => {
       {/* Таблица истории */}
       <div className="table-container">
         {loading ? (
-          <div className="progress-status">⏳ Загрузка истории...</div>
+          <div className="progress-status">Загрузка истории...</div>
         ) : history.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-icon">📜</div>
-            <p className="empty-state-text">
-              История пуста. Выполните импорт, миграцию или выгрузку — операции появятся здесь.
-            </p>
-          </div>
+          renderEmptyState()
         ) : (
           <div className="table-scroll">
             <table>

@@ -1,9 +1,12 @@
 """
 Модели базы данных SQLAlchemy
 """
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, func, Index, JSON
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, func, Index, UniqueConstraint, JSON
 from sqlalchemy.orm import relationship, declarative_base
 from datetime import datetime
+
+
+
 
 Base = declarative_base()
 
@@ -85,7 +88,16 @@ class Product(Base):
     photos_count = Column(Integer, default=0)
     category = Column(String, default="Не указана")
     mapped_category = Column(String, nullable=True)
-    error_message = Column(String, nullable=True) 
+    error_message = Column(String, nullable=True)
+    barcode = Column(String, nullable=True)                     # Штрихкод / EAN
+    weight_grams = Column(Integer, nullable=True)               # Вес товара, г
+    package_weight_grams = Column(Integer, nullable=True)       # Вес в упаковке, г
+    package_width_mm = Column(Integer, nullable=True)           # Ширина упаковки, мм
+    package_height_mm = Column(Integer, nullable=True)          # Высота упаковки, мм
+    package_length_mm = Column(Integer, nullable=True)          # Длина упаковки, мм
+    vat_rate = Column(String, nullable=True)                    # НДС: none | 10 | 22
+    okpd_code = Column(String, nullable=True)                   # Код ОКПД/ТН ВЭД (маркировка)
+    units_per_item = Column(Integer, nullable=True, default=1)  # Единиц в одном товаре
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # --- Богатая модель данных ---
@@ -207,3 +219,26 @@ class PasswordResetToken(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     user = relationship("User", backref="reset_tokens")
+
+class PlatformCategorySpec(Base):
+    """
+    Спецификация категории площадки: обязательные поля, атрибуты, словари значений.
+    Источник: официальный API площадки. Обновляется по запросу пользователя или cron.
+    """
+    __tablename__ = "platform_category_specs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    platform = Column(String, nullable=False, index=True)              # ozon | yandex | wildberries
+    category_id = Column(String, nullable=False, index=True)           # id категории на площадке
+    category_name = Column(String, nullable=False)                     # человекочитаемое имя
+    parent_category_id = Column(String, nullable=True)                 # родительская категория
+    spec = Column(JSON, nullable=False, default=dict)                  # вся спека (см. ниже структуру)
+    fetched_at = Column(DateTime, default=datetime.utcnow)             # когда подтянули с API
+    version = Column(String, nullable=True)                            # хэш для детекта изменений
+
+    user = relationship("User", backref="category_specs")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "platform", "category_id", name="uq_user_platform_category"),
+    )

@@ -74,7 +74,7 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
     setDownloading(true);
     try {
       const data = await api.downloadPhotos(product.id);
-      notify(`💾 Скачивание запущено в фоне (${data.photos} фото)`);
+      notify(`Скачивание запущено в фоне (${data.photos} фото)`);
     } catch (e) {
       notify('❌ ' + e.message);
     } finally {

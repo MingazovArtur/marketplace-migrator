@@ -3,7 +3,7 @@ Pydantic-схемы API
 """
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 # ========== Аутентификация ==========
@@ -12,16 +12,18 @@ class UserCreate(BaseModel):
     email: EmailStr
     username: str
     password: str
-    consent: bool = False 
+    consent: bool = False
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "email": "user@example.com",
                 "username": "seller123",
                 "password": "securePassword123",
+                "consent": True,
             }
         }
+    )
 
 
 class UserLogin(BaseModel):
@@ -36,12 +38,11 @@ class UserResponse(BaseModel):
     email: str
     username: str
     role: str = "user"
-    email_verified_at: datetime | None = None 
+    email_verified_at: datetime | None = None
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class Token(BaseModel):
@@ -55,7 +56,20 @@ class TokenData(BaseModel):
     user_id: Optional[int] = None
 
 
-# ========== Характеристики товаров (ДО ProductBase!) ==========
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=6)
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+# ========== Характеристики товаров ==========
 class ProductAttributeBase(BaseModel):
     """Базовая схема характеристики товара"""
     name: str
@@ -69,13 +83,13 @@ class ProductAttribute(ProductAttributeBase):
     id: Optional[int] = None
     product_id: Optional[int] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProductAttributeCreate(ProductAttributeBase):
     """Схема создания характеристики"""
     product_id: Optional[int] = None
+
 
 # ========== Вариации товаров ==========
 class ProductVariantBase(BaseModel):
@@ -92,12 +106,12 @@ class ProductVariant(ProductVariantBase):
     id: Optional[int] = None
     product_id: Optional[int] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProductVariantCreate(ProductVariantBase):
     product_id: Optional[int] = None
+
 
 # ========== Товары ==========
 class ProductBase(BaseModel):
@@ -118,6 +132,17 @@ class ProductBase(BaseModel):
     attributes: Optional[List[ProductAttribute]] = Field(default_factory=list)
     variants: Optional[List[ProductVariant]] = Field(default_factory=list)
 
+    # ✅ Логистические данные для экспорта на маркетплейсы (требования Ozon/Яндекс)
+    barcode: Optional[str] = None                    # Штрихкод / EAN
+    weight_grams: Optional[int] = None               # Вес товара, г
+    package_weight_grams: Optional[int] = None       # Вес в упаковке, г
+    package_width_mm: Optional[int] = None           # Ширина упаковки, мм
+    package_height_mm: Optional[int] = None          # Высота упаковки, мм
+    package_length_mm: Optional[int] = None          # Длина упаковки, мм
+    vat_rate: Optional[str] = None                   # НДС: none | 10 | 22
+    okpd_code: Optional[str] = None                  # Код ОКПД/ТН ВЭД (маркировка)
+    units_per_item: Optional[int] = 1                # Единиц в одном товаре
+
 
 class Product(ProductBase):
     """Схема ответа (товар)"""
@@ -126,8 +151,7 @@ class Product(ProductBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProductCreate(ProductBase):
@@ -143,6 +167,33 @@ class ProductBulkUpdate(BaseModel):
     price_percent: Optional[float] = None    # ИЛИ наценка в % к текущей цене
     brand: Optional[str] = None
     category: Optional[str] = None
+
+
+class ProductLogisticsUpdate(BaseModel):
+    """Обновление логистических данных товара: штрихкод, габариты упаковки, НДС, ОКПД."""
+    barcode: Optional[str] = None
+    weight_grams: Optional[int] = None
+    package_weight_grams: Optional[int] = None
+    package_width_mm: Optional[int] = None
+    package_height_mm: Optional[int] = None
+    package_length_mm: Optional[int] = None
+    vat_rate: Optional[str] = None
+    okpd_code: Optional[str] = None
+    units_per_item: Optional[int] = None
+
+    @field_validator("vat_rate")
+    @classmethod
+    def check_vat(cls, v):
+        if v is not None and v not in ("none", "10", "22"):
+            raise ValueError("НДС должен быть одним из: none, 10, 22")
+        return v
+
+    @field_validator("units_per_item")
+    @classmethod
+    def check_units(cls, v):
+        if v is not None and v < 1:
+            raise ValueError("Единиц в товаре должно быть >= 1")
+        return v
 
 
 # ========== Импорт / миграция ==========
@@ -162,6 +213,7 @@ class BatchMigrateRequest(BaseModel):
     target_marketplace: str
 
 
+# ========== Статистика ==========
 class Stats(BaseModel):
     total: int
     pending: int
@@ -169,14 +221,49 @@ class Stats(BaseModel):
     error: int
     processing: int
 
-class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+# ========== Спецификации категорий ==========
+class CategoryAttributeSpec(BaseModel):
+    id: str
+    name: str
+    type: str                    # number | text | select | multiselect
+    required: bool = False
+    group: str = "common"        # common | brand | variant | additional | fits_for
+    values: Optional[List[str]] = None
+    case_sensitive: bool = True
+    separator: str = ";"
+    unit: Optional[str] = None
+    allow_unit_in_value: bool = False
 
 
-class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str = Field(..., min_length=6)
+class CategorySpecContent(BaseModel):
+    sheets: List[str] = Field(default_factory=list)
+    required_fields: List[str] = Field(default_factory=list)
+    attributes: List[CategoryAttributeSpec] = Field(default_factory=list)
+    validation_rules: dict = Field(default_factory=dict)
+    special_requirements: dict = Field(default_factory=dict)
 
 
-class VerifyEmailRequest(BaseModel):
-    token: str
+class PlatformCategorySpecResponse(BaseModel):
+    id: int
+    user_id: int
+    platform: str
+    category_id: str
+    category_name: str
+    parent_category_id: Optional[str] = None
+    spec: CategorySpecContent
+    fetched_at: datetime
+    version: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CategorySpecListResponse(BaseModel):
+    platform: str
+    count: int
+    specs: List[PlatformCategorySpecResponse]
+
+
+class RefreshSpecRequest(BaseModel):
+    """Запрос на обновление спеков через API площадки (требует API-ключ продавца)."""
+    category_ids: Optional[List[str]] = None   # если пусто — обновляем всё дерево
+    api_key: Optional[str] = None

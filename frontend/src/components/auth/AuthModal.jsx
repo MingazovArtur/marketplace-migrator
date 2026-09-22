@@ -18,7 +18,7 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
     if (isOpen) {
       setTab(initialTab);
       setError('');
-      setAgree(false);          // ✅ сбрасываем согласие при открытии
+      setAgree(false);
       setUsername('');
       setPassword('');
       setRegEmail('');
@@ -81,7 +81,7 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
         email: regEmail.trim(),
         username: regUsername.trim(),
         password: regPassword,
-        consent: agree,         // ✅ передаём согласие на сервер
+        consent: agree,
       });
 
       const data = await api.login({ username: regUsername.trim(), password: regPassword });
@@ -98,7 +98,13 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-auth" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">{tab === 'login' ? '🔐 Вход' : '✨ Регистрация'}</h2>
+          {/* ✅ Иконка вместо эмодзи — фирменная, в акцентном цвете */}
+          <h2 className="modal-title">
+            <span style={{ color: 'var(--accent-primary)', display: 'inline-flex' }}>
+              <Icon name={tab === 'login' ? 'lock' : 'user-plus'} size={24} />
+            </span>
+            {tab === 'login' ? 'Вход' : 'Регистрация'}
+          </h2>
           <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
             <Icon name="close" size={16} />
           </button>
@@ -118,9 +124,33 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
         {tab === 'login' ? (
           <form onSubmit={submitLogin}>
             <label className="form-label">Логин</label>
-            <input className="form-input" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="admin" required />
+            <input
+              className="form-input"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Ваш логин"
+              required
+              autoComplete="username"
+            />
             <label className="form-label">Пароль</label>
-            <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
+            <input
+              className="form-input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              required
+              autoComplete="current-password"
+            />
+            <div style={{ textAlign: 'right', margin: '0.5rem 0 0.75rem' }}>
+              <a
+                href="#/forgot-password"
+                onClick={onClose}
+                style={{ color: 'var(--accent-primary)', fontSize: '0.85rem', textDecoration: 'none' }}
+              >
+                Забыли пароль?
+              </a>
+            </div>
             <div className="modal-actions">
               <Button type="submit" disabled={loading} loading={loading}>Войти</Button>
             </div>
@@ -128,13 +158,36 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
         ) : (
           <form onSubmit={submitRegister}>
             <label className="form-label">Email</label>
-            <input className="form-input" type="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} placeholder="you@mail.ru" required />
+            <input
+              className="form-input"
+              type="email"
+              value={regEmail}
+              onChange={(e) => setRegEmail(e.target.value)}
+              placeholder="you@mail.ru"
+              required
+              autoComplete="email"
+            />
             <label className="form-label">Логин</label>
-            <input className="form-input" value={regUsername} onChange={(e) => setRegUsername(e.target.value)} placeholder="seller123" required />
+            <input
+              className="form-input"
+              value={regUsername}
+              onChange={(e) => setRegUsername(e.target.value)}
+              placeholder="Придумайте логин"
+              required
+              autoComplete="username"
+            />
             <label className="form-label">Пароль</label>
-            <input className="form-input" type="password" value={regPassword} onChange={(e) => setRegPassword(e.target.value)} placeholder="Минимум 6 символов" required />
+            <input
+              className="form-input"
+              type="password"
+              value={regPassword}
+              onChange={(e) => setRegPassword(e.target.value)}
+              placeholder="Минимум 6 символов"
+              required
+              autoComplete="new-password"
+            />
 
-            {/* ✅ Checkbox согласия */}
+            {/* Checkbox согласия */}
             <label className="bulk-check" style={{ margin: '0.75rem 0', fontWeight: 400, display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
               <input
                 type="checkbox"
