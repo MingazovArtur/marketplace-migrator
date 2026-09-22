@@ -1,6 +1,6 @@
 import React from 'react';
 
-const Pagination = ({ total, skip, limit, onPageChange }) => {
+const Pagination = ({ total, skip, limit, onPageChange, onLimitChange }) => {
   const currentPage = Math.floor(skip / limit) + 1;
   const totalPages = Math.ceil(total / limit);
 
@@ -42,6 +42,20 @@ const Pagination = ({ total, skip, limit, onPageChange }) => {
       <span className="pagination-info">
         Страница {currentPage} из {totalPages} (всего {total} товаров)
       </span>
+            {onLimitChange && (
+        <label className="pagination-limit">
+          Показывать:
+          <select
+            className="filter-select select-small"
+            value={limit}
+            onChange={(e) => onLimitChange(Number(e.target.value))}
+          >
+            {[10, 30, 50, 100].map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </label>
+      )}
     </div>
   );
 };

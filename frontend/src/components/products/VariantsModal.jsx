@@ -60,7 +60,10 @@ const VariantsModal = ({ isOpen, onClose, product, onSave }) => {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">📦 Вариации: {product.name}</h2>
+          <h2 className="modal-title">
+            <Icon name="variants" size={22} />
+            Вариации: {product.name}
+          </h2>
           <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
             <Icon name="close" size={16} />
           </button>

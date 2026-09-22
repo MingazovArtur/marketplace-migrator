@@ -24,19 +24,24 @@ import VariantsModal from './components/products/VariantsModal';
 import PhotosModal from './components/products/PhotosModal';
 import HistoryView from './components/history/HistoryView';
 import StatsDashboard from './components/dashboard/StatsDashboard';
+import EmailVerificationBanner from './components/layout/EmailVerificationBanner';
+import { PrivacyPolicyPage, TermsOfUsePage } from './pages/Legal';
+import { VerifyEmailPage, ForgotPasswordPage, ResetPasswordPage } from './pages/EmailPages';
+import HelpPage from './pages/HelpPage';
 import { api } from './api';
 import './App.css';
-import { PrivacyPolicyPage, TermsOfUsePage } from './pages/Legal';
+import EmptyState from './components/common/EmptyState';
+import OnboardingTour from './components/onboarding/OnboardingTour';
+import LogisticsModal from './components/products/LogisticsModal';
+
 
 function App() {
   const [hash, setHash] = useState(window.location.hash);
   const { token, isAuthenticated, user, handleLogin, handleLogout } = useAuth();
-
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
-  const [authTab, setAuthTab] = useState(null); // null | 'login' | 'register'
+  const [authTab, setAuthTab] = useState(null);
   const [message, setMessage] = useState('');
   const [currentView, setCurrentView] = useState('products');
-
   const [showImportModal, setShowImportModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -47,6 +52,7 @@ function App() {
   const [editAttributesProduct, setEditAttributesProduct] = useState(null);
   const [editVariantsProduct, setEditVariantsProduct] = useState(null);
   const [editPhotosProduct, setEditPhotosProduct] = useState(null);
+  const [editLogisticsProduct, setEditLogisticsProduct] = useState(null);   // ✅ одно объявление
 
   useEffect(() => {
     const onHash = () => setHash(window.location.hash);
@@ -54,10 +60,7 @@ function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
-  if (hash === '#/privacy') return <PrivacyPolicyPage />;
-  if (hash === '#/terms') return <TermsOfUsePage />;
-
-  // Тема применяется к <html> — фон body всегда совпадает с темой
+  // Тема применяется к <html>
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
@@ -76,6 +79,7 @@ function App() {
       setEditAttributesProduct(null);
       setEditVariantsProduct(null);
       setEditPhotosProduct(null);
+      setEditLogisticsProduct(null);   // ✅ добавлено
       setCurrentView('products');
     }
   }, [token]);
@@ -95,7 +99,6 @@ function App() {
   const { isMigratingProductId, migrateProduct, migrateBatch, pollBatchProgress } =
     useMigration(loadData, setMessage);
 
-  // Уникальные источники для фильтра в SearchBar
   const sources = useMemo(
     () => Array.from(new Set(products.map((p) => p.source).filter(Boolean))).sort(),
     [products]
@@ -150,11 +153,10 @@ function App() {
     }
   }, [migrateProduct]);
 
-    /* Автовыгрузка после пакетной миграции */
   const handleAutoExport = useCallback(async (platform) => {
     try {
       await api.exportForPlatform(platform, 'success');
-      setMessage(`📥 Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
+      setMessage(`Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
       loadData();
     } catch (e) {
       setMessage('❌ Не удалось скачать файл: ' + e.message);
@@ -181,7 +183,7 @@ function App() {
 
   const handleOpenBatchModal = useCallback(() => {
     if (!selectedProductIds.length) {
-      setMessage('⚠️ Выберите хотя бы один товар');
+      setMessage('Выберите хотя бы один товар');
       return;
     }
     setShowBatchModal(true);
@@ -197,6 +199,10 @@ function App() {
     updateFilters({ status: 'all', source: 'all', search: '', sort: 'newest' });
   }, [updateFilters]);
 
+  const handleLimitChange = useCallback((newLimit) => {
+    updateFilters({ limit: newLimit, skip: 0 });
+  }, [updateFilters]);
+
   const handleCloseBatchModal = useCallback(() => {
     setShowBatchModal(false);
     setSelectedProductIds([]);
@@ -204,7 +210,6 @@ function App() {
   }, [loadData]);
 
   const handleStartBatchMigration = useCallback(async (ids, platform) => {
-    // ✅ НЕ закрываем модалку: ошибку покажет сама BatchMigrateModal
     return await migrateBatch(ids, platform);
   }, [migrateBatch]);
 
@@ -222,7 +227,7 @@ function App() {
 
   const handleExportReport = useCallback(async () => {
     if (!stats || stats.total === 0) {
-      setMessage('⚠️ Нет товаров для экспорта.');
+      setMessage('Нет товаров для экспорта.');
       return;
     }
     try {
@@ -248,21 +253,48 @@ function App() {
   const handleEditAttributes = useCallback((product) => setEditAttributesProduct(product), []);
   const handleEditVariants = useCallback((product) => setEditVariantsProduct(product), []);
   const handleEditPhotos = useCallback((product) => setEditPhotosProduct(product), []);
+  const handleEditLogistics = useCallback((product) => setEditLogisticsProduct(product), []);   // ✅ добавлено
+
+  /* ================= hash-роутинг (ПОСЛЕ всех хуков!) ================= */
+  const hashPath = hash.split('?')[0];
+  const hashQuery = new URLSearchParams(hash.split('?')[1] || '');
+
+  if (hashPath === '#/privacy') return <PrivacyPolicyPage />;
+  if (hashPath === '#/terms') return <TermsOfUsePage />;
+  if (hashPath === '#/verify-email') return <VerifyEmailPage token={hashQuery.get('token')} />;
+  if (hashPath === '#/forgot-password') return <ForgotPasswordPage />;
+  if (hashPath === '#/reset-password') return <ResetPasswordPage token={hashQuery.get('token')} />;
+  if (hashPath === '#/help') return <HelpPage />;
 
   /* ================= виды ================= */
 
-  const renderDashboard = () => (
-    <>
-      <header className="header">
-        <div>
-          <h1 className="header-title">Дашборд</h1>
-          <p className="header-subtitle">Обзор миграции товаров</p>
-        </div>
-      </header>
-      <StatsGrid stats={stats} />
-      <StatsDashboard />
-    </>
-  );
+  const renderDashboard = () => {
+    const hasProducts = stats && stats.total > 0;
+    return (
+      <>
+        <header className="header">
+          <div>
+            <h1 className="header-title">Дашборд</h1>
+            <p className="header-subtitle">Обзор миграции товаров</p>
+          </div>
+        </header>
+        {hasProducts ? (
+          <>
+            <StatsGrid stats={stats} />
+            <StatsDashboard />
+          </>
+        ) : (
+          <EmptyState
+            icon={<Icon name="dashboard" size={48} />}
+            title="Статистика появится после первой операции"
+            description="Импортируйте товары — и дашборд покажет сводку по статусам и источникам."
+            actionLabel="Перейти к импорту"
+            onAction={() => setCurrentView('import')}
+          />
+        )}
+      </>
+    );
+  };
 
   const renderProducts = () => (
     <>
@@ -272,10 +304,10 @@ function App() {
           <p className="header-subtitle">Управление карточками товаров</p>
         </div>
         <div className="header-actions">
-          <Button onClick={() => setShowImportModal(true)}>
+          <Button onClick={() => setShowImportModal(true)} data-onboarding="import-btn">
             <Icon name="import" size={16} /> Импорт
           </Button>
-          <Button variant="secondary" onClick={() => setShowExportModal(true)}>
+          <Button variant="secondary" onClick={() => setShowExportModal(true)} data-onboarding="export-btn">
             <Icon name="export" size={16} /> Выгрузка
           </Button>
           <Button
@@ -299,13 +331,14 @@ function App() {
         >
           <Icon name="edit" size={16} /> Редактировать ({selectedProductIds.length})
         </Button>
-        <Button onClick={handleOpenBatchModal} disabled={!selectedProductIds.length}>
+        <Button onClick={handleOpenBatchModal} disabled={!selectedProductIds.length} data-onboarding="migrate-btn">
           <Icon name="migrate" size={16} /> Перенести выбранные ({selectedProductIds.length})
         </Button>
       </div>
 
       <ProductTable
         products={products}
+        onEditLogistics={handleEditLogistics}
         selectedIds={selectedProductIds}
         isMigratingProductId={isMigratingProductId}
         loading={productsLoading}
@@ -324,8 +357,14 @@ function App() {
         skip={filters.skip}
         limit={filters.limit}
         onPageChange={setPage}
+        onLimitChange={handleLimitChange}
       />
-
+      <LogisticsModal
+        isOpen={!!editLogisticsProduct}
+        onClose={() => setEditLogisticsProduct(null)}
+        product={editLogisticsProduct}
+        onSaved={loadData}
+      />
       <AttributesModal
         isOpen={!!editAttributesProduct}
         onClose={() => setEditAttributesProduct(null)}
@@ -378,7 +417,9 @@ function App() {
           onClick={() => setShowImportModal(true)}
           onKeyDown={(e) => e.key === 'Enter' && setShowImportModal(true)}
         >
-          <div className="import-card-icon">🔑</div>
+          <div className="import-card-icon">
+            <Icon name="key" size={44} />
+          </div>
           <h3>По API ключу / YML</h3>
           <p>Ozon, Wildberries, Яндекс Маркет. Тест-ключ: test:test</p>
           <Button>Ввести ключ</Button>
@@ -426,6 +467,9 @@ function App() {
         onOpenHistory={() => setCurrentView('history')}
       />
 
+      <EmailVerificationBanner user={user} />
+      <OnboardingTour />
+
       <div className="app-body">
         <Sidebar
           currentView={currentView}
@@ -433,13 +477,12 @@ function App() {
           theme={theme}
           setTheme={setTheme}
         />
-        <main className="main-content">
+        <main className="main-content" data-onboarding="welcome">
           <Alert message={message} onClose={() => setMessage('')} />
           {renderView()}
         </main>
       </div>
 
-      {/* модалки операций */}
       <ImportModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}

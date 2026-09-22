@@ -36,7 +36,10 @@ const BulkEditModal = ({ isOpen, onClose, selectedIds, onSubmit, loading }) => {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">✏️ Массовое редактирование</h2>
+          <h2 className="modal-title">
+            <Icon name="edit" size={22} />
+            Массовое редактирование
+          </h2>
           <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
             <Icon name="close" size={16} />
           </button>

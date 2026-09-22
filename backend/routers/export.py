@@ -177,6 +177,39 @@ def export_for_platform(
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
+@router.get("/export/validate/{platform}")
+def validate_export(
+    platform: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Проверка готовности товаров к экспорту: обязательные логистические поля."""
+    db = SessionLocal()
+    try:
+        products = (
+            db.query(Product)
+            .filter(Product.user_id == current_user.id, Product.status == "success")
+            .all()
+        )
+        issues = []
+        for p in products:
+            missing = []
+            if not p.barcode:
+                missing.append("barcode")
+            if not (p.package_weight_grams and p.package_width_mm
+                    and p.package_height_mm and p.package_length_mm):
+                missing.append("dimensions")
+            if not p.vat_rate:
+                missing.append("vat")
+            if missing:
+                issues.append({"id": p.id, "name": p.name, "missing": missing})
+        return {
+            "platform": platform,
+            "total": len(products),
+            "issues_count": len(issues),
+            "issues": issues[:50],
+        }
+    finally:
+        db.close()
 
 # ==================== ОТЧЁТ ПО ВСЕМ ТОВАРАМ ====================
 @limiter.limit("5/minute;50/day")

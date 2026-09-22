@@ -286,7 +286,10 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
             )}
 
             {previewLoading && (
-              <div className="progress-status">⏳ Читаем файл и строим предпросмотр...</div>
+                <div className="progress-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                  <div className="spinner spinner-dark" />
+                    Читаем файл и строим предпросмотр...
+                  </div>
             )}
 
             {preview && (

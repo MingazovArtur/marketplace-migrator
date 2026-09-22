@@ -1,16 +1,19 @@
 """
 Главный файл приложения FastAPI
+
+Порядок обработки запроса (от внешнего к внутреннему):
+  Запрос → CORS (самый внешний) → SlowAPI → ban_check → роутер
 """
 import logging
 from pathlib import Path
-from routers import import_router
+
 from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from routers import email_router
+
 from core.config import settings
 from core.platforms import Platform, PLATFORM_CONFIG
 from core.rate_limit import (
@@ -24,6 +27,7 @@ from routers import (
     import_router,
     export,
     auth,
+    email_router,
     categories,
     templates,
     history,
@@ -39,41 +43,21 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Marketplace Migrator API", version="3.4")
-app.include_router(import_router.router)
-
-# ============================================================
-# 1. CORS — берём origins из settings.CORS_ORIGINS (из .env)
-# ============================================================
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 # ============================================================
-# 2. SlowAPI — глобальный rate-limit + обработчик превышений
+# 1. Ban-check middleware (декоратор — обрабатывается последним в цепочке)
 # ============================================================
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
-
-# Глобальный лимит: 100 req/min на идентификатор для всех не-декорированных эндпоинтов
-# (эндпоинты с @limiter.limit(...) имеют свои, более строгие лимиты)
-app.add_middleware(SlowAPIMiddleware, default_limits=["100/minute"])
-
-
-# ============================================================
-# 3. Ban-check middleware — отсекает забаненных ДО обработки
-# ============================================================
-# FastAPI применяет middleware в обратном порядке, поэтому добавляем последним
 @app.middleware("http")
 async def ban_check_middleware(request: Request, call_next):
     """
     Проверяет бан IP и user_id перед обработкой запроса.
-    Исключения: healthcheck (/api/health), статика (/media), docs.
+    Пропускает: healthcheck, статику, docs, OPTIONS (preflight).
     """
+    # Preflight CORS-запросы не трогаем — их обработает CORSMiddleware
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     path = request.url.path
 
     # Пропускаем эндпоинты мониторинга и статику
@@ -104,18 +88,39 @@ async def ban_check_middleware(request: Request, call_next):
                     )
     except Exception as e:
         logger.debug(f"ban_check token parse failed: {e}")
-        # Ошибка декодирования токена — не наша забота здесь, пропустим
-        pass
 
     response = await call_next(request)
     return response
 
 
 # ============================================================
-# 4. Роутеры
+# 2. SlowAPI — глобальный rate-limit
+# ============================================================
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+
+# ============================================================
+# 3. CORS — САМЫЙ ВНЕШНИЙ middleware (добавляется последним)
+# ============================================================
+# FastAPI применяет add_middleware в обратном порядке.
+# Добавляя CORS последним — он становится самым внешним и обрабатывает
+# OPTIONS-запросы ДО того, как они дойдут до бан-проверки и rate-limit.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ============================================================
+# Роутеры
 # ============================================================
 app.include_router(health_router)
-app.include_router(migrate_router)      # единственный импорт migrate
+app.include_router(migrate_router)
 app.include_router(variants.router)
 app.include_router(stats.router)
 app.include_router(attributes.router)
@@ -130,7 +135,7 @@ app.include_router(history.router)
 
 
 # ============================================================
-# 5. Статика: раздача скачанных фото
+# Статика: раздача скачанных фото
 # ============================================================
 MEDIA_DIR = Path(__file__).parent / "media"
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
@@ -138,7 +143,7 @@ app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 
 # ============================================================
-# 6. Служебные эндпоинты
+# Служебные эндпоинты
 # ============================================================
 @app.get("/api/platforms")
 def get_platforms():
