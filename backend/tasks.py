@@ -1,5 +1,5 @@
 """
-Celery задачи для фоновой миграции товаров.
+Celery задачи для фоновой миграции товаров и загрузки спеков площадок.
 
 Исправления:
   1. Убран дубликат detect_platform — используется единая функция из services.platform_utils
@@ -12,6 +12,7 @@ Celery задачи для фоновой миграции товаров.
   8. ✅ Унифицированные имена полей: status ∈ {pending, progress, completed, failed}, done
   9. ✅ t0 в самом начале задач — защита от NameError в except
  10. ✅ Убрана искусственная задержка time.sleep(1) в пакетной миграции
+ 11. ✅ Задача refresh_specs_task — фоновая загрузка спеков площадок с прогрессом
 """
 import logging
 import time
@@ -35,6 +36,8 @@ def get_progress(task_id: str) -> dict:
     Возвращает текущий прогресс задачи по её ID в унифицированном формате:
         status: 'pending' | 'progress' | 'completed' | 'failed'
         + поля total, done, success, errors, percent, error (опц.)
+
+    Работает одинаково для задач миграции И задач загрузки спеков.
     """
     try:
         result = celery_app.AsyncResult(task_id)
@@ -56,15 +59,19 @@ def get_progress(task_id: str) -> dict:
         if result.state == "SUCCESS":
             r = result.result or {}
             if isinstance(r, dict):
-                total = r.get("total", 0)
+                # ✅ Поддержка обоих форматов: миграций (success) и спеков (fetched)
+                total = r.get("total") or r.get("fetched", 0) + r.get("errors", 0)
+                success = r.get("success") or r.get("fetched", 0)
+                errors = r.get("errors", 0)
                 return {
                     "status": "completed",
                     "total": total,
                     "done": total,
-                    "success": r.get("success", 0),
-                    "errors": r.get("errors", 0),
+                    "success": success,
+                    "errors": errors,
                     "percent": 100,
                     "error_details": r.get("error_details", []),
+                    "platform": r.get("platform"),
                 }
             return {"status": "completed", "total": 0, "done": 0, "success": 0, "errors": 0, "percent": 100}
 
@@ -438,3 +445,130 @@ def download_photos_task(self, product_id: int, user_id: int):
 
     logger.info(f"💾 Товар {product_id}: скачано {len(saved)} из {len(urls)} фото")
     return {"status": "completed", "saved": len(saved), "total": len(urls)}
+
+
+# ---------------------------------------------------------------------------
+# ✅ НОВОЕ: Фоновая загрузка спеков площадок
+# ---------------------------------------------------------------------------
+
+@celery_app.task(bind=True, name="tasks.refresh_specs_task")
+def refresh_specs_task(self, user_id: int, platform: str, raw_api_key: str, category_ids=None):
+    """
+    Фоновая загрузка спеков категорий площадки через её API.
+    
+    Аргументы:
+        user_id: ID пользователя
+        platform: 'ozon' | 'yandex' | 'wildberries'
+        raw_api_key: строка формата 'CLIENT_ID:API_KEY' (для Ozon)
+        category_ids: опциональный список ID категорий (для частичной загрузки)
+    
+    Прогресс публикуется через self.update_state — UI получает live-обновления.
+    Использует тот же формат (status/done/success/errors/percent) что и миграции,
+    чтобы `get_progress` работал без изменений.
+    """
+    import asyncio
+    # Ленивый импорт — защита от circular import при старте Celery
+    from services.ozon_specs import refresh_ozon_specs
+
+    t0 = time.perf_counter()
+    logger.info(f"🚀 Старт загрузки спеков {platform} для пользователя {user_id}")
+
+    # ✅ Колбэк прогресса — передаётся в refresh_ozon_specs
+    def progress_cb(p: dict):
+        try:
+            total = p.get("total", 0)
+            fetched = p.get("fetched", 0)
+            errors = p.get("errors", 0)
+            done = fetched + errors
+            percent = int(done * 100 / total) if total else 0
+            self.update_state(
+                state="PROGRESS",
+                meta={
+                    "total": total,
+                    "done": done,
+                    "success": fetched,
+                    "errors": errors,
+                    "percent": percent,
+                    "platform": platform,
+                    "error_details": [],
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Не удалось опубликовать прогресс спеков: {e}")
+
+    try:
+        if platform == "ozon":
+            result = asyncio.run(
+                refresh_ozon_specs(
+                    user_id=user_id,
+                    raw_api_key=raw_api_key,
+                    category_ids=category_ids,
+                    progress_cb=progress_cb,
+                )
+            )
+        # elif platform == "yandex":
+        #     from services.yandex_specs import refresh_yandex_specs
+        #     result = asyncio.run(refresh_yandex_specs(...))
+        # elif platform == "wildberries":
+        #     from services.wb_specs import refresh_wildberries_specs
+        #     result = asyncio.run(refresh_wildberries_specs(...))
+        else:
+            raise ValueError(f"Загрузчик спеков для {platform} ещё не реализован")
+
+        fetched = result.get("fetched", 0)
+        errors = result.get("errors", 0)
+        total = fetched + errors
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+
+        logger.info(
+            f"✅ Спеки {platform} загружены: {fetched} категорий, {errors} ошибок за {duration_ms} мс"
+        )
+
+        # --- Статистика ---
+        try:
+            stats_repo.record(
+                user_id=user_id, operation="specs_refresh", platform=platform,
+                status="success" if errors == 0 else "partial",
+                total_items=total, success_items=fetched, failed_items=errors,
+                duration_ms=duration_ms,
+            )
+        except Exception as e:
+            logger.warning(f"Не удалось записать статистику спеков: {e}")
+
+        return {
+            "status": "completed",
+            "platform": platform,
+            "total": total,
+            "done": total,
+            "success": fetched,
+            "fetched": fetched,
+            "errors": errors,
+            "percent": 100,
+            "error_details": result.get("error_details", []),
+            "duration_ms": duration_ms,
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка загрузки спеков {platform}: {e}", exc_info=True)
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+
+        try:
+            stats_repo.record(
+                user_id=user_id, operation="specs_refresh", platform=platform,
+                status="error", total_items=0, failed_items=1,
+                duration_ms=duration_ms,
+            )
+        except Exception:
+            pass
+
+        return {
+            "status": "error",
+            "platform": platform,
+            "total": 0,
+            "done": 0,
+            "success": 0,
+            "errors": 1,
+            "percent": 0,
+            "message": str(e),
+            "error_details": [{"error": str(e)}],
+        }

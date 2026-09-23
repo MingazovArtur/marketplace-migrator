@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     # --- Redis (Celery + rate-limit) ---
     REDIS_URL: str = "redis://redis:6379/0"
 
-        # --- Email (SMTP) ---
+    # --- Email (SMTP) ---
     SMTP_HOST: str = ""             # smtp.yandex.ru | sandbox.smtp.mailtrap.io
     SMTP_PORT: int = 587
     SMTP_USER: str = ""             # noreply@kartovoz.ru
@@ -94,6 +94,13 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
     SENTRY_ENVIRONMENT: str = "development"
     SENTRY_RELEASE: str = "local"
+
+    # --- Ключи маркетплейсов (серверный fallback для загрузки спеков) ---
+    OZON_CLIENT_ID: str = ""
+    OZON_API_KEY: str = ""
+
+    # --- Шифрование чувствительных данных ---
+    FERNET_KEY: str = ""
 
     # --- Админ-бутстрап (опционально) ---
     ADMIN_USERNAME: str = ""

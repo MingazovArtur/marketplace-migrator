@@ -264,6 +264,7 @@ class CategorySpecListResponse(BaseModel):
 
 
 class RefreshSpecRequest(BaseModel):
-    """Запрос на обновление спеков через API площадки (требует API-ключ продавца)."""
-    category_ids: Optional[List[str]] = None   # если пусто — обновляем всё дерево
+    """Запрос на обновление спеков через API площадки (требует ключ продавца)."""
+    category_ids: Optional[List[str]] = None
     api_key: Optional[str] = None
+    business_id: Optional[str] = None 

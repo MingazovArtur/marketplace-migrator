@@ -33,6 +33,7 @@ import './App.css';
 import EmptyState from './components/common/EmptyState';
 import OnboardingTour from './components/onboarding/OnboardingTour';
 import LogisticsModal from './components/products/LogisticsModal';
+import SpecsPage from './pages/SpecsPage';
 
 
 function App() {
@@ -145,7 +146,7 @@ function App() {
     await migrateProduct(id, platform, edited);
     if (autoExport) {
       try {
-        await api.exportForPlatform(platform, 'success');
+        const ext = await api.exportXlsxV2(platform, status);
         setMessage(`✅ Карточка перенесена. Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
       } catch (e) {
         setMessage(`✅ Карточка перенесена, но файл не скачался: ${e.message}`);
@@ -155,7 +156,7 @@ function App() {
 
   const handleAutoExport = useCallback(async (platform) => {
     try {
-      await api.exportForPlatform(platform, 'success');
+      const ext = await api.exportXlsxV2(platform, status);
       setMessage(`Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
       loadData();
     } catch (e) {
@@ -240,8 +241,12 @@ function App() {
 
   const handleExportForPlatform = useCallback(async (platform, status) => {
     try {
-      await api.exportForPlatform(platform, status);
-      setMessage(`✅ Файл для ${platform} скачан. Загрузите его в кабинете площадки.`);
+      const ext = await api.exportXlsxV2(platform, status);
+      setMessage(
+        ext === 'zip'
+          ? `✅ Скачан ZIP из нескольких файлов (по одному на категорию). Загрузите каждый в кабинете ${platform}.`
+          : `✅ Файл по шаблону ${platform} скачан. Загрузите его в кабинете площадки.`
+      );
       setShowExportModal(false);
     } catch (e) {
       setMessage('❌ ' + e.message);
@@ -434,6 +439,7 @@ function App() {
       case 'import': return renderImport();
       case 'mapping': return <CategoryMapping onBack={() => setCurrentView('products')} />;
       case 'history': return <HistoryView />;
+      case 'specs': return <SpecsPage />;
       default: return renderProducts();
     }
   };

@@ -6,6 +6,7 @@ const NAV = [
   { id: 'products', label: 'Товары', icon: 'products' },
   { id: 'import', label: 'Импорт', icon: 'import' },
   { id: 'mapping', label: 'Маппинг', icon: 'mapping' },
+  { id: 'specs', label: 'Спецификации', icon: 'layers' },
   { id: 'history', label: 'История', icon: 'history' },
 ];
 

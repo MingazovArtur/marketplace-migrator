@@ -49,7 +49,6 @@ export const api = {
   },
 
   register: async (payload) => {
-    // payload = { username, email, password, consent }
     const res = await fetch(`${API_URL}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -88,7 +87,6 @@ export const api = {
   },
 
   resendVerification: async () => {
-    // требует авторизации — отправляем письмо текущему пользователю
     const res = await fetch(`${API_URL}/auth/resend-verification`, {
       method: 'POST',
       headers: getHeaders(),
@@ -257,9 +255,10 @@ export const api = {
   },
 
   migrateProduct: async (productId, targetPlatform, editedData = null) => {
-    const body = { product_id: productId, target_marketplace: targetPlatform };
+    // ✅ product_id передаётся в URL, в body только platform + edited_data
+    const body = { platform: targetPlatform };
     if (editedData) body.edited_data = editedData;
-    const res = await fetch(`${API_URL}/migrate`, {
+    const res = await fetch(`${API_URL}/migrate/${productId}`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify(body),
@@ -382,6 +381,70 @@ export const api = {
     const qs = q.toString();
     const res = await fetch(`${API_URL}/history${qs ? '?' + qs : ''}`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить историю'));
+    return res.json();
+  },
+
+  /* ==================== Спецификации категорий площадок ==================== */
+
+  getSpecs: async (platform) => {
+    const res = await fetch(`${API_URL}/specs/${platform}`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка получения спеков'));
+    return res.json();
+  },
+
+  getSpec: async (platform, categoryId) => {
+    const res = await fetch(`${API_URL}/specs/${platform}/${categoryId}`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка получения спека'));
+    return res.json();
+  },
+
+  refreshSpecs: async (platform, apiKey, categoryIds = null, businessId = null) => {
+    const res = await fetch(`${API_URL}/specs/${platform}/refresh`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({
+        api_key: apiKey,
+        category_ids: categoryIds,
+        business_id: businessId,
+      }),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка обновления спеков'));
+    return res.json();
+  },
+
+  exportXlsxV2: async (platform, status = 'success') => {
+    const safeStatus = status && ['success', 'pending', 'processing', 'error', 'all'].includes(status)
+    const res = await fetch(`${API_URL}/export/xlsx/${platform}?status=${status}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка генерации файла'));
+    const blob = await res.blob();
+    const ext = blob.type.includes('zip') ? 'zip' : 'xlsx';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${platform}_export.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return ext;
+  },
+
+  getSpecKeySource: async (platform) => {
+    try {
+      const res = await fetch(`${API_URL}/specs/${platform}/key-source`, {
+        headers: getHeaders(),
+      });
+      if (!res.ok) return { has_server_key: false };   // ← 500 тоже сюда
+      return await res.json();
+    } catch {
+      return { has_server_key: false };                // ← сетевая ошибка
+    }
+  },
+  getSpecsRefreshProgress: async (platform, taskId) => {
+    const res = await fetch(`${API_URL}/specs/${platform}/refresh/${taskId}/progress`, { headers: getHeaders() });
+    if (!res.ok) return { status: 'unknown' };
     return res.json();
   },
 };

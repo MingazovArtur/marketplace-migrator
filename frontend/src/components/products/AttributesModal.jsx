@@ -28,17 +28,32 @@ const AttributesModal = ({ isOpen, onClose, product, onSave }) => {
   };
 
   const handleSave = async () => {
-    if (!product) return;
-    setLoading(true);
     try {
-      const validAttrs = attributes.filter(a => a.name.trim() && a.value.trim());
-      await api.setAttributes(product.id, validAttrs);
+      const result = await api.setAttributes(product.id, attributes);
       onSave();
+
+      // ✅ Показываем уведомления о нормализации
+      if (result?.normalizations?.length > 0) {
+        const normalizedList = result.normalizations
+          .map((n) => `«${n.field}»: "${n.original}" → "${n.normalized}"`)
+          .join('\n');
+        onNotify?.(
+          `✨ ${result.normalizations.length} значений нормализовано под словарь площадки:\n${normalizedList}`
+        );
+      }
+
+      if (result?.warnings?.length > 0) {
+        const warningList = result.warnings
+          .map((w) => `${w.field}: ${w.value}`)
+          .join(', ');
+        onNotify?.(
+          `⚠️ ${result.warnings.length} значений не найдены в словаре площадки: ${warningList}`
+        );
+      }
+
       onClose();
-    } catch (err) {
-      alert('Ошибка сохранения: ' + err.message);
-    } finally {
-      setLoading(false);
+    } catch (e) {
+      setError(e.message);
     }
   };
 
