@@ -65,3 +65,4 @@ alembic/versions/__pycache__/
 secrets/
 .env.*
 !.env.example
+.env

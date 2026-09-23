@@ -15,11 +15,13 @@ from datetime import datetime
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-
+from fastapi.responses import Response
+from database.session import SessionLocal
+from database.models import User, Product, PlatformCategorySpec
+from services.xlsx_generator import generate_export
 from core.auth import get_current_user
 from core.platforms import Platform
 from core.rate_limit import limiter
-from database.models import User
 from database.repository import repo, op_log, stats_repo
 from services.export_builder import build_upload_file, build_rows
 from services.export_validator import validate_products, validate_product, has_errors
@@ -182,32 +184,60 @@ def validate_export(
     platform: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Проверка готовности товаров к экспорту: обязательные логистические поля."""
+    """
+    Проверка готовности товаров к экспорту по спекам площадки.
+    Возвращает детальный список проблем с severity: error (блокирует) / warning.
+    """
     db = SessionLocal()
     try:
-        products = (
-            db.query(Product)
-            .filter(Product.user_id == current_user.id, Product.status == "success")
+        query = db.query(Product).filter(Product.user_id == current_user.id)
+        products = query.all()
+
+        if not products:
+            return {"total": 0, "errors": 0, "warnings": 0, "issues": []}
+
+        # Конвертируем товары в dict
+        product_dicts = []
+        for p in products:
+            product_dicts.append({
+                "id": p.id,
+                "name": p.name,
+                "sku": p.sku,
+                "price": p.price,
+                "category": p.category,
+                "mapped_category": p.mapped_category,
+                "barcode": p.barcode,
+                "vat_rate": p.vat_rate,
+                "package_weight_grams": p.package_weight_grams,
+                "package_width_mm": p.package_width_mm,
+                "package_height_mm": p.package_height_mm,
+                "package_length_mm": p.package_length_mm,
+                "okpd_code": p.okpd_code,
+                "attributes": [
+                    {"name": a.name, "value": a.value} for a in (p.attributes or [])
+                ],
+            })
+
+        # Подгружаем спеки для всех категорий товаров
+        categories = {
+            (p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts
+        }
+        specs = (
+            db.query(PlatformCategorySpec)
+            .filter(
+                PlatformCategorySpec.user_id == current_user.id,
+                PlatformCategorySpec.platform == platform,
+                PlatformCategorySpec.category_name.in_(categories),
+            )
             .all()
         )
-        issues = []
-        for p in products:
-            missing = []
-            if not p.barcode:
-                missing.append("barcode")
-            if not (p.package_weight_grams and p.package_width_mm
-                    and p.package_height_mm and p.package_length_mm):
-                missing.append("dimensions")
-            if not p.vat_rate:
-                missing.append("vat")
-            if missing:
-                issues.append({"id": p.id, "name": p.name, "missing": missing})
-        return {
-            "platform": platform,
-            "total": len(products),
-            "issues_count": len(issues),
-            "issues": issues[:50],
-        }
+        specs_by_category = {s.category_name: s.spec for s in specs}
+
+        # Валидация по спекам
+        from services.spec_validator import validate_products_by_specs
+        result = validate_products_by_specs(product_dicts, specs_by_category, platform)
+
+        return result
     finally:
         db.close()
 
@@ -261,3 +291,76 @@ def export_migration_report(
         output, media_type=XLSX_MIME,
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+@router.get("/export/xlsx/{platform}")
+def export_xlsx_v2(
+    platform: str,
+    status: str = "success",
+    current_user: User = Depends(get_current_user),
+):
+    # ✅ Защита от пустого/невалидного status
+    if not status or status not in ("success", "pending", "processing", "error", "all"):
+        status = "success"
+
+    db = SessionLocal()
+    try:
+        query = db.query(Product).filter(Product.user_id == current_user.id)
+        if status != "all":
+            query = query.filter(Product.status == status)
+        products = query.all()
+
+        if not products:
+            # ✅ Понятное сообщение вместо 404
+            raise HTTPException(
+                status_code=400,
+                detail=f"Нет товаров со статусом '{status}'. Импортируйте товары и выполните миграцию (кнопка «Мигрировать») перед выгрузкой."
+            )
+
+        product_dicts = []
+        for p in products:
+            product_dicts.append({
+                "id": p.id,
+                "name": p.name,
+                "sku": p.sku,
+                "external_id": p.external_id,
+                "price": p.price,
+                "category": p.category,
+                "mapped_category": p.mapped_category,
+                "barcode": p.barcode,
+                "vat_rate": p.vat_rate,
+                "package_weight_grams": p.package_weight_grams,
+                "package_width_mm": p.package_width_mm,
+                "package_height_mm": p.package_height_mm,
+                "package_length_mm": p.package_length_mm,
+                "units_per_item": p.units_per_item,
+                "photos": p.photos or [],
+                "attributes": [
+                    {"name": a.name, "value": a.value} for a in (p.attributes or [])
+                ],
+            })
+
+        categories = {
+            (p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts
+        }
+        specs = (
+            db.query(PlatformCategorySpec)
+            .filter(
+                PlatformCategorySpec.user_id == current_user.id,
+                PlatformCategorySpec.platform == platform,
+                PlatformCategorySpec.category_name.in_(categories),
+            )
+            .all()
+        )
+        specs_by_category = {s.category_name: s.spec for s in specs}
+
+        data, filename = generate_export(product_dicts, specs_by_category, platform)
+
+        media = ("application/zip" if filename.endswith(".zip")
+                 else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        return Response(
+            content=data,
+            media_type=media,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    finally:
+        db.close()
