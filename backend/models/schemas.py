@@ -172,20 +172,21 @@ class ProductBulkUpdate(BaseModel):
 class ProductLogisticsUpdate(BaseModel):
     """Обновление логистических данных товара: штрихкод, габариты упаковки, НДС, ОКПД."""
     barcode: Optional[str] = None
-    weight_grams: Optional[int] = None
-    package_weight_grams: Optional[int] = None
-    package_width_mm: Optional[int] = None
-    package_height_mm: Optional[int] = None
-    package_length_mm: Optional[int] = None
+    weight_grams: Optional[int] = Field(None, ge=0)
+    package_weight_grams: Optional[int] = Field(None, ge=0)
+    package_width_mm: Optional[int] = Field(None, ge=0)
+    package_height_mm: Optional[int] = Field(None, ge=0)
+    package_length_mm: Optional[int] = Field(None, ge=0)
     vat_rate: Optional[str] = None
     okpd_code: Optional[str] = None
-    units_per_item: Optional[int] = None
+    units_per_item: Optional[int] = Field(None, ge=1)
 
+    # ✅ Синхронизация с модалкой и XLSX-генератором: Ozon принимает 5 ставок
     @field_validator("vat_rate")
     @classmethod
     def check_vat(cls, v):
-        if v is not None and v not in ("none", "10", "22"):
-            raise ValueError("НДС должен быть одним из: none, 10, 22")
+        if v is not None and v not in ("none", "22", "10", "7", "5"):
+            raise ValueError("НДС должен быть одним из: none, 22, 10, 7, 5")
         return v
 
     @field_validator("units_per_item")

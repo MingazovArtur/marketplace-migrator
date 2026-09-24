@@ -4,6 +4,44 @@ from typing import Dict, Optional, List
 
 class CategoryMapper:
     """Универсальный маппинг категорий между любыми маркетплейсами"""
+    def auto_map_to_spec(self, text: str, platform: str):
+        """
+        Ищет ТОЧНОЕ имя спека («Родитель / Тип») по тексту товара/категории.
+        Возвращает category_name из platform_category_specs или None.
+        """
+        import re
+        from database.session import SessionLocal
+        from database.models import PlatformCategorySpec
+
+        if not text:
+            return None
+        text_low = str(text).lower().strip()
+        tokens = set(re.findall(r"[a-zа-яё0-9]+", text_low))
+
+        db = SessionLocal()
+        try:
+            names = [n for (n,) in db.query(PlatformCategorySpec.category_name)
+                     .filter(PlatformCategorySpec.platform == platform).all()]
+        finally:
+            db.close()
+
+        best_name, best_score = None, 0
+        for name in names:
+            low = name.lower()
+            if low == text_low:
+                return name                                   # точное совпадение
+            type_part = low.split("/")[-1].strip()            # «футболка» из «Одежда / Футболка»
+            score = 0
+            if type_part and type_part in text_low:
+                score += 100 + len(type_part)
+            parent_part = low.split("/")[0].strip()
+            if parent_part and parent_part in text_low:
+                score += 50
+            score += 10 * len(tokens & set(re.findall(r"[a-zа-яё0-9]+", low)))
+            if score > best_score:
+                best_name, best_score = name, score
+
+        return best_name if best_score >= 100 else None       # порог: совпал ТИП товара
     
     def __init__(self):
         self.data_file = Path(__file__).parent.parent / "data" / "marketplace_categories.json"

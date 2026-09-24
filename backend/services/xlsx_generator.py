@@ -16,7 +16,8 @@
 - числа без единиц измерения;
 - множественный выбор через «;» без пробелов;
 - регистр значений из словаря соблюдается (защита от дублей карточек);
-- выбор из списка — data validation Excel (большие словари на скрытых листах).
+- выбор из списка — data validation Excel (большие словари на скрытых листах);
+- дубли артикулов получают суффиксы _2, _3 (Ozon не принимает дубли).
 """
 import io
 import re
@@ -34,7 +35,7 @@ DICT_LIMIT = 5000
 
 DATA_START_ROW = 5          # данные начинаются с 5-й строки (как в шаблоне Ozon)
 
-VAT_LABELS = {"none": "Не облагается", "10": "10", "22": "22"}
+VAT_LABELS = {"none": "Не облагается", "22": "22", "10": "10", "7": "7", "5": "5"}
 
 GROUP_ORDER = ["brand", "variant", "common", "additional", "fits_for"]
 
@@ -203,6 +204,19 @@ def _row3_marker(col: dict) -> Optional[str]:
     return None
 
 
+def _unique_articles(products: list) -> None:
+    """
+    Уникализация артикулов in-place: дубли получают суффиксы _2, _3.
+    Правило Ozon: «Если в вашей базе артикулы повторяются, сделайте их уникальными».
+    """
+    seen = {}
+    for p in products:
+        base = (p.get("sku") or p.get("external_id") or f"ID{p.get('id')}")
+        count = seen.get(base, 0) + 1
+        seen[base] = count
+        p["_article"] = base if count == 1 else f"{base}_{count}"
+
+
 # ========== Значения ячеек ==========
 
 def _ozon_cell_value(product: dict, col: dict, row_num: int):
@@ -212,7 +226,7 @@ def _ozon_cell_value(product: dict, col: dict, row_num: int):
     if key == "_row_num":
         return row_num
     if key == "article":
-        return product.get("sku") or product.get("external_id") or f"ID{product.get('id')}"
+        return product.get("_article") or product.get("sku") or product.get("external_id") or f"ID{product.get('id')}"
     if key == "name":
         return product.get("name")
     if key == "price":
@@ -262,6 +276,9 @@ def build_ozon_workbook(products: list, spec: Optional[dict]) -> Workbook:
     Файл, структурно идентичный XLS-шаблону Ozon от 23.09.2026:
     строки 1-4 — шапка (блоки / названия* / маркеры / подсказки), данные с строки 5.
     """
+    # ✅ Уникализация артикулов ДО построения плана
+    _unique_articles(products)
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Шаблон"
@@ -283,7 +300,7 @@ def build_ozon_workbook(products: list, spec: Optional[dict]) -> Workbook:
         })
     for col in columns:
         if col["key"] == "vat_rate":
-            col["values"] = ["Не облагается", "10", "22"]
+            col["values"] = ["Не облагается", "22", "10", "7", "5"]
         if col["key"] in ("installment", "reviews_boost"):
             col["values"] = ["Да", "Нет"]
 
@@ -406,6 +423,9 @@ def _build_extra_sheet(wb: Workbook, title: str, group_name: str, cols: list):
 # ========== Сборка книг Yandex / WB (базовая версия) ==========
 
 def build_simple_workbook(platform: str, products: list, spec: Optional[dict]) -> Workbook:
+    # ✅ Уникализация артикулов и для Yandex/WB
+    _unique_articles(products)
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Список товаров" if platform == "yandex" else "Товары"

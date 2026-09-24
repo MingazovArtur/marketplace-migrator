@@ -1482,7 +1482,16 @@ tr.empty-row td { height: 48px; opacity: 0; }
   background: var(--accent-warning);
   color: #fff;
 }
-
+/* Ресайз колонок таблицы */
+.th-resizable { position: relative; user-select: none; }
+.col-resizer {
+  position: absolute;
+  top: 0; right: -3px;
+  width: 6px; height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+}
+.col-resizer:hover, .col-resizer.active { background: var(--accent-primary); opacity: .5; }
 /* Адаптив */
 @media (max-width: 768px) {
   .mapping-columns { grid-template-columns: 1fr; }

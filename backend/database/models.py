@@ -50,6 +50,7 @@ class Category(Base):
     level = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
 
     __table_args__ = (
         Index('idx_platform_category', 'platform', 'category_id'),
@@ -223,12 +224,16 @@ class PasswordResetToken(Base):
 class PlatformCategorySpec(Base):
     """
     Спецификация категории площадки: обязательные поля, атрибуты, словари значений.
-    Источник: официальный API площадки. Обновляется по запросу пользователя или cron.
+    Источник: официальный API площадки.
+
+    ✅ ГЛОБАЛЬНЫЙ справочник: структура категорий площадки одинакова для всех
+    продавцов, поэтому строка одна на пару (platform, category_id).
+    user_id — только аудит: кто загрузил/обновил спек (nullable).
     """
     __tablename__ = "platform_category_specs"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # кто загрузил (аудит)
     platform = Column(String, nullable=False, index=True)              # ozon | yandex | wildberries
     category_id = Column(String, nullable=False, index=True)           # id категории на площадке
     category_name = Column(String, nullable=False)                     # человекочитаемое имя
@@ -240,5 +245,5 @@ class PlatformCategorySpec(Base):
     user = relationship("User", backref="category_specs")
 
     __table_args__ = (
-        UniqueConstraint("user_id", "platform", "category_id", name="uq_user_platform_category"),
+        UniqueConstraint("platform", "category_id", name="uq_platform_category"),
     )

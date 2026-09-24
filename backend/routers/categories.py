@@ -1,5 +1,10 @@
 """
-Роутер для работы со справочниками категорий и маппингом
+Роутер для работы со справочниками категорий и маппингом.
+
+✅ Изменения:
+  - добавлен GET /specs/{platform}/names — лёгкий список имён (для datalist)
+  - порядок маршрутов: /names объявлен ДО /{category_id} (иначе "names" ловится как id)
+  - детализация: key-source теперь отдаёт also `hint` — что делать если ключа нет
 """
 import logging
 from fastapi import APIRouter, HTTPException, Depends
@@ -23,7 +28,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Categories"])
 
-# ========== Спецификации категорий площадок ==========
+# ===========================================================================
+# Спецификации категорий площадок
+# ===========================================================================
 
 
 @router.post("/specs/{platform}/refresh")
@@ -35,17 +42,14 @@ async def refresh_specs(
     """
     Обновить спецификации категорий площадки через её API.
 
-    ✅ Ozon — запускается ФОНОВО через Celery (8000+ категорий),
-       возвращает task_id для polling прогресса через
-       GET /specs/{platform}/refresh/{task_id}/progress.
-
+    ✅ Ozon — фоновая загрузка через Celery (8000+ категорий),
+       возвращает task_id для polling через /specs/{platform}/refresh/{task_id}/progress.
     ✅ Yandex / WB — пока синхронно (они быстрее).
     """
     if platform not in ("ozon", "yandex", "wildberries"):
         raise HTTPException(status_code=501, detail=f"Загрузчик для {platform} ещё не реализован")
 
     raw_key = payload.api_key
-    # Fallback: серверный ключ из .env, если пользователь не ввёл свой
     if not raw_key and platform == "ozon" and settings.OZON_CLIENT_ID and settings.OZON_API_KEY:
         raw_key = f"{settings.OZON_CLIENT_ID}:{settings.OZON_API_KEY}"
 
@@ -61,9 +65,7 @@ async def refresh_specs(
                 raw_api_key=raw_key,
                 category_ids=payload.category_ids,
             )
-            logger.info(
-                f"Ozon specs refresh queued: task_id={task.id}, user={current_user.id}"
-            )
+            logger.info(f"Ozon specs refresh queued: task_id={task.id}, user={current_user.id}")
             return {
                 "success": True,
                 "task_id": task.id,
@@ -108,12 +110,7 @@ def refresh_specs_progress(
     task_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Прогресс фоновой загрузки спеков.
-
-    ✅ Использует тот же get_progress, что и миграции — единый формат
-    ответа (status/done/success/errors/percent) для фронта.
-    """
+    """Прогресс фоновой загрузки спеков (единый формат с миграциями)."""
     return get_progress(task_id)
 
 
@@ -121,33 +118,63 @@ def refresh_specs_progress(
 def spec_key_source(platform: str, current_user: User = Depends(get_current_user)):
     """
     Индикатор: есть ли серверный ключ площадки в .env.
-    ✅ Устойчив к ошибкам: при любой проблеме возвращает has_server_key=False.
+    ✅ При ошибке возвращает has_server_key=False + hint.
     """
     has_server_key = False
+    hint = ""
     try:
         if platform == "ozon":
             client_id = getattr(settings, "OZON_CLIENT_ID", "") or ""
             api_key = getattr(settings, "OZON_API_KEY", "") or ""
             has_server_key = bool(client_id.strip() and api_key.strip())
-        # Yandex/WB можно добавить аналогично при необходимости
+            if not has_server_key:
+                hint = "Задайте OZON_CLIENT_ID и OZON_API_KEY в .env или введите ключ в форме"
     except Exception as e:
         logger.warning(f"key-source check failed for {platform}: {e}")
         has_server_key = False
 
-    return {"platform": platform, "has_server_key": has_server_key}
+    return {"platform": platform, "has_server_key": has_server_key, "hint": hint}
+
+
+# ========== ВАЖНО: порядок маршрутов — /names ДО /{category_id} ==========
+
+
+@router.get("/specs/{platform}/names")
+def list_spec_names(platform: str, current_user: User = Depends(get_current_user)):
+    """
+    ✅ ЛЁГКИЙ список имён категорий спеков (для datalist/автокомплита).
+    Возвращает ТОЛЬКО имена (category_name), без атрибутов и словарей.
+    Размер ответа ~50-150 КБ (vs 10+ МБ у полного /specs/{platform}).
+
+    Используется в MigrateModal для выпадающего списка точных имён.
+    """
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(PlatformCategorySpec.category_name)
+            .filter(PlatformCategorySpec.platform == platform)
+            .order_by(PlatformCategorySpec.category_name)
+            .all()
+        )
+        names = [r[0] for r in rows if r[0]]
+        logger.info(f"📋 /specs/{platform}/names: {len(names)} категорий для user={current_user.id}")
+        return {
+            "platform": platform,
+            "count": len(names),
+            "names": names,
+        }
+    finally:
+        db.close()
 
 
 @router.get("/specs/{platform}")
 def list_specs(platform: str, current_user: User = Depends(get_current_user)):
-    """Список спеков всех категорий площадки для текущего пользователя."""
+    """Полный список спеков всех категорий площадки (с атрибутами, словарями)."""
     db = SessionLocal()
     try:
         rows = (
             db.query(PlatformCategorySpec)
-            .filter(
-                PlatformCategorySpec.user_id == current_user.id,
-                PlatformCategorySpec.platform == platform,
-            )
+            .filter(PlatformCategorySpec.platform == platform)
             .order_by(PlatformCategorySpec.category_name)
             .all()
         )
@@ -162,13 +189,12 @@ def list_specs(platform: str, current_user: User = Depends(get_current_user)):
 
 @router.get("/specs/{platform}/{category_id}")
 def get_spec(platform: str, category_id: str, current_user: User = Depends(get_current_user)):
-    """Спек одной категории."""
+    """Спек одной категории по её category_id."""
     db = SessionLocal()
     try:
         row = (
             db.query(PlatformCategorySpec)
             .filter(
-                PlatformCategorySpec.user_id == current_user.id,
                 PlatformCategorySpec.platform == platform,
                 PlatformCategorySpec.category_id == category_id,
             )
@@ -181,7 +207,9 @@ def get_spec(platform: str, category_id: str, current_user: User = Depends(get_c
         db.close()
 
 
-# ========== Справочники категорий ==========
+# ===========================================================================
+# Справочники категорий
+# ===========================================================================
 
 
 @router.get("/categories/{platform}")
@@ -224,7 +252,9 @@ def refresh_categories_with_api(
     }
 
 
-# ========== Маппинг категорий ==========
+# ===========================================================================
+# Маппинг категорий
+# ===========================================================================
 
 
 @router.get("/category-mapping")

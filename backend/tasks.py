@@ -1,26 +1,14 @@
 """
 Celery задачи для фоновой миграции товаров и загрузки спеков площадок.
-
-Исправления:
-  1. Убран дубликат detect_platform — используется единая функция из services.platform_utils
-  2. Цена пересчитывается по PRICE_RULES (например, ×1.15 для Wildberries)
-  3. mapped_category сохраняется и в одиночной, и в пакетной миграции
-  4. Ошибки пишутся в поле error_message товара
-  5. Автомаппинг категорий: если категории нет — маппим по названию товара
-  6. Все миграции логируются в таблицу migration_logs (Фаза 3)
-  7. ✅ Прогресс публикуется через self.update_state (работает с AsyncResult.info)
-  8. ✅ Унифицированные имена полей: status ∈ {pending, progress, completed, failed}, done
-  9. ✅ t0 в самом начале задач — защита от NameError в except
- 10. ✅ Убрана искусственная задержка time.sleep(1) в пакетной миграции
- 11. ✅ Задача refresh_specs_task — фоновая загрузка спеков площадок с прогрессом
 """
 import logging
 import time
+
 from celery_app import celery_app
 from services.category_mapper import CategoryMapper
 from services.category_service import category_service
-from services.platform_utils import detect_platform          # ✅ единая функция
-from core.platforms import PLATFORM_CONFIG, PRICE_RULES      # ✅ правила цен
+from services.platform_utils import detect_platform
+from core.platforms import PLATFORM_CONFIG, PRICE_RULES
 from database.repository import repo, op_log, stats_repo
 
 logger = logging.getLogger(__name__)
@@ -31,13 +19,141 @@ category_mapper = CategoryMapper()
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
 
+def _safe_float(value, default: float = 0.0) -> float:
+    """Безопасное преобразование в float (строки, Decimal, None → default)."""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        logger.warning(f"⚠️ Не удалось преобразовать '{value}' в float → {default}")
+        return default
+
+
+def _base_source(source_value: str) -> str:
+    """
+    Базовый источник импорта — часть до первой стрелки « → ».
+    Защита от накопления «Магнит Маркет (Файл) → Ozon → Ozon → Ozon»
+    при повторных миграциях одного и того же товара.
+    """
+    if not source_value:
+        return "неизвестно"
+    return str(source_value).split(" → ")[0].strip()
+
+
+def _spec_name_exists(platform: str, name) -> bool:
+    """Существует ли ТОЧНОЕ имя категории в спеках площадки."""
+    if not name:
+        return False
+    from database.session import SessionLocal
+    from database.models import PlatformCategorySpec
+    db = SessionLocal()
+    try:
+        return db.query(PlatformCategorySpec.id).filter(
+            PlatformCategorySpec.platform == platform,
+            PlatformCategorySpec.category_name == str(name).strip(),
+        ).first() is not None
+    finally:
+        db.close()
+
+
+def _match_spec_by_text(text, platform: str):
+    """
+    Умный поиск спека по тексту товара/категории.
+    Ищет ТОЧНОЕ имя из platform_category_specs, где:
+      1) ТИП (часть после '/') полностью входит в текст — самый высокий приоритет (score ≥ 100);
+      2) ТИП начинается с введённой подстроки (≥4 символов) — префикс-матчинг (score ≥ 50).
+    Берёт самый длинный совпавший тип (более специфичный).
+    """
+    if not text:
+        return None
+    from database.session import SessionLocal
+    from database.models import PlatformCategorySpec
+    low = str(text).lower().strip()
+    if not low:
+        return None
+    db = SessionLocal()
+    try:
+        names = [n for (n,) in db.query(PlatformCategorySpec.category_name)
+                 .filter(PlatformCategorySpec.platform == platform).all()]
+    finally:
+        db.close()
+
+    best, best_score = None, 0
+    for name in names:
+        type_part = name.lower().split("/")[-1].strip()
+        if not type_part or len(type_part) < 4:
+            continue
+        score = 0
+        if type_part in low:
+            score = 100 + len(type_part)
+        elif len(low) >= 4 and type_part.startswith(low):
+            score = 50 + len(type_part)
+        if score > best_score:
+            best, best_score = name, score
+    return best
+
+
+def _pick_target_category(product: dict, edited_category, target_platform: str, user_id: int):
+    """
+    Единая точка определения целевой категории. Возвращает (имя_спека, источник).
+
+    Приоритеты:
+      1) категория из модалки миграции — если это ТОЧНОЕ имя спека;
+      2) уже выставленный product.mapped_category — если он валиден;
+      3) ручное правило из раздела «Маппинг»;
+      4) авто-маппинг по тексту + проверка по спекам;
+      5) поиск типа товара по спекам (с префикс-матчингом);
+      6) None → миграция завершится ошибкой с инструкцией.
+    """
+    # 1) Категория из модалки
+    if edited_category and _spec_name_exists(target_platform, edited_category):
+        return str(edited_category).strip(), "модалка"
+
+    # 2) Уже выставленный mapped_category
+    existing = product.get("mapped_category")
+    if existing and _spec_name_exists(target_platform, existing):
+        return existing, "mapped_category"
+
+    # 3) Ручной маппинг
+    source_platform = detect_platform(product.get("source"))
+    mapping = category_service.get_mapping_for_product(
+        source_platform, product.get("category"), target_platform, user_id
+    )
+    if mapping and mapping.get("is_manual"):
+        name = mapping.get("target_category_name")
+        if _spec_name_exists(target_platform, name):
+            return name, "ручной маппинг"
+        logger.warning(f"⚠️ Ручной маппинг указывает на '{name}', но её нет в спеках — игнорирую")
+
+    # 4) Авто-маппинг + проверка
+    category_name = product.get("category")
+    map_text = (
+        category_name if category_name and category_name != "Не указана"
+        else (product.get("name") or "Дом и сад")
+    )
+    auto_map = category_mapper.auto_map_by_text(map_text, target_platform)
+    auto_name = auto_map.get("name") if auto_map else None
+    if auto_name and auto_name != "Неизвестно":
+        if _spec_name_exists(target_platform, auto_name):
+            return auto_name, "авто-маппинг"
+        logger.warning(
+            f"⚠️ Авто-маппинг нашёл '{auto_name}', но такой категории нет в спеках {target_platform}"
+        )
+
+    # 5) Поиск типа товара по спекам
+    spec_name = (_match_spec_by_text(map_text, target_platform)
+                 or _match_spec_by_text(product.get("name"), target_platform))
+    if spec_name:
+        return spec_name, "поиск по спекам"
+
+    return None, "не найдено"
+
+
 def get_progress(task_id: str) -> dict:
     """
-    Возвращает текущий прогресс задачи по её ID в унифицированном формате:
-        status: 'pending' | 'progress' | 'completed' | 'failed'
-        + поля total, done, success, errors, percent, error (опц.)
-
-    Работает одинаково для задач миграции И задач загрузки спеков.
+    Текущий прогресс задачи по ID: status ∈ pending|progress|completed|failed
+    + total, done, success, errors, percent, error_details.
     """
     try:
         result = celery_app.AsyncResult(task_id)
@@ -48,8 +164,7 @@ def get_progress(task_id: str) -> dict:
             done = meta.get("done", 0)
             return {
                 "status": "progress",
-                "total": total,
-                "done": done,
+                "total": total, "done": done,
                 "success": meta.get("success", 0),
                 "errors": meta.get("errors", 0),
                 "percent": meta.get("percent", int(done * 100 / total) if total else 0),
@@ -59,17 +174,13 @@ def get_progress(task_id: str) -> dict:
         if result.state == "SUCCESS":
             r = result.result or {}
             if isinstance(r, dict):
-                # ✅ Поддержка обоих форматов: миграций (success) и спеков (fetched)
-                total = r.get("total") or r.get("fetched", 0) + r.get("errors", 0)
+                total = r.get("total") or (r.get("fetched", 0) + r.get("errors", 0))
                 success = r.get("success") or r.get("fetched", 0)
                 errors = r.get("errors", 0)
                 return {
                     "status": "completed",
-                    "total": total,
-                    "done": total,
-                    "success": success,
-                    "errors": errors,
-                    "percent": 100,
+                    "total": total, "done": total,
+                    "success": success, "errors": errors, "percent": 100,
                     "error_details": r.get("error_details", []),
                     "platform": r.get("platform"),
                 }
@@ -82,34 +193,14 @@ def get_progress(task_id: str) -> dict:
                 "error": str(result.info) if result.info else "Неизвестная ошибка",
             }
 
-        # PENDING / STARTED / RECEIVED
-        return {
-            "status": "pending",
-            "total": 0, "done": 0, "success": 0, "errors": 0, "percent": 0,
-        }
+        return {"status": "pending", "total": 0, "done": 0, "success": 0, "errors": 0, "percent": 0}
 
     except Exception as e:
         logger.warning(f"Не удалось получить прогресс задачи {task_id}: {e}")
         return {
             "status": "failed",
-            "total": 0, "done": 0, "success": 0, "errors": 0, "percent": 0,
-            "error": str(e),
+            "total": 0, "done": 0, "success": 0, "errors": 0, "percent": 0, "error": str(e),
         }
-
-
-def _resolve_target_category(category_name: str, product_name: str, target_platform: str):
-    """
-    Определяет целевую категорию: ручной маппинг не проверяется здесь
-    (его делает вызывающий код), здесь — только авто-маппинг.
-    ✅ Если категории нет или она 'Не указана' — маппим по названию товара.
-    """
-    map_text = (
-        category_name
-        if category_name and category_name != "Не указана"
-        else (product_name or "Дом и сад")
-    )
-    auto_map = category_mapper.auto_map_by_text(map_text, target_platform)
-    return auto_map.get("name", "Неизвестно"), map_text
 
 
 # ---------------------------------------------------------------------------
@@ -121,10 +212,10 @@ def migrate_product_task(self, product_id: int, target_platform: str,
                          user_id: int, edited_data: dict = None):
     """
     Фоновая задача для одиночной миграции товара.
-    ВАЖНО: проверяет, что товар принадлежит user_id, перед обновлением.
+    Проверяет, что товар принадлежит user_id, перед обновлением.
     """
-    t0 = time.perf_counter()                 # ✅ t0 в самом начале
-    final_price = None                       # ✅ защита от NameError в except
+    t0 = time.perf_counter()
+    final_price = None
 
     try:
         product = repo.get_by_id(product_id, user_id=user_id)
@@ -134,82 +225,75 @@ def migrate_product_task(self, product_id: int, target_platform: str,
 
         repo.update(product_id, {"status": "processing", "error_message": None}, user_id=user_id)
 
-        # --- Запоминаем старые значения для журнала ---
-        old_price = product.get("price")
+        old_price = _safe_float(product.get("price"))
         old_category = product.get("category")
-        old_source_platform = detect_platform(product.get("source"))
+        source_platform = detect_platform(product.get("source"))
 
-        source_platform = old_source_platform
-        category_name = edited_data.get("category") if edited_data else product.get("category")
-
-        # --- Маппинг категории: ручной приоритетнее авто ---
-        mapping = category_service.get_mapping_for_product(
-            source_platform, category_name, target_platform, user_id
+        edited_category = edited_data.get("category") if edited_data else None
+        target_category_name, how = _pick_target_category(
+            product, edited_category, target_platform, user_id
         )
+        if target_category_name:
+            logger.info(f"📂 Товар {product_id}: категория '{target_category_name}' (источник: {how})")
 
-        if mapping and mapping.get("is_manual"):
-            target_category_name = mapping["target_category_name"]
-            logger.info(f"Использован ручной маппинг: {category_name} -> {target_category_name}")
-        else:
-            target_category_name, map_text = _resolve_target_category(
-                category_name, product.get("name"), target_platform
-            )
-            logger.info(f"Использован авто-маппинг: {map_text} -> {target_category_name}")
-
-        # --- ✅ Пересчёт цены по PRICE_RULES ---
-        original_price = edited_data.get("price") if edited_data else (product.get("price") or 0)
-        price_multiplier = PRICE_RULES.get(target_platform, 1.0)
+        original_price = _safe_float(
+            edited_data.get("price") if edited_data else product.get("price")
+        )
+        price_multiplier = _safe_float(PRICE_RULES.get(target_platform, 1.0), default=1.0)
         final_price = round(original_price * price_multiplier, 2)
 
-        # Небольшая задержка, чтобы было видно статус "processing" в UI
         time.sleep(0.3)
 
         final_name = edited_data.get("name") if edited_data else product.get("name")
-        new_source = f"{product['source']} → {PLATFORM_CONFIG[target_platform]['name']}"
+        base_source = _base_source(product.get("source"))
+        new_source = f"{base_source} → {PLATFORM_CONFIG[target_platform]['name']}"
+
+        if target_category_name is None:
+            error_msg = (
+                f"Не найдена точная категория в спеках {target_platform} для товара '{final_name}'. "
+                f"Выберите категорию в модалке миграции из выпадающего списка "
+                f"(формат «Родитель / Тип», например «Одежда / Футболка») "
+                f"или задайте её в разделе «Маппинг». Список имён — на странице «Спецификации»."
+            )
+            repo.update(product_id, {
+                "status": "error",
+                "name": final_name,
+                "price": final_price,
+                "mapped_category": None,
+                "error_message": error_msg,
+            }, user_id=user_id)
+            logger.warning(f"⚠️ Товар {product_id}: {error_msg}")
+            return {"status": "error", "message": error_msg, "product_id": product_id}
 
         repo.update(product_id, {
             "status": "success",
             "source": new_source,
             "name": final_name,
             "price": final_price,
-            "category": category_name,
             "mapped_category": target_category_name,
             "error_message": None,
         }, user_id=user_id)
 
         duration_ms = int((time.perf_counter() - t0) * 1000)
-
         stats_repo.record(
             user_id=user_id, operation="migrate", platform=target_platform,
-            status="success", total_items=1, success_items=1,
-            duration_ms=duration_ms,
+            status="success", total_items=1, success_items=1, duration_ms=duration_ms,
         )
-
-        # --- ✅ Журнал миграции ---
         op_log.log_migration(
-            user_id=user_id,
-            product_id=product_id,
-            product_name=final_name,
-            source_platform=source_platform,
-            target_platform=target_platform,
-            old_price=old_price,
-            new_price=final_price,
-            old_category=old_category,
-            new_category=target_category_name,
-            status="success",
-            error_message=None,
-            is_batch=False,
-            batch_id=self.request.id,
+            user_id=user_id, product_id=product_id, product_name=final_name,
+            source_platform=source_platform, target_platform=target_platform,
+            old_price=old_price, new_price=final_price,
+            old_category=old_category, new_category=target_category_name,
+            status="success", error_message=None, is_batch=False, batch_id=self.request.id,
         )
-
         logger.info(
-            f"✅ Товар {product_id} успешно мигрирован пользователем {user_id} "
-            f"(цена: {old_price} → {final_price})"
+            f"✅ Товар {product_id} мигрирован (цена: {old_price} → {final_price}, "
+            f"категория: {target_category_name})"
         )
         return {"status": "completed", "product_id": product_id}
 
     except Exception as e:
-        logger.error(f"❌ Ошибка миграции товара {product_id}: {e}")
+        logger.error(f"❌ Ошибка миграции товара {product_id}: {e}", exc_info=True)
         duration_ms = int((time.perf_counter() - t0) * 1000)
         try:
             repo.update(product_id, {"status": "error", "error_message": str(e)}, user_id=user_id)
@@ -218,23 +302,15 @@ def migrate_product_task(self, product_id: int, target_platform: str,
         try:
             stats_repo.record(
                 user_id=user_id, operation="migrate", platform=target_platform,
-                status="error", total_items=1, failed_items=1,
-                duration_ms=duration_ms,
+                status="error", total_items=1, failed_items=1, duration_ms=duration_ms,
             )
         except Exception:
             pass
-        # --- ✅ Журнал ошибки миграции ---
         try:
             op_log.log_migration(
-                user_id=user_id,
-                product_id=product_id,
-                product_name=None,
-                source_platform=None,
-                target_platform=target_platform,
-                status="error",
-                error_message=str(e),
-                is_batch=False,
-                batch_id=self.request.id,
+                user_id=user_id, product_id=product_id, product_name=None,
+                source_platform=None, target_platform=target_platform,
+                status="error", error_message=str(e), is_batch=False, batch_id=self.request.id,
             )
         except Exception:
             pass
@@ -248,20 +324,15 @@ def migrate_product_task(self, product_id: int, target_platform: str,
 @celery_app.task(bind=True, name="tasks.migrate_batch_task")
 def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: int):
     """Пакетная миграция товаров с отслеживанием прогресса и журналом"""
-    t0 = time.perf_counter()                 # ✅ t0 в самом начале
+    t0 = time.perf_counter()
     total = len(product_ids)
     success_count = 0
     error_count = 0
     errors = []
 
-    # Сразу публикуем "старт": 0%
-    self.update_state(
-        state="PROGRESS",
-        meta={
-            "total": total, "done": 0, "success": 0, "errors": 0,
-            "percent": 0, "error_details": [],
-        },
-    )
+    self.update_state(state="PROGRESS", meta={
+        "total": total, "done": 0, "success": 0, "errors": 0, "percent": 0, "error_details": [],
+    })
 
     for index, product_id in enumerate(product_ids, 1):
         try:
@@ -269,80 +340,78 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
             if not product:
                 error_count += 1
                 errors.append({"id": product_id, "error": "Товар не найден или не принадлежит вам"})
+                self.update_state(state="PROGRESS", meta={
+                    "total": total, "done": index, "success": success_count,
+                    "errors": error_count,
+                    "percent": int(index * 100 / total) if total else 0,
+                    "error_details": errors[:10],
+                })
+                continue
+
+            old_price = _safe_float(product.get("price"))
+            old_category = product.get("category")
+            source_platform = detect_platform(product.get("source"))
+
+            target_category_name, how = _pick_target_category(
+                product, None, target_platform, user_id
+            )
+
+            original_price = _safe_float(product.get("price"))
+            price_multiplier = _safe_float(PRICE_RULES.get(target_platform, 1.0), default=1.0)
+            final_price = round(original_price * price_multiplier, 2)
+            base_source = _base_source(product.get("source"))
+            new_source = f"{base_source} → {PLATFORM_CONFIG[target_platform]['name']}"
+
+            if target_category_name is None:
+                error_msg = (
+                    "Не найдена точная категория в спеках "
+                    f"{target_platform}. Задайте категорию товару (массово: «Обновить цену/бренд» → "
+                    "«Категория назначения») или создайте правило в «Маппинг»."
+                )
+                repo.update(product_id, {
+                    "status": "error",
+                    "price": final_price,
+                    "mapped_category": None,
+                    "error_message": error_msg,
+                }, user_id=user_id)
+                error_count += 1
+                errors.append({"id": product_id, "error": error_msg})
                 try:
                     op_log.log_migration(
-                        user_id=user_id, product_id=product_id, product_name=None,
-                        source_platform=None, target_platform=target_platform,
-                        status="error", error_message="Товар не найден или не принадлежит вам",
+                        user_id=user_id, product_id=product_id,
+                        product_name=product.get("name"),
+                        source_platform=source_platform, target_platform=target_platform,
+                        old_price=old_price, new_price=final_price,
+                        old_category=old_category, new_category=None,
+                        status="error", error_message=error_msg,
                         is_batch=True, batch_id=self.request.id,
                     )
                 except Exception:
                     pass
-                self.update_state(
-                    state="PROGRESS",
-                    meta={
-                        "total": total, "done": index,
-                        "success": success_count, "errors": error_count,
-                        "percent": int(index * 100 / total) if total else 0,
-                        "error_details": errors[:10],
-                    },
-                )
-                continue
-
-            # --- Запоминаем старые значения ---
-            old_price = product.get("price")
-            old_category = product.get("category")
-            source_platform = detect_platform(product.get("source"))
-            category_name = product.get("category")
-
-            # --- Маппинг категории ---
-            mapping = category_service.get_mapping_for_product(
-                source_platform, category_name, target_platform, user_id
-            )
-
-            if mapping and mapping.get("is_manual"):
-                target_category_name = mapping["target_category_name"]
+                logger.warning(f"⚠️ Товар {product_id}: {error_msg}")
             else:
-                target_category_name, _ = _resolve_target_category(
-                    category_name, product.get("name"), target_platform
-                )
-
-            # --- ✅ Пересчёт цены по PRICE_RULES ---
-            original_price = product.get("price") or 0
-            price_multiplier = PRICE_RULES.get(target_platform, 1.0)
-            final_price = round(original_price * price_multiplier, 2)
-
-            new_source = f"{product['source']} → {PLATFORM_CONFIG[target_platform]['name']}"
-            repo.update(product_id, {
-                "status": "success",
-                "source": new_source,
-                "price": final_price,
-                "mapped_category": target_category_name,
-                "error_message": None,
-            }, user_id=user_id)
-
-            # --- ✅ Журнал успешной миграции ---
-            try:
-                op_log.log_migration(
-                    user_id=user_id,
-                    product_id=product_id,
-                    product_name=product.get("name"),
-                    source_platform=source_platform,
-                    target_platform=target_platform,
-                    old_price=old_price,
-                    new_price=final_price,
-                    old_category=old_category,
-                    new_category=target_category_name,
-                    status="success",
-                    error_message=None,
-                    is_batch=True,
-                    batch_id=self.request.id,
-                )
-            except Exception:
-                pass
-
-            success_count += 1
-            logger.info(f"✅ Товар {product_id} мигрирован (цена: {old_price} → {final_price})")
+                logger.info(f"📂 Товар {product_id}: категория '{target_category_name}' (источник: {how})")
+                repo.update(product_id, {
+                    "status": "success",
+                    "source": new_source,
+                    "price": final_price,
+                    "mapped_category": target_category_name,
+                    "error_message": None,
+                }, user_id=user_id)
+                try:
+                    op_log.log_migration(
+                        user_id=user_id, product_id=product_id,
+                        product_name=product.get("name"),
+                        source_platform=source_platform, target_platform=target_platform,
+                        old_price=old_price, new_price=final_price,
+                        old_category=old_category, new_category=target_category_name,
+                        status="success", error_message=None,
+                        is_batch=True, batch_id=self.request.id,
+                    )
+                except Exception:
+                    pass
+                success_count += 1
+                logger.info(f"✅ Товар {product_id} мигрирован (цена: {old_price} → {final_price})")
 
         except Exception as e:
             error_count += 1
@@ -353,32 +422,20 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
                 pass
             try:
                 op_log.log_migration(
-                    user_id=user_id,
-                    product_id=product_id,
-                    product_name=None,
-                    source_platform=None,
-                    target_platform=target_platform,
-                    status="error",
-                    error_message=str(e),
-                    is_batch=True,
-                    batch_id=self.request.id,
+                    user_id=user_id, product_id=product_id, product_name=None,
+                    source_platform=None, target_platform=target_platform,
+                    status="error", error_message=str(e), is_batch=True, batch_id=self.request.id,
                 )
             except Exception:
                 pass
 
-        # ✅ ПУБЛИКАЦИЯ ПРОГРЕССА после каждой итерации через self.update_state
         try:
-            self.update_state(
-                state="PROGRESS",
-                meta={
-                    "total": total,
-                    "done": index,
-                    "success": success_count,
-                    "errors": error_count,
-                    "percent": int(index * 100 / total) if total else 0,
-                    "error_details": errors[:10],
-                },
-            )
+            self.update_state(state="PROGRESS", meta={
+                "total": total, "done": index,
+                "success": success_count, "errors": error_count,
+                "percent": int(index * 100 / total) if total else 0,
+                "error_details": errors[:10],
+            })
         except Exception as e:
             logger.warning(f"Не удалось опубликовать прогресс: {e}")
 
@@ -387,7 +444,6 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
         f"✅ Пакетная миграция завершена пользователем {user_id}: "
         f"{success_count}/{total} успешно за {duration_ms} мс"
     )
-
     try:
         stats_repo.record(
             user_id=user_id, operation="migrate", platform=target_platform,
@@ -398,15 +454,10 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
     except Exception as e:
         logger.warning(f"Не удалось записать статистику пакета: {e}")
 
-    # ✅ Возвращаем финальный результат — Celery сам сохранит его в SUCCESS
     return {
-        "status": "completed",
-        "total": total,
-        "success": success_count,
-        "errors": error_count,
-        "error_details": errors[:10],
-        "percent": 100,
-        "duration_ms": duration_ms,
+        "status": "completed", "total": total,
+        "success": success_count, "errors": error_count,
+        "error_details": errors[:10], "percent": 100, "duration_ms": duration_ms,
     }
 
 
@@ -431,14 +482,10 @@ def download_photos_task(self, product_id: int, user_id: int):
 
     try:
         op_log.log_file_operation(
-            user_id=user_id,
-            operation="media_download",
-            platform=None,
+            user_id=user_id, operation="media_download", platform=None,
             filename=f"товар #{product_id}",
             status="success" if saved else "error",
-            total_rows=len(urls),
-            imported=len(saved),
-            failed=len(urls) - len(saved),
+            total_rows=len(urls), imported=len(saved), failed=len(urls) - len(saved),
         )
     except Exception as e:
         logger.warning(f"Не удалось записать лог скачивания фото: {e}")
@@ -448,32 +495,18 @@ def download_photos_task(self, product_id: int, user_id: int):
 
 
 # ---------------------------------------------------------------------------
-# ✅ НОВОЕ: Фоновая загрузка спеков площадок
+# Фоновая загрузка спеков площадок
 # ---------------------------------------------------------------------------
 
 @celery_app.task(bind=True, name="tasks.refresh_specs_task")
 def refresh_specs_task(self, user_id: int, platform: str, raw_api_key: str, category_ids=None):
-    """
-    Фоновая загрузка спеков категорий площадки через её API.
-    
-    Аргументы:
-        user_id: ID пользователя
-        platform: 'ozon' | 'yandex' | 'wildberries'
-        raw_api_key: строка формата 'CLIENT_ID:API_KEY' (для Ozon)
-        category_ids: опциональный список ID категорий (для частичной загрузки)
-    
-    Прогресс публикуется через self.update_state — UI получает live-обновления.
-    Использует тот же формат (status/done/success/errors/percent) что и миграции,
-    чтобы `get_progress` работал без изменений.
-    """
+    """Фоновая загрузка спеков категорий площадки через её API."""
     import asyncio
-    # Ленивый импорт — защита от circular import при старте Celery
     from services.ozon_specs import refresh_ozon_specs
 
     t0 = time.perf_counter()
     logger.info(f"🚀 Старт загрузки спеков {platform} для пользователя {user_id}")
 
-    # ✅ Колбэк прогресса — передаётся в refresh_ozon_specs
     def progress_cb(p: dict):
         try:
             total = p.get("total", 0)
@@ -481,37 +514,19 @@ def refresh_specs_task(self, user_id: int, platform: str, raw_api_key: str, cate
             errors = p.get("errors", 0)
             done = fetched + errors
             percent = int(done * 100 / total) if total else 0
-            self.update_state(
-                state="PROGRESS",
-                meta={
-                    "total": total,
-                    "done": done,
-                    "success": fetched,
-                    "errors": errors,
-                    "percent": percent,
-                    "platform": platform,
-                    "error_details": [],
-                },
-            )
+            self.update_state(state="PROGRESS", meta={
+                "total": total, "done": done, "success": fetched, "errors": errors,
+                "percent": percent, "platform": platform, "error_details": [],
+            })
         except Exception as e:
             logger.warning(f"Не удалось опубликовать прогресс спеков: {e}")
 
     try:
         if platform == "ozon":
-            result = asyncio.run(
-                refresh_ozon_specs(
-                    user_id=user_id,
-                    raw_api_key=raw_api_key,
-                    category_ids=category_ids,
-                    progress_cb=progress_cb,
-                )
-            )
-        # elif platform == "yandex":
-        #     from services.yandex_specs import refresh_yandex_specs
-        #     result = asyncio.run(refresh_yandex_specs(...))
-        # elif platform == "wildberries":
-        #     from services.wb_specs import refresh_wildberries_specs
-        #     result = asyncio.run(refresh_wildberries_specs(...))
+            result = asyncio.run(refresh_ozon_specs(
+                user_id=user_id, raw_api_key=raw_api_key,
+                category_ids=category_ids, progress_cb=progress_cb,
+            ))
         else:
             raise ValueError(f"Загрузчик спеков для {platform} ещё не реализован")
 
@@ -519,12 +534,8 @@ def refresh_specs_task(self, user_id: int, platform: str, raw_api_key: str, cate
         errors = result.get("errors", 0)
         total = fetched + errors
         duration_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(f"✅ Спеки {platform} загружены: {fetched} категорий, {errors} ошибок за {duration_ms} мс")
 
-        logger.info(
-            f"✅ Спеки {platform} загружены: {fetched} категорий, {errors} ошибок за {duration_ms} мс"
-        )
-
-        # --- Статистика ---
         try:
             stats_repo.record(
                 user_id=user_id, operation="specs_refresh", platform=platform,
@@ -536,39 +547,23 @@ def refresh_specs_task(self, user_id: int, platform: str, raw_api_key: str, cate
             logger.warning(f"Не удалось записать статистику спеков: {e}")
 
         return {
-            "status": "completed",
-            "platform": platform,
-            "total": total,
-            "done": total,
-            "success": fetched,
-            "fetched": fetched,
-            "errors": errors,
-            "percent": 100,
-            "error_details": result.get("error_details", []),
-            "duration_ms": duration_ms,
+            "status": "completed", "platform": platform, "total": total, "done": total,
+            "success": fetched, "fetched": fetched, "errors": errors, "percent": 100,
+            "error_details": result.get("error_details", []), "duration_ms": duration_ms,
         }
 
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки спеков {platform}: {e}", exc_info=True)
         duration_ms = int((time.perf_counter() - t0) * 1000)
-
         try:
             stats_repo.record(
                 user_id=user_id, operation="specs_refresh", platform=platform,
-                status="error", total_items=0, failed_items=1,
-                duration_ms=duration_ms,
+                status="error", total_items=0, failed_items=1, duration_ms=duration_ms,
             )
         except Exception:
             pass
-
         return {
-            "status": "error",
-            "platform": platform,
-            "total": 0,
-            "done": 0,
-            "success": 0,
-            "errors": 1,
-            "percent": 0,
-            "message": str(e),
-            "error_details": [{"error": str(e)}],
+            "status": "error", "platform": platform, "total": 0, "done": 0,
+            "success": 0, "errors": 1, "percent": 0,
+            "message": str(e), "error_details": [{"error": str(e)}],
         }

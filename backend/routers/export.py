@@ -118,7 +118,7 @@ def export_template(
     )
 
 
-# ==================== ФАЙЛ ДЛЯ ЛК ПЛОЩАДКИ ====================
+# ==================== ФАЙЛ ДЛЯ ЛК ПЛОЩАДКИ (старый путь) ====================
 @limiter.limit("10/minute;100/day")
 @router.get("/export/platform/{platform}")
 def export_for_platform(
@@ -179,6 +179,8 @@ def export_for_platform(
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
+
+# ==================== ВАЛИДАЦИЯ ПО СПЕКАМ (перед экспортом) ====================
 @router.get("/export/validate/{platform}")
 def validate_export(
     platform: str,
@@ -187,6 +189,9 @@ def validate_export(
     """
     Проверка готовности товаров к экспорту по спекам площадки.
     Возвращает детальный список проблем с severity: error (блокирует) / warning.
+
+    Дополнительно возвращает `missing_specs` — список категорий, для которых
+    нет спека (т.е. маппинг указывает на «широкую» категорию вместо «Родитель / Тип»).
     """
     db = SessionLocal()
     try:
@@ -194,7 +199,7 @@ def validate_export(
         products = query.all()
 
         if not products:
-            return {"total": 0, "errors": 0, "warnings": 0, "issues": []}
+            return {"total": 0, "errors": 0, "warnings": 0, "issues": [], "missing_specs": []}
 
         # Конвертируем товары в dict
         product_dicts = []
@@ -203,6 +208,7 @@ def validate_export(
                 "id": p.id,
                 "name": p.name,
                 "sku": p.sku,
+                "external_id": p.external_id,
                 "price": p.price,
                 "category": p.category,
                 "mapped_category": p.mapped_category,
@@ -213,33 +219,59 @@ def validate_export(
                 "package_height_mm": p.package_height_mm,
                 "package_length_mm": p.package_length_mm,
                 "okpd_code": p.okpd_code,
+                "photos": p.photos or [],
                 "attributes": [
                     {"name": a.name, "value": a.value} for a in (p.attributes or [])
                 ],
             })
 
-        # Подгружаем спеки для всех категорий товаров
+        # ✅ Подгружаем ГЛОБАЛЬНЫЕ спеки для всех категорий товаров (без user_id)
         categories = {
             (p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts
         }
         specs = (
             db.query(PlatformCategorySpec)
             .filter(
-                PlatformCategorySpec.user_id == current_user.id,
                 PlatformCategorySpec.platform == platform,
                 PlatformCategorySpec.category_name.in_(categories),
             )
             .all()
         )
-        specs_by_category = {s.category_name: s.spec for s in specs}
+        specs_by_name = {s.category_name: s.spec for s in specs}
+
+        # ✅ Категории без спека — критично для Ozon
+        missing_specs = sorted(cat for cat in categories if cat not in specs_by_name)
+        specs_by_category = {cat: specs_by_name.get(cat) for cat in categories}
 
         # Валидация по спекам
         from services.spec_validator import validate_products_by_specs
         result = validate_products_by_specs(product_dicts, specs_by_category, platform)
 
+        # Добавляем информацию об отсутствии спеков
+        result["missing_specs"] = missing_specs
+        if missing_specs and platform == "ozon":
+            result.setdefault("issues", []).append({
+                "product_id": None,
+                "product_name": "Система",
+                "category": "—",
+                "issues": [{
+                    "field": "spec",
+                    "message": (
+                        f"Нет спека Ozon для {len(missing_specs)} категорий: "
+                        f"{', '.join(missing_specs[:5])}{'…' if len(missing_specs) > 5 else ''}. "
+                        f"В маппинге выберите точную категорию в формате «Родитель / Тип» "
+                        f"(список — на странице «Спецификации»)."
+                    ),
+                    "severity": "error",
+                }],
+            })
+            # Пересчёт счётчиков
+            result["errors"] = result.get("errors", 0) + 1
+
         return result
     finally:
         db.close()
+
 
 # ==================== ОТЧЁТ ПО ВСЕМ ТОВАРАМ ====================
 @limiter.limit("5/minute;50/day")
@@ -292,13 +324,21 @@ def export_migration_report(
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
+
+# ==================== XLSX v2 ПОД РЕАЛЬНЫЙ ШАБЛОН OZON ====================
 @router.get("/export/xlsx/{platform}")
 def export_xlsx_v2(
     platform: str,
     status: str = "success",
     current_user: User = Depends(get_current_user),
 ):
-    # ✅ Защита от пустого/невалидного status
+    """
+    XLSX v2: файл, СТРУКТТУРНО идентичный реальному шаблону площадки.
+    ✅ Глобальные спеки (без user_id)
+    ✅ Отсев товаров с error-issues (иначе Ozon отклонит)
+    ✅ Громкая ошибка если спека нет для категории (иначе файл без атрибутов)
+    """
+    # Защита от пустого/невалидного status
     if not status or status not in ("success", "pending", "processing", "error", "all"):
         status = "success"
 
@@ -310,10 +350,10 @@ def export_xlsx_v2(
         products = query.all()
 
         if not products:
-            # ✅ Понятное сообщение вместо 404
             raise HTTPException(
                 status_code=400,
-                detail=f"Нет товаров со статусом '{status}'. Импортируйте товары и выполните миграцию (кнопка «Мигрировать») перед выгрузкой."
+                detail=f"Нет товаров со статусом '{status}'. "
+                       f"Импортируйте товары и выполните миграцию (кнопка «Мигрировать») перед выгрузкой.",
             )
 
         product_dicts = []
@@ -332,6 +372,7 @@ def export_xlsx_v2(
                 "package_width_mm": p.package_width_mm,
                 "package_height_mm": p.package_height_mm,
                 "package_length_mm": p.package_length_mm,
+                "okpd_code": p.okpd_code,
                 "units_per_item": p.units_per_item,
                 "photos": p.photos or [],
                 "attributes": [
@@ -342,18 +383,78 @@ def export_xlsx_v2(
         categories = {
             (p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts
         }
+
+        # ✅ ГЛОБАЛЬНЫЕ спеки — без user_id (одна строка на категорию для всех пользователей)
         specs = (
             db.query(PlatformCategorySpec)
             .filter(
-                PlatformCategorySpec.user_id == current_user.id,
                 PlatformCategorySpec.platform == platform,
                 PlatformCategorySpec.category_name.in_(categories),
             )
             .all()
         )
-        specs_by_category = {s.category_name: s.spec for s in specs}
+        specs_by_name = {s.category_name: s.spec for s in specs}
 
-        data, filename = generate_export(product_dicts, specs_by_category, platform)
+        # ✅ Громкая ошибка если для какой-то категории нет спека
+        no_spec_categories = sorted(cat for cat in categories if cat not in specs_by_name)
+        if no_spec_categories and platform == "ozon":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Для {len(no_spec_categories)} категорий нет спека Ozon: "
+                    f"{', '.join(no_spec_categories[:5])}{'…' if len(no_spec_categories) > 5 else ''}. "
+                    f"В маппинге выберите точную категорию Ozon в формате «Родитель / Тип» "
+                    f"(например, «Одежда / Футболка»). Список всех категорий — на странице «Спецификации»."
+                ),
+            )
+
+        specs_by_category = {cat: specs_by_name.get(cat) for cat in categories}
+
+        # ✅ Валидация + отсев невалидных товаров перед генерацией
+        from services.spec_validator import validate_products_by_specs
+        validation = validate_products_by_specs(product_dicts, specs_by_category, platform)
+        bad_ids = {
+            item["product_id"]
+            for item in validation["issues"]
+            if any(i["severity"] == "error" for i in item["issues"])
+        }
+        exportable = [p for p in product_dicts if p["id"] not in bad_ids]
+
+        if bad_ids:
+            logger.warning(
+                f"⚠️ Исключено из XLSX v2: {len(bad_ids)} товаров с ошибками "
+                f"(из {len(product_dicts)}): ids={list(bad_ids)[:10]}"
+            )
+
+        if not exportable:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Ни один товар не прошёл валидацию ({len(bad_ids)} с ошибками). "
+                    f"Проверьте цены, ТН ВЭД, габариты, обязательные атрибуты. "
+                    f"Подробности — в блоке валидации на странице экспорта."
+                ),
+            )
+
+        # Генерация
+        data, filename = generate_export(exportable, specs_by_category, platform)
+
+        # Логирование успешного экспорта
+        op_log.log_file_operation(
+            user_id=current_user.id, operation="export", platform=platform,
+            filename=filename, status="success",
+            total_rows=len(product_dicts), imported=len(exportable),
+            updated=0, failed=len(bad_ids),
+            errors=[{"product_id": i, "error": "исключён: ошибки валидации"} for i in list(bad_ids)[:10]],
+        )
+
+        t0 = time.perf_counter()
+        stats_repo.record(
+            user_id=current_user.id, operation="export", platform=platform,
+            status="success", total_items=len(exportable),
+            success_items=len(exportable), failed_items=len(bad_ids),
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+        )
 
         media = ("application/zip" if filename.endswith(".zip")
                  else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
