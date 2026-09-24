@@ -60,7 +60,6 @@ def _get_spec_for_category(user_id: int, category_name: Optional[str]) -> Option
         rows = (
             db.query(PlatformCategorySpec)
             .filter(
-                PlatformCategorySpec.user_id == user_id,
                 PlatformCategorySpec.category_name == category_name,
             )
             .all()

@@ -24,6 +24,7 @@
 """
 import json
 import re
+from collections import Counter
 from typing import Optional
 
 # Подакцизные товары (из официальной документации Ozon)
@@ -32,6 +33,10 @@ EXCISABLE_CATEGORIES = {
 }
 
 HASHTAG_RE = re.compile(r"^#[A-Za-zА-Яа-яЁё0-9_]{1,30}$")
+OKPD_RE = re.compile(r"^\d{4,11}$")                    # ✅ ДОБАВЛЕНО: формат ТН ВЭД
+# Ozon принимает только jpg/jpeg/png и Яндекс.Диск (по документации)
+VALID_PHOTO_DOMAINS = {"yadi.sk", "disk.yandex.ru", "disk.yandex.com"}
+VALID_PHOTO_EXT = (".jpg", ".jpeg", ".png")
 
 
 # ==================== Базовые поля Ozon ====================
@@ -49,7 +54,17 @@ def _validate_ozon_base(product: dict, issues: list):
 
     # Предельная цена без акций, руб.*
     price = product.get("price")
-    if price is None or float(price or 0) <= 0:
+    try:
+        price_val = float(price) if price is not None else 0.0
+    except (TypeError, ValueError):
+        issues.append({
+            "field": "price",
+            "message": f"Некорректный формат цены: {price}",
+            "severity": "error",
+        })
+        price_val = 0.0
+
+    if price_val <= 0:
         issues.append({
             "field": "price",
             "message": "Предельная цена без акций не указана или ≤ 0 (обязательное поле)",
@@ -58,12 +73,20 @@ def _validate_ozon_base(product: dict, issues: list):
 
     # Зачёркнутая цена: должна быть выше предельной
     strike = product.get("strike_price")
-    if strike and price and float(strike) <= float(price):
-        issues.append({
-            "field": "strike_price",
-            "message": "Зачёркнутая цена должна быть выше предельной цены",
-            "severity": "error",
-        })
+    if strike and price_val > 0:
+        try:
+            if float(strike) <= price_val:
+                issues.append({
+                    "field": "strike_price",
+                    "message": "Зачёркнутая цена должна быть выше предельной цены",
+                    "severity": "error",
+                })
+        except (TypeError, ValueError):
+            issues.append({
+                "field": "strike_price",
+                "message": f"Некорректный формат зачёркнутой цены: {strike}",
+                "severity": "warning",
+            })
 
     # НДС, %*
     vat = product.get("vat_rate")
@@ -73,19 +96,27 @@ def _validate_ozon_base(product: dict, issues: list):
             "message": "НДС, % не указан — поле обязательное в шаблоне Ozon",
             "severity": "error",
         })
-    elif vat not in ("none", "10", "22"):
+    elif str(vat) not in ("none", "22", "10", "7", "5"):
         issues.append({
             "field": "vat_rate",
-            "message": f"Некорректное значение НДС: {vat} (допустимо: none, 10, 22)",
+            "message": f"Некорректное значение НДС: {vat} (допустимо: none, 22, 10, 7, 5)",
             "severity": "error",
         })
 
     # ТН ВЭД коды ЕАЭС* — обязательны во всех категориях (эталон 23.09.2026)
-    if not product.get("okpd_code"):
+    okpd = product.get("okpd_code")
+    if not okpd:
         issues.append({
             "field": "okpd_code",
             "message": "ТН ВЭД коды ЕАЭС не указан — поле обязательное в шаблоне Ozon",
             "severity": "error",
+        })
+    elif not OKPD_RE.match(str(okpd).replace(".", "").replace("-", "").strip()):
+        # ✅ ДОБАВЛЕНО: предупреждение о некорректном формате кода
+        issues.append({
+            "field": "okpd_code",
+            "message": f"ТН ВЭД код «{okpd}» имеет нестандартный формат (ожидается 4-11 цифр)",
+            "severity": "warning",
         })
 
     # Габариты упаковки (4 обязательных поля)
@@ -104,12 +135,23 @@ def _validate_ozon_base(product: dict, issues: list):
         })
 
     # Ссылка на главное фото*
-    if not (product.get("photos") or []):
+    photos = product.get("photos") or []
+    if not photos:
         issues.append({
             "field": "main_photo",
             "message": "Нет ссылки на главное фото — поле обязательное в шаблоне Ozon",
             "severity": "error",
         })
+    else:
+        # ✅ ДОБАВЛЕНО: валидация формата главной фото-ссылки
+        main_url = str(photos[0]).lower().strip()
+        if not _is_valid_photo_url(main_url):
+            issues.append({
+                "field": "main_photo",
+                "message": "Ссылка на главное фото должна вести напрямую на JPG/JPEG/PNG "
+                           "или быть ссылкой на Яндекс.Диск",
+                "severity": "warning",
+            })
 
     # Штрихкод: в шаблоне НЕ помечен обязательным (Ozon генерирует сам)
     if not product.get("barcode"):
@@ -119,6 +161,21 @@ def _validate_ozon_base(product: dict, issues: list):
                        "но для FBO-приёмки и компенсаций при утере лучше свой",
             "severity": "warning",
         })
+
+
+def _is_valid_photo_url(url: str) -> bool:
+    """
+    Ozon принимает:
+      - прямые ссылки на .jpg / .jpeg / .png
+      - ссылки на Яндекс.Диск (yadi.sk, disk.yandex.ru)
+    НЕ принимает: Google Drive, Dropbox, imgur с HTML-страницей, и т.д.
+    """
+    if not url.startswith(("http://", "https://")):
+        return False
+    for domain in VALID_PHOTO_DOMAINS:
+        if domain in url:
+            return True
+    return url.endswith(VALID_PHOTO_EXT)
 
 
 # ==================== Атрибуты категории (спек) ====================
@@ -273,14 +330,42 @@ def validate_product_by_spec(product: dict, spec: Optional[dict], platform: str 
 def validate_products_by_specs(products: list, specs_by_category: dict, platform: str = "ozon") -> dict:
     """
     Валидирует список товаров по спекам.
-    Возвращает: {"total", "ready", "errors", "warnings", "issues"}
+    Возвращает:
+      {
+        "total": int,
+        "ready": int,                       # без ошибок
+        "ready_with_warnings": int,         # ✅ ДОБАВЛЕНО: без ошибок, но с предупреждениями
+        "errors": int,                      # всего error-issues
+        "warnings": int,                    # всего warning-issues
+        "products_with_errors": int,        # ✅ ДОБАВЛЕНО: сколько товаров имеют хотя бы 1 error
+        "products_with_warnings": int,      # ✅ ДОБАВЛЕНО: сколько товаров имеют хотя бы 1 warning
+        "duplicate_articles": list[str],    # ✅ ДОБАВЛЕНО: дубли артикулов
+        "issues": list,
+      }
     """
     all_issues = []
+
+    # ✅ ДОБАВЛЕНО: проверка дублей артикулов (генератор присвоит _2, _3)
+    article_counter = Counter()
+    for p in products:
+        art = p.get("sku") or p.get("external_id") or f"ID{p.get('id')}"
+        article_counter[art] += 1
+    duplicate_articles = sorted(a for a, c in article_counter.items() if c > 1)
 
     for product in products:
         category = product.get("mapped_category") or product.get("category") or "Без категории"
         spec = specs_by_category.get(category)
         issues = validate_product_by_spec(product, spec, platform)
+
+        # ✅ ДОБАВЛЕНО: предупредить пользователя о дубле артикула
+        art = product.get("sku") or product.get("external_id") or f"ID{product.get('id')}"
+        if art in duplicate_articles:
+            issues.append({
+                "field": "article",
+                "message": f"Артикул «{art}» дублируется — при генерации дубли получат "
+                           f"суффиксы _2, _3 (правило Ozon: уникальный артикул на строку)",
+                "severity": "warning",
+            })
 
         if issues:
             all_issues.append({
@@ -302,11 +387,21 @@ def validate_products_by_specs(products: list, specs_by_category: dict, platform
         1 for item in all_issues
         if any(i["severity"] == "error" for i in item["issues"])
     )
+    products_with_warnings = sum(
+        1 for item in all_issues
+        if any(i["severity"] == "warning" for i in item["issues"])
+    )
 
     return {
         "total": len(products),
         "ready": len(products) - products_with_errors,
+        "ready_with_warnings": len(products) - products_with_errors - (
+            products_with_warnings - products_with_errors
+        ) if products_with_warnings > products_with_errors else len(products) - products_with_errors,
         "errors": errors,
         "warnings": warnings,
+        "products_with_errors": products_with_errors,
+        "products_with_warnings": products_with_warnings,
+        "duplicate_articles": duplicate_articles[:20],
         "issues": all_issues,
     }

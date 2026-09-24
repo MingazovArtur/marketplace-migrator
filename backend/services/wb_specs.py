@@ -230,7 +230,6 @@ def _upsert_spec(user_id, platform, category_id, category_name, parent_category_
         existing = (
             db.query(PlatformCategorySpec)
             .filter(
-                PlatformCategorySpec.user_id == user_id,
                 PlatformCategorySpec.platform == platform,
                 PlatformCategorySpec.category_id == category_id,
             )
@@ -239,6 +238,7 @@ def _upsert_spec(user_id, platform, category_id, category_name, parent_category_
         version = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
 
         if existing:
+            existing.user_id = user_id 
             existing.category_name = category_name
             existing.parent_category_id = parent_category_id
             existing.spec = spec

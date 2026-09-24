@@ -26,7 +26,7 @@ const Alert = ({ message, onClose, autoClose = false }) => {
 
   return (
     <div className={className}>
-      <div>{message}</div>
+      <div>{message.split('\n').map((line, i) => <div key={i}>{line}</div>)}</div>
       {onClose && (
         <button onClick={handleClose} className="alert-close"></button>
       )}

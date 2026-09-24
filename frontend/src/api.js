@@ -25,6 +25,11 @@ async function safeError(res, fallback) {
           .map((d) => `${(d.loc || []).join('.')} — ${d.msg}`)
           .join('; ');
       }
+      // ✅ Поддержка структурированного 409 (summary + problems)
+      if (typeof data.detail === 'object') {
+        if (data.detail.message) return data.detail.message;
+        return JSON.stringify(data.detail);
+      }
       return String(data.detail);
     }
     return data.message || fallback;
@@ -139,7 +144,36 @@ export const api = {
       method: 'DELETE',
       headers: getHeaders(),
     });
-    if (!res.ok) throw new Error(await safeError(res, 'Не удалось удалить товар'));
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Ошибка удаления товара');
+    }
+    return res.json();
+  },
+
+  bulkDeleteProducts: async (productIds) => {
+    const res = await fetch(`${API_URL}/products/bulk-delete`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ product_ids: productIds }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Ошибка массового удаления');
+    }
+    return res.json();
+  },
+
+  deleteAllProducts: async () => {
+    const res = await fetch(`${API_URL}/products/delete-all`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ confirm: true }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Ошибка полного удаления');
+    }
     return res.json();
   },
 
@@ -202,6 +236,24 @@ export const api = {
     return res.json();
   },
 
+  /* ==================== Logistics (единый канонический метод) ==================== */
+
+  updateLogistics: async (productId, payload) => {
+    const res = await fetch(`${API_URL}/products/${productId}/logistics`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Ошибка сохранения логистических данных');
+    }
+    return res.json();
+  },
+
+  // Алиас для обратной совместимости
+  updateProductLogistics: (id, payload) => api.updateLogistics(id, payload),
+
   /* ==================== Platforms & categories ==================== */
 
   getPlatforms: async () => {
@@ -255,7 +307,6 @@ export const api = {
   },
 
   migrateProduct: async (productId, targetPlatform, editedData = null) => {
-    // ✅ product_id передаётся в URL, в body только platform + edited_data
     const body = { platform: targetPlatform };
     if (editedData) body.edited_data = editedData;
     const res = await fetch(`${API_URL}/migrate/${productId}`, {
@@ -282,10 +333,10 @@ export const api = {
     return res.json();
   },
 
-  // Алиас для useMigration.js (чтобы не править хук)
+  // Алиас для useMigration.js
   startBatchMigration: (ids, platform) => api.migrateBatch(ids, platform),
 
-  // ✅ Оба метода идут на один правильный эндпоинт
+  // ✅ Прогресс Celery-задачи (миграция / specs refresh — один эндпоинт)
   getTaskProgress: async (taskId) => {
     const res = await fetch(`${API_URL}/migrate/batch/${taskId}/progress`, {
       headers: getAuthHeaders(),
@@ -340,14 +391,51 @@ export const api = {
     const res = await fetch(`${API_URL}/export/report`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось сформировать отчет'));
     const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `migration_report_${new Date().toISOString().slice(0, 10)}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    window.URL.revokeObjectURL(url);
+    URL.revokeObjectURL(url);
+  },
+
+  validateExport: async (platform) => {
+    const res = await fetch(`${API_URL}/export/validate/${platform}`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка проверки готовности к экспорту'));
+    return res.json();
+  },
+
+  // ✅ XLSX v2: детальный 409 с summary и fix_hint
+  exportXlsxV2: async (platform, status = 'success') => {
+    const res = await fetch(`${API_URL}/export/xlsx/${platform}?status=${status}`, { headers: getHeaders() });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.detail) {
+        if (typeof data.detail === 'object') {
+          const sum = Object.entries(data.detail.summary || {})
+            .map(([k, v]) => `${k}: ${v.count} шт.`)
+            .join(', ');
+          const hint = data.detail.fix_hint ? `\n\n${data.detail.fix_hint}` : '';
+          throw new Error(`${data.detail.message}\nПроблемы: ${sum}${hint}`);
+        }
+        throw new Error(data.detail);
+      }
+      throw new Error(await safeError(res, `HTTP ${res.status}`));
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const filename = res.headers.get('content-disposition')?.split('filename=')[1]?.replace(/"/g, '')
+                 || `${platform}_export.xlsx`;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return filename;
   },
 
   /* ==================== Stats / History ==================== */
@@ -355,22 +443,6 @@ export const api = {
   getStats: async () => {
     const res = await fetch(`${API_URL}/stats`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить статистику'));
-    return res.json();
-  },
-
-  updateLogistics: async (productId, payload) => {
-    const res = await fetch(`${API_URL}/products/${productId}/logistics`, {
-      method: 'PUT',
-      headers: getHeaders(),
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(await safeError(res, 'Ошибка сохранения логистических данных'));
-    return res.json();
-  },
-
-  validateExport: async (platform) => {
-    const res = await fetch(`${API_URL}/export/validate/${platform}`, { headers: getHeaders() });
-    if (!res.ok) throw new Error(await safeError(res, 'Ошибка проверки готовности к экспорту'));
     return res.json();
   },
 
@@ -392,6 +464,16 @@ export const api = {
     return res.json();
   },
 
+  // ✅ ЛЁГКИЙ список имён (только category_name) — для datalist в модалке миграции
+  getSpecNames: async (platform) => {
+    const res = await fetch(`${API_URL}/specs/${platform}/names`, { headers: getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const d = await res.json();
+    return (d.names || []).sort();
+  },
   getSpec: async (platform, categoryId) => {
     const res = await fetch(`${API_URL}/specs/${platform}/${categoryId}`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка получения спека'));
@@ -412,38 +494,22 @@ export const api = {
     return res.json();
   },
 
-  exportXlsxV2: async (platform, status = 'success') => {
-    const safeStatus = status && ['success', 'pending', 'processing', 'error', 'all'].includes(status)
-    const res = await fetch(`${API_URL}/export/xlsx/${platform}?status=${status}`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error(await safeError(res, 'Ошибка генерации файла'));
-    const blob = await res.blob();
-    const ext = blob.type.includes('zip') ? 'zip' : 'xlsx';
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${platform}_export.${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    return ext;
-  },
-
   getSpecKeySource: async (platform) => {
     try {
       const res = await fetch(`${API_URL}/specs/${platform}/key-source`, {
         headers: getHeaders(),
       });
-      if (!res.ok) return { has_server_key: false };   // ← 500 тоже сюда
+      if (!res.ok) return { has_server_key: false };
       return await res.json();
     } catch {
-      return { has_server_key: false };                // ← сетевая ошибка
+      return { has_server_key: false };
     }
   },
+
   getSpecsRefreshProgress: async (platform, taskId) => {
-    const res = await fetch(`${API_URL}/specs/${platform}/refresh/${taskId}/progress`, { headers: getHeaders() });
+    const res = await fetch(`${API_URL}/specs/${platform}/refresh/${taskId}/progress`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) return { status: 'unknown' };
     return res.json();
   },

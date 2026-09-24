@@ -27,7 +27,7 @@ class ProductRepository:
             "photos_count": p.photos_count,
             "category": p.category,
             "mapped_category": p.mapped_category,
-            "error_message": p.error_message,  # ← ДОБАВЛЕНО
+            "error_message": p.error_message,
             "user_id": p.user_id,
             "sku": p.sku,
             "external_id": p.external_id,
@@ -36,6 +36,21 @@ class ProductRepository:
             "sku_count": p.sku_count or 1,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+
+            # ✅ Логистика (раньше не возвращались — модалка открывалась пустой)
+            "barcode": p.barcode,
+            "weight_grams": p.weight_grams,
+            "package_weight_grams": p.package_weight_grams,
+            "package_width_mm": p.package_width_mm,
+            "package_height_mm": p.package_height_mm,
+            "package_length_mm": p.package_length_mm,
+            "vat_rate": p.vat_rate,
+            "okpd_code": p.okpd_code,
+            "units_per_item": p.units_per_item,
+
+            # ✅ Остаток (раньше тоже не возвращался)
+            "stock": p.stock,
+
             "attributes": [
                 {
                     "id": a.id,
@@ -200,7 +215,7 @@ class ProductRepository:
                 "total": total, "pending": pending, "success": success,
                 "error": error, "processing": processing,
             }
-        
+
 class OperationLogRepository:
     """Репозиторий журнала операций (импорт/экспорт/миграции)"""
 
@@ -396,7 +411,7 @@ class AttributeRepository:
             db.delete(attr)
             db.commit()
             return True
-        
+
 class VariantRepository:
     """Репозиторий вариаций товаров"""
 
