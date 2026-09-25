@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-
+from routers import defaults as defaults_router
 from core.config import settings
 from core.platforms import Platform, PLATFORM_CONFIG
 from core.rate_limit import (
@@ -132,7 +132,7 @@ app.include_router(auth.router)
 app.include_router(email_router.router)
 app.include_router(categories.router)
 app.include_router(history.router)
-
+app.include_router(defaults_router.router)
 
 # ============================================================
 # Статика: раздача скачанных фото

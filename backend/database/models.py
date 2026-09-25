@@ -1,11 +1,9 @@
 """
 Модели базы данных SQLAlchemy
 """
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, func, Index, UniqueConstraint, JSON
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, func, Index, UniqueConstraint, JSON, Numeric
 from sqlalchemy.orm import relationship, declarative_base
 from datetime import datetime
-
-
 
 
 Base = declarative_base()
@@ -25,6 +23,7 @@ class User(Base):
 
     products = relationship("Product", back_populates="owner")
 
+
 class AccessLog(Base):
     """Журнал доступа: кто, когда, с какого IP (152-ФЗ / безопасность)."""
     __tablename__ = "access_logs"
@@ -36,6 +35,7 @@ class AccessLog(Base):
     ip = Column(String(64), nullable=True)
     user_agent = Column(String(512), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+
 
 class Category(Base):
     """Справочник категорий маркетплейсов"""
@@ -50,7 +50,6 @@ class Category(Base):
     level = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    
 
     __table_args__ = (
         Index('idx_platform_category', 'platform', 'category_id'),
@@ -74,6 +73,7 @@ class CategoryMapping(Base):
     __table_args__ = (
         Index('idx_mapping_lookup', 'source_platform', 'source_category_id', 'target_platform'),
     )
+
 
 class Product(Base):
     """Модель товара (расширенная под богатую модель данных)"""
@@ -114,6 +114,7 @@ class Product(Base):
     attributes = relationship("ProductAttribute", back_populates="product", cascade="all, delete-orphan")
     variants = relationship("ProductVariant", back_populates="product", cascade="all, delete-orphan")
 
+
 class ProductAttribute(Base):
     """Характеристика товара (Размер, Цвет, Материал и т.д.)"""
     __tablename__ = "product_attributes"
@@ -131,7 +132,8 @@ class ProductAttribute(Base):
 
     __table_args__ = (
         Index('idx_product_attr_name', 'product_id', 'name'),
-)
+    )
+
 
 class ProductVariant(Base):
     """Вариация товара (отдельный SKU: размер/цвет/цена/остаток)"""
@@ -152,7 +154,8 @@ class ProductVariant(Base):
 
     __table_args__ = (
         Index('idx_variant_product_sku', 'product_id', 'sku'),
-)
+    )
+
 
 class FileOperationLog(Base):
     """Журнал операций импорта/экспорта файлов"""
@@ -193,6 +196,7 @@ class MigrationLog(Base):
     batch_id = Column(String, nullable=True)     # task_id для группировки пакета
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+
 class ImportExportStats(Base):
     """Статистика операций (импорт/экспорт/миграция) для дашборда"""
     __tablename__ = "import_export_stats"
@@ -208,6 +212,7 @@ class ImportExportStats(Base):
     duration_ms = Column(Integer, default=0)     # время обработки, мс
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+
 class PasswordResetToken(Base):
     """Одноразовый токен сброса пароля (TTL 1 час)."""
     __tablename__ = "password_reset_tokens"
@@ -220,6 +225,7 @@ class PasswordResetToken(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     user = relationship("User", backref="reset_tokens")
+
 
 class PlatformCategorySpec(Base):
     """
@@ -246,4 +252,32 @@ class PlatformCategorySpec(Base):
 
     __table_args__ = (
         UniqueConstraint("platform", "category_id", name="uq_platform_category"),
+    )
+
+
+class ExportDefault(Base):
+    """
+    Дефолты экспорта: глобальные (category_name=NULL) и по категориям.
+
+    Применяются при массовом дозаполнении пропусков и при миграции:
+    только ПУСТЫЕ/нулевые поля товара заполняются из дефолтов.
+    Уже указанные значения не перезаписываются.
+    """
+    __tablename__ = "export_defaults"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    category_name = Column(String, nullable=True)          # NULL = глобальные
+    vat_rate = Column(String, nullable=True)               # none/22/10/7/5
+    okpd_code = Column(String, nullable=True)              # ТН ВЭД
+    package_weight_grams = Column(Integer, nullable=True)
+    package_width_mm = Column(Integer, nullable=True)
+    package_height_mm = Column(Integer, nullable=True)
+    package_length_mm = Column(Integer, nullable=True)
+    brand = Column(String, nullable=True)                  # значение бренда по умолчанию
+    marking = Column(String, nullable=True, default="Нет") # Нужен код маркировки
+    price_default = Column(Numeric(10, 2), nullable=True)  # ✅ цена по умолчанию (только для нулевых)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "category_name", name="uq_export_defaults_user_category"),
     )

@@ -1,18 +1,73 @@
 """
 Celery задачи для фоновой миграции товаров и загрузки спеков площадок.
+
+✅ v3:
+  - Авто-заполнение 4 канонических атрибутов XLS-шаблона Ozon
+    (Бренд, Тип, Название модели, Нужен код маркировки) с поддержкой синонимов.
+  - Авто-копирование ТН ВЭД из карточки в атрибут спека.
+  - Защита от миграции с ценой 0 (Ozon отклонит карточку).
+  - ✅ Дозаполнение пустой логистики (НДС, ТН ВЭД, ОВХ, вес) из дефолтов
+    категории/глобальных — перед миграцией и авто-атрибутами.
 """
 import logging
+import re as _re
 import time
 
 from celery_app import celery_app
 from services.category_mapper import CategoryMapper
 from services.category_service import category_service
 from services.platform_utils import detect_platform
+from services import defaults_service
 from core.platforms import PLATFORM_CONFIG, PRICE_RULES
 from database.repository import repo, op_log, stats_repo
 
 logger = logging.getLogger(__name__)
 category_mapper = CategoryMapper()
+
+
+# ---------------------------------------------------------------------------
+# Конфигурация канонических атрибутов XLS-шаблона Ozon
+# ---------------------------------------------------------------------------
+# Это 4 атрибута, которые ОЗОН требует в каждом XLS-файле (эталон 23.09.2026).
+# При миграции, если у товара их нет — вставляем автоматически значения из
+# словарей спека площадки (правило: пользователь работает только через UI).
+
+CANON_ATTRS = {
+    "brand": {
+        "names": ["бренд", "брендводеждеиобуви", "брендодеждыиобуви"],
+        "fallback": "NoName",
+        "dict_pref": "нет бренда",          # предпочитаем «Нет бренда» из словаря
+    },
+    "model": {
+        "names": [
+            "названиемодели",
+            "названиемоделидляобъединенияводнукарточку",
+            "объединитьнаоднойкарточке",
+            "объединитьводнукарточку",
+            "модель",
+        ],
+        "fallback": None,                   # берётся из названия товара
+        "dict_pref": None,
+    },
+    "type": {
+        "names": ["тип"],
+        "fallback": "Футболка",
+        "dict_pref": None,                  # первое значение словаря
+    },
+    "marking": {
+        "names": ["нуженкодмаркировки", "кодмаркировки", "маркировка"],
+        "fallback": "Нет",
+        "dict_pref": "нет",                 # предпочитаем «Нет» из словаря
+    },
+}
+
+# Каноническое имя атрибута «ТН ВЭД коды ЕАЭС» в спеке (для авто-копирования)
+TNVED_NAMES = ["тнвэдкодыеаэс", "тнвэд", "кодытнвэд"]
+
+
+def _norm_name(s):
+    """Нормализация имени атрибута: убираем всё кроме букв и цифр, в нижний регистр."""
+    return _re.sub(r"[^a-zа-я0-9]", "", (s or "").lower())
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +205,103 @@ def _pick_target_category(product: dict, edited_category, target_platform: str, 
     return None, "не найдено"
 
 
+def _load_spec_for_category(target_platform: str, category_name: str):
+    """Загружает спек из БД по имени категории. Возвращает JSON-dict или None."""
+    if not category_name:
+        return None
+    from database.session import SessionLocal
+    from database.models import PlatformCategorySpec
+    db = SessionLocal()
+    try:
+        row = (db.query(PlatformCategorySpec)
+               .filter(PlatformCategorySpec.platform == target_platform,
+                       PlatformCategorySpec.category_name == category_name)
+               .first())
+        return row.spec if row else None
+    finally:
+        db.close()
+
+
+def _ensure_canonical_attributes(product_id: int, target_platform: str,
+                                  target_category_name: str, product_name: str,
+                                  okpd_code: str = None, user_id: int = None):
+    if target_platform != "ozon" or not target_category_name:
+        return
+
+    spec = _load_spec_for_category(target_platform, target_category_name)
+    if not spec or not isinstance(spec, dict):
+        return
+
+    defaults = defaults_service.get_merged_defaults(user_id, target_category_name) if user_id else {}
+    spec_attrs = {_norm_name(a.get("name")): a for a in (spec.get("attributes") or []) if a.get("name")}
+    if not spec_attrs:
+        return
+
+    # ✅ Умный Тип: «Одежда / Футболка» → «Футболка» (сверка со словарём)
+    derived_type = defaults_service.derive_type_value(target_category_name, spec)
+
+    from database.session import SessionLocal
+    from database.models import ProductAttribute
+    db = SessionLocal()
+    try:
+        existing = {
+            _norm_name(a.name)
+            for a in db.query(ProductAttribute).filter(ProductAttribute.product_id == product_id).all()
+        }
+        added = 0
+        for canon, cfg in CANON_ATTRS.items():
+            keys = [n for n in cfg["names"] if n in spec_attrs and n not in existing]
+            if not keys:
+                continue
+
+            first_attr = spec_attrs[keys[0]]
+            values = first_attr.get("values") or []
+
+            if canon == "model":
+                value = (product_name or "").strip()[:50] or "Модель"
+            elif canon == "type" and derived_type:
+                value = derived_type                       # ✅ вместо первого значения словаря
+            elif canon == "brand":
+                pref = (defaults.get("brand") or "").strip().lower()
+                value = next((v for v in values if pref and pref in str(v).lower()), None) \
+                        or next((v for v in values if "нет бренда" in str(v).lower()), None) \
+                        or (values[0] if values else cfg["fallback"])
+            elif canon == "marking":
+                value = defaults.get("marking") or \
+                        next((v for v in values if str(v).lower() == "нет"), "Нет")
+            elif cfg.get("dict_pref") and values:
+                value = next((v for v in values if cfg["dict_pref"] in str(v).lower()), values[0])
+            elif values:
+                value = values[0]
+            else:
+                value = cfg.get("fallback")
+            if value is None:
+                continue
+
+            for key in keys:
+                db.add(ProductAttribute(product_id=product_id, name=spec_attrs[key].get("name"),
+                                        value=str(value), sort_order=0))
+                existing.add(key)
+                added += 1
+
+        # ТН ВЭД из карточки или дефолтов
+        okpd = okpd_code or defaults.get("okpd_code")
+        tnved_key = next((n for n in TNVED_NAMES if n in spec_attrs and n not in existing), None)
+        if okpd and tnved_key:
+            db.add(ProductAttribute(product_id=product_id, name=spec_attrs[tnved_key].get("name"),
+                                    value=str(okpd), sort_order=0))
+            added += 1
+
+        db.commit()
+        if added:
+            logger.info(f"🧩 Товар {product_id}: авто-добавлено {added} обязательных атрибутов шаблона")
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Авто-атрибуты для товара {product_id} не записаны: {e}")
+    finally:
+        db.close()
+
+
 def get_progress(task_id: str) -> dict:
     """
     Текущий прогресс задачи по ID: status ∈ pending|progress|completed|failed
@@ -242,6 +394,19 @@ def migrate_product_task(self, product_id: int, target_platform: str,
         price_multiplier = _safe_float(PRICE_RULES.get(target_platform, 1.0), default=1.0)
         final_price = round(original_price * price_multiplier, 2)
 
+        # ✅ Защита от цены 0: Ozon отклонит карточку, поэтому не мигрируем молча,
+        # а возвращаем понятную инструкцию для UI.
+        if final_price <= 0:
+            error_msg = (
+                "Цена товара = 0 ₽. Укажите цену в поле «Цена, ₽» в этом окне "
+                "(или массово: «Обновить цену/бренд» в таблице товаров) и повторите миграцию."
+            )
+            repo.update(product_id, {
+                "status": "error", "error_message": error_msg,
+            }, user_id=user_id)
+            logger.warning(f"⚠️ Товар {product_id}: миграция отклонена — цена 0")
+            return {"status": "error", "message": error_msg, "product_id": product_id}
+
         time.sleep(0.3)
 
         final_name = edited_data.get("name") if edited_data else product.get("name")
@@ -264,6 +429,23 @@ def migrate_product_task(self, product_id: int, target_platform: str,
             }, user_id=user_id)
             logger.warning(f"⚠️ Товар {product_id}: {error_msg}")
             return {"status": "error", "message": error_msg, "product_id": product_id}
+
+        # ✅ Дозаполнение пустой логистики из дефолтов (категория → глобальные)
+        upd = defaults_service.build_updates_for_product(product, user_id)
+        if upd:
+            repo.update(product_id, upd, user_id=user_id)
+            product.update(upd)
+            logger.info(f"🩹 Товар {product_id}: дефолты дописали поля {list(upd)}")
+
+        # ✅ Авто-дозаполнение обязательных атрибутов XLS-шаблона ДО обновления статуса
+        _ensure_canonical_attributes(
+            product_id=product_id,
+            target_platform=target_platform,
+            target_category_name=target_category_name,
+            product_name=final_name or product.get("name"),
+            okpd_code=product.get("okpd_code"),
+            user_id=user_id,  # ✅ передаём user_id для дефолтов
+        )
 
         repo.update(product_id, {
             "status": "success",
@@ -362,6 +544,14 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
             base_source = _base_source(product.get("source"))
             new_source = f"{base_source} → {PLATFORM_CONFIG[target_platform]['name']}"
 
+            # ✅ Защита от цены 0 в пакетной миграции
+            if final_price <= 0:
+                error_msg = "Цена = 0 ₽ — установите цену через «Обновить цену/бренд» и повторите"
+                repo.update(product_id, {"status": "error", "error_message": error_msg}, user_id=user_id)
+                error_count += 1
+                errors.append({"id": product_id, "error": error_msg})
+                continue
+
             if target_category_name is None:
                 error_msg = (
                     "Не найдена точная категория в спеках "
@@ -391,6 +581,24 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
                 logger.warning(f"⚠️ Товар {product_id}: {error_msg}")
             else:
                 logger.info(f"📂 Товар {product_id}: категория '{target_category_name}' (источник: {how})")
+
+                # ✅ Дозаполнение пустой логистики из дефолтов (категория → глобальные)
+                upd = defaults_service.build_updates_for_product(product, user_id)
+                if upd:
+                    repo.update(product_id, upd, user_id=user_id)
+                    product.update(upd)
+                    logger.info(f"🩹 Товар {product_id}: дефолты дописали поля {list(upd)}")
+
+                # ✅ Авто-дозаполнение обязательных атрибутов XLS-шаблона ДО обновления статуса
+                _ensure_canonical_attributes(
+                    product_id=product_id,
+                    target_platform=target_platform,
+                    target_category_name=target_category_name,
+                    product_name=product.get("name"),
+                    okpd_code=product.get("okpd_code"),
+                    user_id=user_id,  # ✅ передаём user_id для дефолтов
+                )
+
                 repo.update(product_id, {
                     "status": "success",
                     "source": new_source,

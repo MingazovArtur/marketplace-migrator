@@ -1,18 +1,17 @@
 import { useEffect, useState } from 'react';
-
-const API_URL = import.meta.env.VITE_API_URL ||
-  (import.meta.env.PROD ? '/api' : 'http://localhost:8000/api');
-
-const authHeaders = () => {
-  const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
+import { api } from '../api';
 
 /**
- * Проверяет, сопоставлена ли категория товара (по имени) для пары
- * sourcePlatform → targetPlatform.
+ * Проверяет, сопоставлена ли категория товара для пары sourcePlatform → targetPlatform.
  *
- * Логика: имя категории → id в справочнике источника → есть ли маппинг с этим id.
+ * Логика:
+ *   1. Пытаемся найти категорию в справочнике источника по имени.
+ *   2. Если нашли — проверяем маппинг по source_category_id.
+ *   3. Если справочника нет (404, например для файловых импортов) —
+ *      пробуем найти маппинг напрямую по source_category_name.
+ *
+ * Не спамит 404-ошибками в консоль: api.getCategories мягко возвращает []
+ * при отсутствии маршрута на бэкенде.
  */
 export function useCategoryMappingCheck(sourcePlatform, targetPlatform, categoryName) {
   const [state, setState] = useState({ checked: false, isMapped: false, loading: false });
@@ -28,29 +27,46 @@ export function useCategoryMappingCheck(sourcePlatform, targetPlatform, category
     setState((s) => ({ ...s, loading: true }));
 
     Promise.all([
-      fetch(`${API_URL}/categories/${sourcePlatform}`)
-        .then((r) => (r.ok ? r.json() : { categories: [] })),
-      fetch(
-        `${API_URL}/category-mapping?source_platform=${sourcePlatform}&target_platform=${targetPlatform}`,
-        { headers: authHeaders() }
-      ).then((r) => (r.ok ? r.json() : { mappings: [] })),
+      // ✅ api.getCategories: кодирует URL, при 404 возвращает [] (без throw)
+      api.getCategories(sourcePlatform).catch(() => ({ categories: [] })),
+      // ✅ api.getCategoryMapping: использует URLSearchParams (безопасно для кириллицы)
+      api.getCategoryMapping(sourcePlatform, targetPlatform).catch(() => ({ mappings: [] })),
     ])
       .then(([cats, maps]) => {
         if (cancelled) return;
+
         const name = String(categoryName).trim().toLowerCase();
-        const cat = (cats.categories || []).find(
+        const categories = cats.categories || [];
+        const mappings = maps.mappings || [];
+
+        // Ищем категорию в справочнике источника
+        const cat = categories.find(
           (c) => String(c.name).trim().toLowerCase() === name
         );
-        const isMapped =
-          !!cat &&
-          (maps.mappings || []).some((m) => String(m.source_category_id) === String(cat.id));
+
+        let isMapped = false;
+
+        if (cat) {
+          // Вариант 1: справочник есть, проверяем по ID
+          isMapped = mappings.some(
+            (m) => String(m.source_category_id) === String(cat.id)
+          );
+        } else {
+          // Вариант 2: справочника нет (файловый импорт / 404) — ищем по имени
+          isMapped = mappings.some(
+            (m) => String(m.source_category_name || '').trim().toLowerCase() === name
+          );
+        }
+
         setState({ checked: true, isMapped, loading: false });
       })
       .catch(() => {
         if (!cancelled) setState({ checked: true, isMapped: false, loading: false });
       });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [sourcePlatform, targetPlatform, categoryName]);
 
   return state;

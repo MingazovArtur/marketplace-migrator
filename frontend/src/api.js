@@ -3,6 +3,9 @@ const API_URL = import.meta.env.VITE_API_URL ||
 
 /* ---------- Вспомогательные функции ---------- */
 
+// ✅ Все динамические сегменты пути (кириллица, пробелы, «→») обязаны кодироваться
+const enc = encodeURIComponent;
+
 const getHeaders = () => {
   const token = localStorage.getItem('token');
   return {
@@ -25,7 +28,7 @@ async function safeError(res, fallback) {
           .map((d) => `${(d.loc || []).join('.')} — ${d.msg}`)
           .join('; ');
       }
-      // ✅ Поддержка структурированного 409 (summary + problems)
+      // ✅ Поддержка структурированных ошибок (409 summary + problems и т.п.)
       if (typeof data.detail === 'object') {
         if (data.detail.message) return data.detail.message;
         return JSON.stringify(data.detail);
@@ -37,6 +40,36 @@ async function safeError(res, fallback) {
     return `${fallback} (HTTP ${res.status})`;
   }
 }
+
+/**
+ * ✅ Извлечь имя файла из заголовка Content-Disposition.
+ * Поддерживает RFC 5987:
+ *   attachment; filename="fallback.xlsx"; filename*=UTF-8''%D0%9E...
+ * Приоритет: filename*=UTF-8''... (оригинальное имя с кириллицей),
+ *            затем filename="..." (fallback с латиницей).
+ */
+const parseContentDisposition = (header, fallback = 'export.xlsx') => {
+  if (!header) return fallback;
+
+  // Приоритет 1: RFC 5987 filename*=UTF-8''... (с кириллицей)
+  const utf8Match = header.match(/filename\*\s*=\s*UTF-8''([^;\s]+)/i);
+  if (utf8Match) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      // Если decode упал — падаем на обычный filename
+    }
+  }
+
+  // Приоритет 2: filename="..." или filename=... (без кавычек)
+  const quotedMatch = header.match(/filename\s*=\s*"([^"]+)"/i);
+  if (quotedMatch) return quotedMatch[1];
+
+  const plainMatch = header.match(/filename\s*=\s*([^;\s]+)/i);
+  if (plainMatch) return plainMatch[1];
+
+  return fallback;
+};
 
 /* ---------- API объект ---------- */
 
@@ -125,8 +158,8 @@ export const api = {
   getProducts: async (params = {}) => {
     const q = new URLSearchParams();
     if (params.search) q.append('search', params.search);
-    if (params.status) q.append('status', params.status);
-    if (params.source) q.append('source', params.source);
+    if (params.status && params.status !== 'all') q.append('status', params.status);
+    if (params.source && params.source !== 'all') q.append('source', params.source);
     if (params.sort_by) q.append('sort_by', params.sort_by);
     if (params.sort_order) q.append('sort_order', params.sort_order);
     if (params.skip !== undefined) q.append('skip', params.skip);
@@ -140,7 +173,7 @@ export const api = {
   },
 
   deleteProduct: async (productId) => {
-    const res = await fetch(`${API_URL}/products/${productId}`, {
+    const res = await fetch(`${API_URL}/products/${enc(productId)}`, {
       method: 'DELETE',
       headers: getHeaders(),
     });
@@ -190,7 +223,7 @@ export const api = {
   /* ==================== Product details ==================== */
 
   setAttributes: async (productId, attributes) => {
-    const res = await fetch(`${API_URL}/products/${productId}/attributes`, {
+    const res = await fetch(`${API_URL}/products/${enc(productId)}/attributes`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(attributes),
@@ -200,7 +233,7 @@ export const api = {
   },
 
   getVariants: async (productId) => {
-    const res = await fetch(`${API_URL}/products/${productId}/variants`, {
+    const res = await fetch(`${API_URL}/products/${enc(productId)}/variants`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка загрузки вариаций'));
@@ -208,7 +241,7 @@ export const api = {
   },
 
   setVariants: async (productId, variants) => {
-    const res = await fetch(`${API_URL}/products/${productId}/variants`, {
+    const res = await fetch(`${API_URL}/products/${enc(productId)}/variants`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(variants),
@@ -218,7 +251,7 @@ export const api = {
   },
 
   setPhotos: async (productId, photos) => {
-    const res = await fetch(`${API_URL}/products/${productId}/photos`, {
+    const res = await fetch(`${API_URL}/products/${enc(productId)}/photos`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify({ photos }),
@@ -228,7 +261,7 @@ export const api = {
   },
 
   downloadPhotos: async (productId) => {
-    const res = await fetch(`${API_URL}/products/${productId}/photos/download`, {
+    const res = await fetch(`${API_URL}/products/${enc(productId)}/photos/download`, {
       method: 'POST',
       headers: getHeaders(),
     });
@@ -236,10 +269,10 @@ export const api = {
     return res.json();
   },
 
-  /* ==================== Logistics (единый канонический метод) ==================== */
+  /* ==================== Logistics ==================== */
 
   updateLogistics: async (productId, payload) => {
-    const res = await fetch(`${API_URL}/products/${productId}/logistics`, {
+    const res = await fetch(`${API_URL}/products/${enc(productId)}/logistics`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(payload),
@@ -251,7 +284,7 @@ export const api = {
     return res.json();
   },
 
-  // Алиас для обратной совместимости
+  // Алиас для обратной совместимости (LogisticsModal и др.)
   updateProductLogistics: (id, payload) => api.updateLogistics(id, payload),
 
   /* ==================== Platforms & categories ==================== */
@@ -262,9 +295,33 @@ export const api = {
     return res.json();
   },
 
+  /**
+   * ✅ Категории площадки.
+   * ВАЖНО: маршрут /categories/{platform} на бэкенде существует НЕ для всех
+   * источников (для source-строк вида «Магнит Маркет (Файл) → Ozon» его нет → 404).
+   * Поэтому: кодируем путь и при 404 мягко возвращаем [] — UI покажет
+   * предупреждение и предложит выбрать категорию из списка спеков.
+   */
   getCategories: async (platform) => {
-    const res = await fetch(`${API_URL}/categories/${platform}`, { headers: getHeaders() });
+    const res = await fetch(`${API_URL}/categories/${enc(platform)}`, { headers: getHeaders() });
+    if (res.status === 404) return [];
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить категории'));
+    return res.json();
+  },
+
+  /**
+   * ✅ Канонический эндпоинт маппинга категорий (в логах бэкенда отвечает 200).
+   * Query-параметры кодирует URLSearchParams — кириллица и «→» безопасны.
+   */
+  getCategoryMapping: async (sourcePlatform, targetPlatform) => {
+    const q = new URLSearchParams({
+      source_platform: sourcePlatform || '',
+      target_platform: targetPlatform || '',
+    });
+    const res = await fetch(`${API_URL}/category-mapping?${q.toString()}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить маппинг категорий'));
     return res.json();
   },
 
@@ -309,7 +366,7 @@ export const api = {
   migrateProduct: async (productId, targetPlatform, editedData = null) => {
     const body = { platform: targetPlatform };
     if (editedData) body.edited_data = editedData;
-    const res = await fetch(`${API_URL}/migrate/${productId}`, {
+    const res = await fetch(`${API_URL}/migrate/${enc(productId)}`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify(body),
@@ -338,7 +395,7 @@ export const api = {
 
   // ✅ Прогресс Celery-задачи (миграция / specs refresh — один эндпоинт)
   getTaskProgress: async (taskId) => {
-    const res = await fetch(`${API_URL}/migrate/batch/${taskId}/progress`, {
+    const res = await fetch(`${API_URL}/migrate/batch/${enc(taskId)}/progress`, {
       headers: getAuthHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось получить прогресс'));
@@ -350,9 +407,10 @@ export const api = {
   /* ==================== Export ==================== */
 
   exportForPlatform: async (platform, status = 'success') => {
-    const res = await fetch(`${API_URL}/export/platform/${platform}?status=${status}`, {
-      headers: getHeaders(),
-    });
+    const res = await fetch(
+      `${API_URL}/export/platform/${enc(platform)}?status=${enc(status)}`,
+      { headers: getHeaders() }
+    );
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось сформировать файл'));
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
@@ -366,15 +424,16 @@ export const api = {
   },
 
   exportPreview: async (platform, status = 'success') => {
-    const res = await fetch(`${API_URL}/export/preview/${platform}?status=${status}`, {
-      headers: getHeaders(),
-    });
+    const res = await fetch(
+      `${API_URL}/export/preview/${enc(platform)}?status=${enc(status)}`,
+      { headers: getHeaders() }
+    );
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка предпросмотра выгрузки'));
     return res.json();
   },
 
   exportTemplate: async (platform) => {
-    const res = await fetch(`${API_URL}/export/template/${platform}`, { headers: getHeaders() });
+    const res = await fetch(`${API_URL}/export/template/${enc(platform)}`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка скачивания шаблона'));
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -400,36 +459,125 @@ export const api = {
     a.remove();
     URL.revokeObjectURL(url);
   },
+    /* ==================== Эталонные шаблоны Ozon (файлы пользователя) ==================== */
 
-  validateExport: async (platform) => {
-    const res = await fetch(`${API_URL}/export/validate/${platform}`, { headers: getHeaders() });
+  uploadOzonTemplate: async (categoryName, file) => {
+    const fd = new FormData();
+    fd.append('category_name', categoryName);
+    fd.append('file', file);
+    const res = await fetch(`${API_URL}/export/ozon-template/upload`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: fd,
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка загрузки эталонного шаблона'));
+    return res.json();
+  },
+
+  listOzonTemplates: async () => {
+    const res = await fetch(`${API_URL}/export/ozon-template/list`, { headers: getHeaders() });
+    if (!res.ok) return { templates: [] };
+    return res.json();
+  },
+
+  getOzonTemplateStatus: async (categoryName) => {
+    const res = await fetch(
+      `${API_URL}/export/ozon-template/status?category_name=${enc(categoryName)}`,
+      { headers: getHeaders() }
+    );
+    if (!res.ok) return { has_official_template: false };
+    return res.json();
+  },
+
+  deleteOzonTemplate: async (categoryName) => {
+    const res = await fetch(
+      `${API_URL}/export/ozon-template?category_name=${enc(categoryName)}`,
+      { method: 'DELETE', headers: getHeaders() }
+    );
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка удаления эталона'));
+    return res.json();
+  },
+
+  /**
+   * ✅ Валидация готовности товаров к экспорту.
+   * @param {string} platform - площадка (ozon, yandex, wildberries)
+   * @param {string} status - фильтр по статусу (success, pending, all)
+   * @param {number|null} productId - ID одного товара (для модалки миграции)
+   */
+  validateExport: async (platform, status = 'all', productId = null) => {
+    const q = new URLSearchParams();
+    if (status) q.append('status', status);
+    if (productId) q.append('product_id', productId);
+
+    const res = await fetch(`${API_URL}/export/validate/${enc(platform)}?${q.toString()}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка проверки готовности к экспорту'));
     return res.json();
   },
 
-  // ✅ XLSX v2: детальный 409 с summary и fix_hint
-  exportXlsxV2: async (platform, status = 'success') => {
-    const res = await fetch(`${API_URL}/export/xlsx/${platform}?status=${status}`, { headers: getHeaders() });
+  /**
+   * ✅ XLSX v2: файл под реальный шаблон площадки.
+   *
+   * @param {string} platform - площадка (ozon, yandex, wildberries)
+   * @param {string} status - фильтр по статусу (success, pending, all)
+   * @param {number|null} productId - ID одного товара (для авто-экспорта из модалки миграции)
+   *
+   * 409 — структурированный detail (summary + fix_hint).
+   * 400 — валидатор не пропустил ни один товар: показываем detail целиком.
+   *
+   * ✅ Поддержка RFC 5987 filename*: имя с кириллицей в загрузках браузера.
+   */
+  exportXlsxV2: async (platform, status = 'success', productId = null) => {
+    const q = new URLSearchParams();
+    if (status) q.append('status', status);
+    if (productId) q.append('product_id', productId);  // ✅ фильтр по одному товару
+
+    const res = await fetch(`${API_URL}/export/xlsx/${enc(platform)}?${q.toString()}`, {
+      headers: getHeaders(),
+    });
+
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      if (res.status === 409 && data.detail) {
-        if (typeof data.detail === 'object') {
-          const sum = Object.entries(data.detail.summary || {})
-            .map(([k, v]) => `${k}: ${v.count} шт.`)
-            .join(', ');
-          const hint = data.detail.fix_hint ? `\n\n${data.detail.fix_hint}` : '';
-          throw new Error(`${data.detail.message}\nПроблемы: ${sum}${hint}`);
-        }
-        throw new Error(data.detail);
+
+      if (res.status === 409 && data.detail && typeof data.detail === 'object') {
+        const sum = Object.entries(data.detail.summary || {})
+          .map(([k, v]) => `${k}: ${v.count} шт.`)
+          .join(', ');
+        const hint = data.detail.fix_hint ? `\n\n${data.detail.fix_hint}` : '';
+        throw new Error(`${data.detail.message}\nПроблемы: ${sum}${hint}`);
       }
+
+      if (res.status === 400) {
+        const detail = typeof data.detail === 'string'
+          ? data.detail
+          : (data.detail?.message || JSON.stringify(data.detail || {}));
+
+        // ✅ Для одиночного товара — просто показываем конкретные ошибки
+        if (productId) {
+          throw new Error(
+            `Товар #${productId} не прошёл валидацию:\n\n${detail}\n\n` +
+            `Исправьте поля через кнопки «Логистика», «Характеристики», «Фото» и повторите миграцию.`
+          );
+        }
+
+        throw new Error(
+          `${detail}\n\nОткройте «Выгрузка» — блок валидации покажет, каких полей не хватает каждому товару.`
+        );
+      }
+
       throw new Error(await safeError(res, `HTTP ${res.status}`));
     }
+
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const filename = res.headers.get('content-disposition')?.split('filename=')[1]?.replace(/"/g, '')
-                 || `${platform}_export.xlsx`;
+
+    // ✅ RFC 5987: сначала пытаемся filename*=UTF-8''... (кириллица), потом filename=...
+    const cd = res.headers.get('content-disposition');
+    const filename = parseContentDisposition(cd, `${platform}_export.xlsx`);
+
     a.download = filename;
     document.body.appendChild(a);
     a.click();
@@ -459,14 +607,14 @@ export const api = {
   /* ==================== Спецификации категорий площадок ==================== */
 
   getSpecs: async (platform) => {
-    const res = await fetch(`${API_URL}/specs/${platform}`, { headers: getHeaders() });
+    const res = await fetch(`${API_URL}/specs/${enc(platform)}`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка получения спеков'));
     return res.json();
   },
 
-  // ✅ ЛЁГКИЙ список имён (только category_name) — для datalist в модалке миграции
+  // ✅ ЛЁГКИЙ список имён категорий (для datalist модалки миграции и страницы спеков)
   getSpecNames: async (platform) => {
-    const res = await fetch(`${API_URL}/specs/${platform}/names`, { headers: getHeaders() });
+    const res = await fetch(`${API_URL}/specs/${enc(platform)}/names`, { headers: getHeaders() });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `HTTP ${res.status}`);
@@ -474,14 +622,18 @@ export const api = {
     const d = await res.json();
     return (d.names || []).sort();
   },
+
   getSpec: async (platform, categoryId) => {
-    const res = await fetch(`${API_URL}/specs/${platform}/${categoryId}`, { headers: getHeaders() });
+    const res = await fetch(
+      `${API_URL}/specs/${enc(platform)}/${enc(categoryId)}`,
+      { headers: getHeaders() }
+    );
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка получения спека'));
     return res.json();
   },
 
   refreshSpecs: async (platform, apiKey, categoryIds = null, businessId = null) => {
-    const res = await fetch(`${API_URL}/specs/${platform}/refresh`, {
+    const res = await fetch(`${API_URL}/specs/${enc(platform)}/refresh`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({
@@ -496,7 +648,7 @@ export const api = {
 
   getSpecKeySource: async (platform) => {
     try {
-      const res = await fetch(`${API_URL}/specs/${platform}/key-source`, {
+      const res = await fetch(`${API_URL}/specs/${enc(platform)}/key-source`, {
         headers: getHeaders(),
       });
       if (!res.ok) return { has_server_key: false };
@@ -507,10 +659,49 @@ export const api = {
   },
 
   getSpecsRefreshProgress: async (platform, taskId) => {
-    const res = await fetch(`${API_URL}/specs/${platform}/refresh/${taskId}/progress`, {
-      headers: getHeaders(),
-    });
+    const res = await fetch(
+      `${API_URL}/specs/${enc(platform)}/refresh/${enc(taskId)}/progress`,
+      { headers: getHeaders() }
+    );
     if (!res.ok) return { status: 'unknown' };
+    return res.json();
+  },
+
+    /* ==================== Дефолты экспорта ==================== */
+
+  getDefaults: async () => {
+    const res = await fetch(`${API_URL}/defaults`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить дефолты'));
+    return res.json();
+  },
+
+  saveDefaults: async (payload) => {
+    const res = await fetch(`${API_URL}/defaults`, {
+      method: 'PUT', headers: getHeaders(), body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось сохранить дефолты'));
+    return res.json();
+  },
+
+  deleteCategoryDefaults: async (categoryName) => {
+    const res = await fetch(`${API_URL}/defaults/category?category_name=${enc(categoryName)}`, {
+      method: 'DELETE', headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось удалить дефолты категории'));
+    return res.json();
+  },
+
+  getGaps: async (status = 'all') => {
+    const res = await fetch(`${API_URL}/defaults/gaps?status=${enc(status)}`, { headers: getHeaders() });
+    if (!res.ok) return { total: 0, gaps: {} };
+    return res.json();
+  },
+
+  applyDefaults: async (status = 'all') => {
+    const res = await fetch(`${API_URL}/products/apply-defaults?status=${enc(status)}`, {
+      method: 'POST', headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось заполнить пропуски'));
     return res.json();
   },
 };

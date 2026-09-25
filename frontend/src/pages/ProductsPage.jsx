@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Button from '../components/common/Button';
 import Icon from '../components/icons';
 import EmptyState from '../components/common/EmptyState';
 import DeleteConfirmModal from '../components/products/DeleteConfirmModal';
+import DefaultsModal from '../components/products/DefaultsModal';
 import { api } from '../api';
 
 const STATUS_META = {
@@ -27,8 +28,20 @@ const DEFAULT_WIDTHS = {
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
+const GAP_LABELS = {
+  vat_rate: 'НДС, %',
+  okpd_code: 'ТН ВЭД',
+  package_weight_grams: 'Вес в упаковке, г',
+  package_width_mm: 'Ширина, мм',
+  package_height_mm: 'Высота, мм',
+  package_length_mm: 'Длина, мм',
+  price: 'Цена > 0',
+  main_photo: 'Главное фото',
+};
+
 const ProductsPage = ({
   isAdmin = false,
+  refreshKey = 0,
   onMigrate, onLogistics, onAttributes, onVariants, onPhotos, onExport, onImport,
 }) => {
   const [products, setProducts] = useState([]);
@@ -53,6 +66,12 @@ const ProductsPage = ({
   const [showBulkUpdate, setShowBulkUpdate] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
 
+  // ✅ Дефолты экспорта и счётчик пропусков
+  const [showDefaults, setShowDefaults] = useState(false);
+  const [gaps, setGaps] = useState(null);
+  const [gapsLoading, setGapsLoading] = useState(false);
+  const [specNames, setSpecNames] = useState([]);
+
   // ==================== Загрузка ====================
   const load = useCallback(async () => {
     setLoading(true);
@@ -60,18 +79,71 @@ const ProductsPage = ({
     try {
       const d = await api.getProducts({
         search: search || undefined,
-        status, source: 'all', sort, skip, limit,
+        status: status === 'all' ? undefined : status,
+        source: 'all',
+        sort, skip, limit,
       });
       setProducts(d.products || []);
       setTotal(d.total ?? (d.products || []).length);
+      console.log('✅ ProductsPage: loaded', d.products?.length || 0, 'products');
     } catch (e) {
       setError(e.message);
+      console.error('❌ ProductsPage: load error', e);
     } finally {
       setLoading(false);
     }
   }, [search, status, sort, skip, limit]);
 
-  useEffect(() => { load(); }, [load]);
+  const loadRef = useRef(load);
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    if (refreshKey > 0) {
+      console.log('🔄 ProductsPage: refreshKey changed to', refreshKey, '- reloading...');
+      loadRef.current();
+    }
+  }, [refreshKey]);
+
+  useEffect(() => {
+    if (!message) return;
+    const t = setTimeout(() => setMessage(''), 5000);
+    return () => clearTimeout(t);
+  }, [message]);
+
+  // ✅ Загрузка счётчика пропусков (для кнопки «Заполнить пропуски» и DefaultsModal)
+  const loadGaps = useCallback(async () => {
+    setGapsLoading(true);
+    try {
+      const g = await api.getGaps('all');
+      setGaps(g);
+    } catch {
+      setGaps(null);
+    } finally {
+      setGapsLoading(false);
+    }
+  }, []);
+
+  // ✅ Имена спеков Ozon — для dropdown в DefaultsModal
+  const loadSpecNames = useCallback(async () => {
+    try {
+      const names = await api.getSpecNames('ozon');
+      setSpecNames(Array.isArray(names) ? names : []);
+    } catch {
+      setSpecNames([]);
+    }
+  }, []);
+
+  // Обновляем gaps при refreshKey (после миграций, удаления, дефолтов)
+  useEffect(() => {
+    loadGaps();
+    loadSpecNames();
+  }, [refreshKey, loadGaps, loadSpecNames]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ==================== Ресайз колонок ====================
   const resetCol = (key) => {
@@ -167,6 +239,40 @@ const ProductsPage = ({
     }
   };
 
+  // ✅ Массовое заполнение пропусков из дефолтов
+  const handleApplyDefaults = async () => {
+    setGapsLoading(true);
+    try {
+      const r = await api.applyDefaults('all');
+      const summary = Object.entries(r.fields || {})
+        .map(([k, v]) => `${GAP_LABELS[k] || k}: ${v}`)
+        .join(', ');
+      setMessage(
+        `🩹 Дозаполнено товаров: ${r.updated} из ${r.total}` +
+        (summary ? ` (${summary})` : '')
+      );
+      await loadGaps();
+      await load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setGapsLoading(false);
+    }
+  };
+
+  // ✅ Категории текущих товаров (для dropdown в DefaultsModal)
+  const productCategories = useMemo(() => {
+    const all = [...products];
+    if (all.length < total) {
+      // если показывается только часть — добавим mapped_category из products
+      // но в любом случае у нас есть список из products, что достаточно для dropdown
+    }
+    return Array.from(new Set(all.map((p) => p.mapped_category || p.category).filter(Boolean))).sort();
+  }, [products]);
+
+  const gapEntries = gaps ? Object.entries(gaps.gaps || {}).filter(([, n]) => n > 0) : [];
+  const gapsTotal = gapEntries.reduce((acc, [, n]) => acc + n, 0);
+
   const page = Math.floor(skip / limit) + 1;
   const pages = Math.max(1, Math.ceil(total / limit));
 
@@ -201,6 +307,27 @@ const ProductsPage = ({
         </div>
       </header>
 
+      {/* ==================== Баннер пропусков ==================== */}
+      {gaps && gaps.total > 0 && gapEntries.length > 0 && (
+        <div className="alert alert-error" style={{ marginBottom: '0.75rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div>
+              ❌ Пропуски обязательных полей у {gaps.total} товаров:{' '}
+              <strong>
+                {gapEntries.map(([k, n]) => `${GAP_LABELS[k] || k} — ${n}`).join('; ')}
+              </strong>
+            </div>
+            <Button size="small" onClick={handleApplyDefaults} loading={gapsLoading}>
+              🩹 Заполнить пропуски из дефолтов
+            </Button>
+          </div>
+          <p style={{ margin: '0.4rem 0 0', fontSize: '0.85rem', opacity: 0.9 }}>
+            Значения берутся из <strong>Дефолтов экспорта</strong>: глобальных и по категориям.
+            Один клик — и все 5000 товаров получат НДС, ТН ВЭД, ОВХ и вес.
+          </p>
+        </div>
+      )}
+
       {/* ==================== Фильтры + сброс ширины колонок ==================== */}
       <div className="products-toolbar" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
         <input
@@ -228,6 +355,21 @@ const ProductsPage = ({
             onClick={() => setColWidths({})}
           >
             <Icon name="refresh" size={14} /> Сбросить ширину колонок
+          </Button>
+        )}
+
+        {/* ✅ Кнопки дефолтов и заполнения пропусков */}
+        <Button variant="secondary" onClick={() => setShowDefaults(true)}>
+          <Icon name="settings" size={16} /> Дефолты
+        </Button>
+        {gapsTotal > 0 && (
+          <Button
+            variant="outline"
+            onClick={handleApplyDefaults}
+            loading={gapsLoading}
+            title="Дозаполнит пустые НДС/ТН ВЭД/ОВХ/вес из дефолтов по всем товарам"
+          >
+            <Icon name="edit" size={16} /> Заполнить пропуски ({gapsTotal})
           </Button>
         )}
       </div>
@@ -309,18 +451,13 @@ const ProductsPage = ({
               {products.map((p) => {
                 const st = STATUS_META[p.status] || STATUS_META.pending;
                 return (
-                  /* ✅ СТРОГО 7 ЯЧЕЕК в порядке шапки:
-                     1 checkbox | 2 ID | 3 Товар | 4 Категория | 5 Цена | 6 Статус | 7 Действия */
                   <tr key={p.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                    {/* 1 */}
                     <td style={{ padding: '0.6rem', overflow: 'hidden' }}>
                       <input type="checkbox" checked={selected.includes(p.id)} onChange={() => toggleOne(p.id)} />
                     </td>
-                    {/* 2 */}
                     <td style={{ padding: '0.6rem', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden' }}>
                       {p.id}
                     </td>
-                    {/* 3 */}
                     <td style={{ padding: '0.6rem', overflow: 'hidden' }}>
                       <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={p.name}>
                         {p.name}
@@ -329,26 +466,30 @@ const ProductsPage = ({
                         {p.sku || p.external_id || 'без артикула'} · {p.source}
                       </div>
                     </td>
-                    {/* 4 */}
                     <td style={{ padding: '0.6rem', color: 'var(--text-secondary)', overflow: 'hidden' }}>
                       <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.category || 'Не указана'}</div>
                       {p.mapped_category && (
                         <div style={{ fontSize: '0.75rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>→ {p.mapped_category}</div>
                       )}
                     </td>
-                    {/* 5 */}
                     <td style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 600, overflow: 'hidden' }}>
                       {p.price != null ? `${p.price} ₽` : '—'}
                     </td>
-                    {/* 6 */}
                     <td style={{ padding: '0.6rem', textAlign: 'center', overflow: 'hidden' }}>
                       <span className={`badge ${st.cls}`}>{st.label}</span>
                     </td>
-                    {/* 7 — ДЕЙСТВИЯ: grid 3×2 ТОЛЬКО внутри этой ячейки */}
                     <td style={{ padding: '0.6rem', overflow: 'hidden' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.25rem' }}>
                         {onLogistics && (
-                          <Button variant="secondary" size="small" title="Логистика" onClick={() => onLogistics(p)}>
+                          <Button
+                            variant="secondary"
+                            size="small"
+                            title="Логистика"
+                            onClick={() => {
+                              console.log('📦 Открываем логистику для товара', p.id, 'package_weight_grams:', p.package_weight_grams);
+                              onLogistics(p);
+                            }}
+                          >
                             <Icon name="box" size={15} />
                           </Button>
                         )}
@@ -390,7 +531,7 @@ const ProductsPage = ({
         </div>
       )}
 
-      {/* ==================== Пагинация: начало/конец + компактный селект лимита ==================== */}
+      {/* ==================== Пагинация ==================== */}
       {total > 0 && (
         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center', marginTop: '0.75rem', flexWrap: 'wrap' }}>
           <Button variant="secondary" size="small" disabled={skip === 0} onClick={() => setSkip(0)} title="Первая страница">
@@ -446,6 +587,16 @@ const ProductsPage = ({
           loading={bulkLoading}
           onSubmit={handleBulkUpdate}
           onClose={() => setShowBulkUpdate(false)}
+        />
+      )}
+
+      {showDefaults && (
+        <DefaultsModal
+          isOpen
+          onClose={() => { setShowDefaults(false); loadGaps(); }}
+          onNotify={setMessage}
+          productCategories={productCategories}
+          specNames={specNames}
         />
       )}
     </>
