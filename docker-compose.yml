@@ -13,7 +13,6 @@ services:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      # Исправлено: проверяем того пользователя и БД, которых создали
       test: ["CMD-SHELL", "pg_isready -U migrator_user -d marketplace_migrator"]
       interval: 5s
       timeout: 5s
@@ -25,7 +24,6 @@ services:
     ports:
       - "6379:6379"
     restart: unless-stopped
-    # Добавлено: проверка готовности Redis
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -39,6 +37,7 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - ozon_templates:/app/templates        # ✅ эталонные шаблоны Ozon
     env_file:
       - .env
     environment:
@@ -55,6 +54,7 @@ services:
     command: celery -A celery_app worker --loglevel=info --pool=solo
     volumes:
       - ./backend:/app
+      - ozon_templates:/app/templates        # ✅ общий с backend, чтобы видеть эталоны
     env_file:
       - .env
     environment:
@@ -71,10 +71,11 @@ services:
       - "5173:5173"
     volumes:
       - ./frontend:/app
-      - /app/node_modules # Анонимный том, чтобы локальные node_modules не ломали контейнер
+      - /app/node_modules
     depends_on:
       - backend
     restart: unless-stopped
 
 volumes:
   postgres_data:
+  ozon_templates:                             # ✅ объявление volume для эталонов Ozon

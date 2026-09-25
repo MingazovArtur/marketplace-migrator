@@ -42,6 +42,9 @@ function App() {
   const [message, setMessage] = useState('');
   const [currentView, setCurrentView] = useState('products');
 
+  // ✅ Триггер синхронизации обоих списков товаров (App + ProductsPage)
+  const [refreshKey, setRefreshKey] = useState(0);
+
   // Модалки
   const [showImportModal, setShowImportModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -63,13 +66,11 @@ function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
-  // Тема применяется к <html>
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  // Сброс состояния при выходе
   useEffect(() => {
     if (!token) {
       setMessage('');
@@ -87,7 +88,6 @@ function App() {
     }
   }, [token]);
 
-  // Сообщение само исчезает через 6 секунд
   useEffect(() => {
     if (!message) return undefined;
     const t = setTimeout(() => setMessage(''), 6000);
@@ -108,6 +108,17 @@ function App() {
     [products]
   );
 
+  // ✅ ОБЪЕДИНЁННАЯ функция перезагрузки:
+  // обновляет App-овский список (useProducts) И внутренний список ProductsPage
+  // через refreshKey. Именно её надо передавать в onSaved/onSave модалок редактирования.
+  const refreshAll = useCallback(async () => {
+    try {
+      await loadData();
+    } finally {
+      setRefreshKey((k) => k + 1);
+    }
+  }, [loadData]);
+
   // ==================== Обработчики импорта ====================
   const handleImport = useCallback(async (fullKey) => {
     try {
@@ -115,14 +126,14 @@ function App() {
       if (data.success) {
         setMessage(`✅ Импортировано ${data.imported} товаров${data.is_mock ? ' (тест)' : ''}`);
         setShowImportModal(false);
-        loadData();
+        await refreshAll();
       } else {
         setMessage('❌ Ошибка импорта: ' + (data.detail || 'неизвестно'));
       }
     } catch (e) {
       setMessage('❌ ' + e.message);
     }
-  }, [loadData]);
+  }, [refreshAll]);
 
   const handleFileImport = useCallback(async (platform, file, mode = 'create') => {
     try {
@@ -132,24 +143,22 @@ function App() {
         if (data.updated) msg += ` · обновлено: ${data.updated}`;
         setMessage(msg);
         setShowImportModal(false);
-        loadData();
+        await refreshAll();
       } else {
         setMessage('❌ ' + (data.detail || 'Ошибка импорта'));
       }
     } catch (e) {
       setMessage('❌ ' + e.message);
     }
-  }, [loadData]);
+  }, [refreshAll]);
 
   // ==================== Обработчики миграции ====================
   const handleConfirmMigrate = useCallback(async (id, platform, edited, autoExport = true) => {
     setMigrateProductId(null);
     try {
-      // ✅ ОБЯЗАТЕЛЬНО await — ждём завершения Celery-задачи
       await migrateProduct(id, platform, edited);
       setMessage('✅ Карточка мигрирована');
 
-      // Только ПОСЛЕ завершения миграции — пробуем экспорт
       if (autoExport) {
         try {
           await api.exportXlsxV2(platform);
@@ -167,25 +176,22 @@ function App() {
     try {
       await api.exportXlsxV2(platform);
       setMessage(`Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
-      loadData();
+      await refreshAll();
     } catch (e) {
       setMessage('❌ Не удалось скачать файл: ' + e.message);
     }
-  }, [loadData]);
+  }, [refreshAll]);
 
   const handleCloseBatchModal = useCallback(() => {
     setShowBatchModal(false);
     setSelectedProductIds([]);
-    loadData();
-  }, [loadData]);
+    refreshAll();
+  }, [refreshAll]);
 
   const handleStartBatchMigration = useCallback(async (ids, platform) => {
     return await migrateBatch(ids, platform);
   }, [migrateBatch]);
 
-  // Универсальный обработчик миграции из ProductsPage:
-  //   target = товар (одиночная)  -> MigrateModal
-  //   target = массив id (пакет)  -> BatchMigrateModal
   const handleProductsPageMigrate = useCallback((target) => {
     if (Array.isArray(target)) {
       setSelectedProductIds(target);
@@ -202,11 +208,11 @@ function App() {
       setMessage(`✅ Обновлено товаров: ${data.updated}`);
       setShowBulkModal(false);
       setSelectedProductIds([]);
-      loadData();
+      await refreshAll();
     } catch (e) {
       setMessage('❌ ' + e.message);
     }
-  }, [loadData]);
+  }, [refreshAll]);
 
   // ==================== Обработчики экспорта ====================
   const handleExportReport = useCallback(async () => {
@@ -232,7 +238,6 @@ function App() {
       );
       setShowExportModal(false);
     } catch (e) {
-      // ✅ Детализированное сообщение с разрывами строк
       setMessage(`❌ ${e.message}`);
     }
   }, []);
@@ -241,10 +246,25 @@ function App() {
   const openAuth = useCallback((tab) => setAuthTab(tab || 'login'), []);
 
   // ==================== Обработчики редактирования товара ====================
-  const handleEditAttributes = useCallback((product) => setEditAttributesProduct(product), []);
-  const handleEditVariants = useCallback((product) => setEditVariantsProduct(product), []);
-  const handleEditPhotos = useCallback((product) => setEditPhotosProduct(product), []);
-  const handleEditLogistics = useCallback((product) => setEditLogisticsProduct(product), []);
+  const handleEditAttributes = useCallback((product) => {
+    setMessage('');
+    setEditAttributesProduct(product);
+  }, []);
+
+  const handleEditVariants = useCallback((product) => {
+    setMessage('');
+    setEditVariantsProduct(product);
+  }, []);
+
+  const handleEditPhotos = useCallback((product) => {
+    setMessage('');
+    setEditPhotosProduct(product);
+  }, []);
+
+  const handleEditLogistics = useCallback((product) => {
+    setMessage('');
+    setEditLogisticsProduct(product);
+  }, []);
 
   // ==================== Hash-роутинг (ПОСЛЕ всех хуков!) ====================
   const hashPath = hash.split('?')[0];
@@ -338,6 +358,7 @@ function App() {
         return (
           <ProductsPage
             isAdmin={user?.role === 'admin'}
+            refreshKey={refreshKey}             
             onMigrate={handleProductsPageMigrate}
             onLogistics={handleEditLogistics}
             onAttributes={handleEditAttributes}
@@ -396,20 +417,27 @@ function App() {
 
       {/* ==================== Модалки ==================== */}
       <ImportModal
+        key={`import-${showImportModal}`}
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         onImport={handleImport}
         onFileImport={handleFileImport}
         loading={productsLoading}
       />
-      <MigrateModal
-        isOpen={!!migrateProductId}
-        onClose={() => setMigrateProductId(null)}
-        product={getProductById(migrateProductId)}
-        onConfirm={handleConfirmMigrate}
-        loading={isMigratingProductId === migrateProductId}
-      />
+
+      {migrateProductId && (
+        <MigrateModal
+          key={`migrate-${migrateProductId}`}
+          isOpen
+          onClose={() => setMigrateProductId(null)}
+          product={getProductById(migrateProductId)}
+          onConfirm={handleConfirmMigrate}
+          loading={isMigratingProductId === migrateProductId}
+        />
+      )}
+
       <BatchMigrateModal
+        key={`batch-${selectedProductIds.join('-')}`}
         isOpen={showBatchModal}
         onAutoExport={handleAutoExport}
         onClose={handleCloseBatchModal}
@@ -419,44 +447,70 @@ function App() {
         pollProgress={pollBatchProgress}
         loading={productsLoading}
       />
+
       <ExportModal
+        key={`export-${showExportModal}`}
         isOpen={showExportModal}
         onClose={() => setShowExportModal(false)}
         onExport={handleExportForPlatform}
         loading={productsLoading}
       />
+
       <BulkEditModal
+        key={`bulk-${selectedProductIds.join('-')}`}
         isOpen={showBulkModal}
         onClose={() => setShowBulkModal(false)}
         selectedIds={selectedProductIds}
         onSubmit={handleBulkEdit}
         loading={productsLoading}
       />
-      <LogisticsModal
-        isOpen={!!editLogisticsProduct}
-        onClose={() => setEditLogisticsProduct(null)}
-        product={editLogisticsProduct}
-        onSaved={loadData}
-      />
-      <AttributesModal
-        isOpen={!!editAttributesProduct}
-        onClose={() => setEditAttributesProduct(null)}
-        product={editAttributesProduct}
-        onSave={loadData}
-      />
-      <VariantsModal
-        isOpen={!!editVariantsProduct}
-        onClose={() => setEditVariantsProduct(null)}
-        product={editVariantsProduct}
-        onSave={loadData}
-      />
-      <PhotosModal
-        isOpen={!!editPhotosProduct}
-        onClose={() => setEditPhotosProduct(null)}
-        product={editPhotosProduct}
-        onSave={loadData}
-        onNotify={setMessage}
-      />
+
+      {/* ✅ ЛОГИСТИКА — берём СВЕЖИЙ продукт из обновлённого списка products,
+          а не устаревший объект из editLogisticsProduct */}
+      {editLogisticsProduct && (
+        <LogisticsModal
+          key={`logistics-${editLogisticsProduct.id}-${refreshKey}`}
+          isOpen
+          onClose={() => setEditLogisticsProduct(null)}
+          product={getProductById(editLogisticsProduct.id) || editLogisticsProduct}
+          onSaved={refreshAll}
+        />
+      )}
+
+      {/* ✅ АТРИБУТЫ */}
+      {editAttributesProduct && (
+        <AttributesModal
+          key={`attrs-${editAttributesProduct.id}-${refreshKey}`}
+          isOpen
+          onClose={() => setEditAttributesProduct(null)}
+          product={getProductById(editAttributesProduct.id) || editAttributesProduct}
+          onSave={refreshAll}
+        />
+      )}
+
+      {/* ✅ ВАРИАНТЫ */}
+      {editVariantsProduct && (
+        <VariantsModal
+          key={`variants-${editVariantsProduct.id}-${refreshKey}`}
+          isOpen
+          onClose={() => setEditVariantsProduct(null)}
+          product={getProductById(editVariantsProduct.id) || editVariantsProduct}
+          onSave={refreshAll}
+        />
+      )}
+
+      {/* ✅ ФОТО */}
+      {editPhotosProduct && (
+        <PhotosModal
+          key={`photos-${editPhotosProduct.id}-${refreshKey}`}
+          isOpen
+          onClose={() => setEditPhotosProduct(null)}
+          product={getProductById(editPhotosProduct.id) || editPhotosProduct}
+          onSave={refreshAll}
+          onNotify={setMessage}
+        />
+      )}
+
       <AuthModal
         isOpen={!!authTab}
         initialTab={authTab || 'login'}

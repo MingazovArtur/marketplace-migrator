@@ -3,11 +3,19 @@
 Поддерживает фильтрацию, сортировку, пагинацию, массовые операции.
 Схему БД ведёт ТОЛЬКО Alembic (create_all не вызываем).
 """
-from sqlalchemy import desc, asc
-from database.models import Product
-from database.session import SessionLocal
 from typing import Optional, List, Dict
-from database.models import Product, FileOperationLog, MigrationLog, ProductAttribute, ProductVariant, ImportExportStats
+
+from sqlalchemy import desc, asc
+
+from database.models import (
+    Product,
+    FileOperationLog,
+    MigrationLog,
+    ProductAttribute,
+    ProductVariant,
+    ImportExportStats,
+)
+from database.session import SessionLocal
 
 
 class ProductRepository:
@@ -18,6 +26,7 @@ class ProductRepository:
         if p is None:
             return None
         return {
+            # --- базовые поля ---
             "id": p.id,
             "name": p.name,
             "source": p.source,
@@ -34,10 +43,11 @@ class ProductRepository:
             "brand": p.brand,
             "photos": p.photos or [],
             "sku_count": p.sku_count or 1,
+            "stock": p.stock,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None,
 
-            # ✅ Логистика (раньше не возвращались — модалка открывалась пустой)
+            # --- ✅ ЛОГИСТИКА И НАЛОГИ (без этого модалка открывается пустой) ---
             "barcode": p.barcode,
             "weight_grams": p.weight_grams,
             "package_weight_grams": p.package_weight_grams,
@@ -48,9 +58,7 @@ class ProductRepository:
             "okpd_code": p.okpd_code,
             "units_per_item": p.units_per_item,
 
-            # ✅ Остаток (раньше тоже не возвращался)
-            "stock": p.stock,
-
+            # --- связи ---
             "attributes": [
                 {
                     "id": a.id,
@@ -72,8 +80,8 @@ class ProductRepository:
                     "sort_order": v.sort_order,
                 }
                 for v in (p.variants or [])
-            ]
-    }
+            ],
+        }
 
     @staticmethod
     def _apply_filters(query, user_id, is_admin, search, status, source):
@@ -216,6 +224,7 @@ class ProductRepository:
                 "error": error, "processing": processing,
             }
 
+
 class OperationLogRepository:
     """Репозиторий журнала операций (импорт/экспорт/миграции)"""
 
@@ -269,7 +278,6 @@ class OperationLogRepository:
     def get_history(self, user_id: int, is_admin: bool = False, operation: str = None,
                     limit: int = 50, skip: int = 0) -> list:
         """Единая лента истории: файлы + миграции, отсортированные по дате."""
-        from database.models import FileOperationLog, MigrationLog
         entries = []
 
         with SessionLocal() as db:
@@ -323,6 +331,7 @@ class OperationLogRepository:
 
         entries.sort(key=lambda x: x["created_at"] or "", reverse=True)
         return entries[skip:skip + limit]
+
 
 class AttributeRepository:
     """Репозиторий характеристик товаров"""
@@ -412,6 +421,7 @@ class AttributeRepository:
             db.commit()
             return True
 
+
 class VariantRepository:
     """Репозиторий вариаций товаров"""
 
@@ -476,6 +486,7 @@ class VariantRepository:
             db.delete(v)
             db.commit()
             return True
+
 
 class StatsRepository:
     """Запись и агрегация статистики операций"""
@@ -578,5 +589,6 @@ variant_repo = VariantRepository()
 attr_repo = AttributeRepository()
 
 op_log = OperationLogRepository()
+
 # Глобальный экземпляр
 repo = ProductRepository()

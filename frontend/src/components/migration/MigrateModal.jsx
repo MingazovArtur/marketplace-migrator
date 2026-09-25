@@ -1,80 +1,175 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Button from '../common/Button';
 import Icon from '../icons';
 import { PLATFORMS } from '../../utils/platformUtils';
-import { useCategoryMappingCheck } from '../../hooks/useCategoryMapping';
 import { api } from '../../api';
 
-const MigrateModal = ({ isOpen, onClose, product, onConfirm, loading }) => {
+const POLL_INTERVAL_MS = 700;
+
+/**
+ * Модалка миграции одной карточки товара на выбранную площадку.
+ *
+ * ✅ v3:
+ *  - Блокирует кнопку «Мигрировать» при цене ≤ 0 с явным красным алертом.
+ *  - Показывает выпадающий список категорий из спеков площадки.
+ *  - Polling прогресса Celery-задачи.
+ *  - Галочка «Автоматически скачать XLSX после миграции».
+ *  - Авто-экспорт скачивает ТОЛЬКО ОДИН мигрированный товар (передаём product.id),
+ *    а не все успешные (которые скачиваются через «Выгрузка для площадки»).
+ *  - Корректно вызывает refreshAll через onSaved.
+ */
+const MigrateModal = ({
+  isOpen,
+  onClose,
+  product,              // «живой» объект товара (getProductById из App)
+  onConfirm,            // (productId, platform, editedData, autoExport) => Promise
+  loading = false,
+  onSaved,              // ← refreshAll из App.jsx (обновляет список + refreshKey)
+  onNotify,             // опциональный setMessage из App
+}) => {
   const [platform, setPlatform] = useState('ozon');
-  const [autoExport, setAutoExport] = useState(true);
-  const [edited, setEdited] = useState(null);
-  const [specNames, setSpecNames] = useState([]);
+  const [form, setForm] = useState({ name: '', price: '', category: '' });
+  const [specCategories, setSpecCategories] = useState([]);
   const [specsLoading, setSpecsLoading] = useState(false);
+  const [autoExport, setAutoExport] = useState(true);
+  const [progress, setProgress] = useState(null);
+  const [localError, setLocalError] = useState('');
+  const pollTimerRef = useRef(null);
 
-  /* ✅ Хук ДО early return — иначе нарушение правил хуков */
-  const { checked, isMapped } = useCategoryMappingCheck(
-    product?.source,
-    platform,
-    product?.category
-  );
+  // Загрузка списка категорий спеков для выбранной площадки
+  const loadSpecCategories = useCallback(async (pl) => {
+    setSpecsLoading(true);
+    try {
+      const names = await api.getSpecNames(pl);
+      setSpecCategories(Array.isArray(names) ? names : []);
+    } catch (e) {
+      setSpecCategories([]);
+    } finally {
+      setSpecsLoading(false);
+    }
+  }, []);
 
-  // useEffect инициализации формы
+  // Инициализация формы при открытии / смене товара
   useEffect(() => {
     if (isOpen && product) {
-      setEdited({
+      setForm({
         name: product.name || '',
-        price: product.price ?? '',
-        category: product.mapped_category || product.category || '',
+        price: product.price != null ? String(product.price) : '',
+        category: product.mapped_category || '',
       });
-      setAutoExport(true);
+      setLocalError('');
+      setProgress(null);
+      loadSpecCategories(platform);
     }
-  }, [isOpen, product]);
+  }, [isOpen, product, platform, loadSpecCategories]);
 
-  // useEffect загрузки спеков
+  // Очистка polling при размонтировании
   useEffect(() => {
-    let cancelled = false;
-    if (!isOpen) return undefined;
-    setSpecsLoading(true);
-    api
-      .getSpecNames(platform)
-      .then((names) => { if (!cancelled) setSpecNames(Array.isArray(names) ? names : []); })
-      .catch(() => { if (!cancelled) setSpecNames([]); })
-      .finally(() => { if (!cancelled) setSpecsLoading(false); });
-    return () => { cancelled = true; };
-  }, [isOpen, platform]);
+    return () => {
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, []);
 
-  // ✅ useMemo ДО early return — иначе "Rendered more hooks than previous render"
-  const categoryValue = (edited?.category || '').trim();
-  const filteredSpecs = useMemo(() => {
-    if (!specNames.length) return [];
-    const q = categoryValue.toLowerCase();
-    if (!q) return specNames.slice(0, 100);
-    const starts = specNames.filter((n) => n.toLowerCase().startsWith(q));
-    const contains = specNames.filter(
-      (n) => !n.toLowerCase().startsWith(q) && n.toLowerCase().includes(q)
-    );
-    return [...starts, ...contains].slice(0, 200);
-  }, [specNames, categoryValue]);
-
-  // ✅ Валидация — тоже до early return (это просто вычисление, не хук,
-  //    но держим рядом с useMemo для ясности)
-  const categoryValid = !categoryValue || specNames.includes(categoryValue);
-  const specsReady = specNames.length > 0;
-  const categoryInvalid = specsReady && !categoryValid;
-
-  // ✅ Единственный early return — ПОСЛЕ ВСЕХ хуков
   if (!isOpen || !product) return null;
 
-  const sourceName = PLATFORMS.find((p) => p.id === product.source)?.name || product.source;
-  const targetName = PLATFORMS.find((p) => p.id === platform)?.name || platform;
+  // ✅ Валидация цены: блокируем миграцию при 0 или невалидном значении
+  const priceNum = Number(form.price);
+  const priceInvalid = !Number.isFinite(priceNum) || priceNum <= 0;
 
-  const handleChange = (field, value) => setEdited((e) => ({ ...e, [field]: value }));
-  const handleConfirm = () => onConfirm(product.id, platform, edited, autoExport);
+  // Polling прогресса Celery-задачи
+  const pollProgress = useCallback(async (taskId) => {
+    try {
+      const data = await api.getTaskProgress(taskId);
+      setProgress(data);
+      if (data.status === 'completed' || data.status === 'failed') {
+        if (pollTimerRef.current) {
+          clearTimeout(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+
+        // Вызов refreshAll, чтобы обновить список товаров и refreshKey
+        if (onSaved && data.status === 'completed') {
+          try {
+            await onSaved();
+          } catch (e) {
+            console.warn('refreshAll failed:', e);
+          }
+        }
+
+        // ✅ Авто-скачивание XLSX после успешной миграции — ТОЛЬКО ОДИН ТОВАР
+        if (data.status === 'completed' && autoExport && platform === 'ozon' && product?.id) {
+          try {
+            await api.exportXlsxV2('ozon', 'success', product.id);
+            if (onNotify) {
+              onNotify(
+                `✅ Карточка #${product.id} перенесена. ` +
+                `XLSX с этим товаром скачан — загрузите его в кабинете Ozon.`
+              );
+            }
+          } catch (e) {
+            if (onNotify) {
+              onNotify(
+                `✅ Карточка #${product.id} перенесена, но XLSX не скачался: ${e.message}`
+              );
+            }
+          }
+        }
+
+        if (data.status === 'completed') {
+          setTimeout(onClose, 600);
+        }
+      } else {
+        pollTimerRef.current = setTimeout(() => pollProgress(taskId), POLL_INTERVAL_MS);
+      }
+    } catch (e) {
+      setLocalError(`Не удалось получить прогресс: ${e.message}`);
+    }
+  }, [autoExport, platform, onClose, onSaved, onNotify, product]);
+
+  const handleSubmit = async () => {
+    if (priceInvalid) {
+      setLocalError('Цена должна быть больше 0 ₽ — Ozon отклонит карточку с нулевой ценой.');
+      return;
+    }
+
+    setLocalError('');
+    setProgress({ status: 'pending', percent: 0 });
+
+    const editedData = {
+      name: form.name.trim() || product.name,
+      price: priceNum,
+      category: form.category || undefined,
+    };
+
+    try {
+      const result = await api.migrateProduct(product.id, platform, editedData);
+      if (result && result.task_id) {
+        pollProgress(result.task_id);
+      } else {
+        // Синхронный ответ без task_id — вызываем onConfirm напрямую
+        if (onConfirm) {
+          await onConfirm(product.id, platform, editedData, autoExport);
+        }
+        if (onSaved) await onSaved();
+        setTimeout(onClose, 300);
+      }
+    } catch (e) {
+      setLocalError(e.message);
+      setProgress(null);
+    }
+  };
+
+  const percent = progress?.percent ?? 0;
+  const isInProgress = progress && (progress.status === 'progress' || progress.status === 'pending');
+  const isCompleted = progress?.status === 'completed';
+  const isFailed = progress?.status === 'failed';
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
         <div className="modal-header">
           <h2 className="modal-title">
             <Icon name="migrate" size={22} /> Миграция карточки
@@ -84,134 +179,178 @@ const MigrateModal = ({ isOpen, onClose, product, onConfirm, loading }) => {
           </button>
         </div>
 
-        <div className="migrate-product-card">
-          <div className="product-name">{product.name}</div>
-          <div className="product-sub">
-            {product.sku && <>SKU: {product.sku} · </>}
-            {product.brand || 'Без бренда'}
-            {product.price ? ` · ${Number(product.price).toLocaleString('ru-RU')} ₽` : ''}
+        <div style={{ marginBottom: '0.75rem', padding: '0.5rem 0.75rem', background: 'var(--bg-secondary)', borderRadius: 6, fontSize: '0.85rem' }}>
+          <div style={{ color: 'var(--text-muted)' }}>Товар:</div>
+          <div style={{ fontWeight: 600 }}>{product.name}</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+            ID {product.id} · {product.source || 'без источника'}
           </div>
         </div>
 
-        <label className="form-label">Целевая площадка:</label>
-        <div className="platform-selector">
+        {/* Площадка */}
+        <label className="form-label">Площадка назначения</label>
+        <select
+          className="form-input"
+          value={platform}
+          onChange={(e) => setPlatform(e.target.value)}
+          disabled={isInProgress}
+        >
           {PLATFORMS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className={`platform-btn ${platform === p.id ? 'platform-btn-active' : ''}`}
-              onClick={() => setPlatform(p.id)}
-            >
-              {p.name}
-            </button>
+            <option key={p.id} value={p.id}>{p.name}</option>
           ))}
-        </div>
+        </select>
 
-        {/* Предупреждение: категория источника не сопоставлена */}
-        {checked && !isMapped && product.category && (
-          <div
-            className="modal-hint-box"
-            style={{
-              borderColor: 'rgba(245, 158, 11, 0.4)',
-              background: 'rgba(245, 158, 11, 0.08)',
-            }}
-          >
-            <span className="hint-icon">
-              <Icon name="warning" size={18} />
-            </span>
-            <p>
-              Категория «{product.category}» не сопоставлена для перехода{' '}
-              <strong>{sourceName} → {targetName}</strong>. При миграции будет использовано
-              значение из поля «Категория назначения» ниже. Настроить соответствие можно в разделе
-              «Маппинг» (боковое меню).
-            </p>
-          </div>
-        )}
-
-        <label className="form-label">Данные карточки (можно править):</label>
-
-        <label className="form-label">Название</label>
+        {/* Название */}
+        <label className="form-label" style={{ marginTop: '0.6rem' }}>Название товара</label>
         <input
           className="form-input"
-          value={edited?.name || ''}
-          onChange={(e) => handleChange('name', e.target.value)}
+          type="text"
+          value={form.name}
+          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          placeholder={product.name}
+          disabled={isInProgress}
         />
 
-        <label className="form-label">Цена, ₽</label>
-        <input
-          className="form-input"
-          type="number"
-          value={edited?.price ?? ''}
-          onChange={(e) => handleChange('price', e.target.value)}
-        />
-
-        {/* ================= Категория: выбор ИЗ спеков площадки ================= */}
-        <label className="form-label">
-          Категория назначения{specsReady ? ` (${targetName})` : ''}
+        {/* Цена */}
+        <label className="form-label" style={{ marginTop: '0.6rem' }}>
+          Цена, ₽ <span style={{ color: 'var(--danger, #ef4444)' }}>*</span>
         </label>
         <input
           className="form-input"
-          list="migrate-spec-categories"
-          value={edited?.category || ''}
-          onChange={(e) => handleChange('category', e.target.value)}
-          placeholder={specsLoading ? 'Загружаю список категорий…' : 'Начните вводить: Одежда / Футболка…'}
-          style={categoryInvalid ? { borderColor: 'var(--accent-danger)' } : undefined}
+          type="number"
+          step="0.01"
+          min="0.01"
+          value={form.price}
+          onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
+          placeholder="990"
+          disabled={isInProgress}
+          style={priceInvalid && form.price ? { borderColor: 'var(--danger, #ef4444)' } : {}}
         />
-        <datalist id="migrate-spec-categories">
-          {filteredSpecs.map((n) => (
-            <option key={n} value={n} />
-          ))}
-        </datalist>
-        <p className="form-hint">
-          {specsLoading && 'Загрузка списка категорий…'}
-          {!specsLoading && specsReady && (
-            <>
-              Выберите точное имя из списка спеков {targetName} (формат «Родитель / Тип»).
-              Доступно вариантов: {specNames.length}.
-              {categoryValue && categoryValid && ' ✅ Имя найдено в спеках.'}
-            </>
-          )}
-          {!specsLoading && !specsReady && (
-            <>Спеки {targetName} не загружены — оставьте поле пустым (сработает авто-подбор) или задайте категорию в «Маппинг».</>
-          )}
-        </p>
-
-        {/* Блокирующее предупреждение: имя не из спеков */}
-        {categoryInvalid && (
+        {priceInvalid && (
           <div
-            className="modal-hint-box"
-            style={{
-              borderColor: 'rgba(239, 68, 68, 0.5)',
-              background: 'rgba(239, 68, 68, 0.08)',
-            }}
+            className="alert alert-error"
+            style={{ marginTop: '0.4rem', padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}
           >
-            <span className="hint-icon">
-              <Icon name="warning" size={18} />
-            </span>
-            <p>
-              Категории «{categoryValue}» нет в спеках {targetName} — миграция завершится ошибкой,
-              а выгрузка не сформируется. Выберите имя из выпадающего списка выше
-              или очистите поле (тогда категория подберётся автоматически по названию товара).
-            </p>
+            <div>
+              ❌ Цена должна быть больше 0 ₽ — без цены Ozon отклонит карточку,
+              и товар не попадёт в выгрузку. Укажите цену в поле выше.
+            </div>
           </div>
         )}
 
-        <label className="bulk-check" style={{ margin: '1rem 0 0' }}>
+        {/* Категория */}
+        <label className="form-label" style={{ marginTop: '0.6rem' }}>
+          Категория на {PLATFORMS.find((p) => p.id === platform)?.name || 'площадке'}
+        </label>
+        <input
+          className="form-input"
+          type="text"
+          list={`spec-categories-${platform}`}
+          value={form.category}
+          onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+          placeholder="Одежда / Футболка"
+          disabled={isInProgress || specsLoading}
+        />
+        <datalist id={`spec-categories-${platform}`}>
+          {specCategories.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+        <p className="form-hint">
+          {specsLoading
+            ? 'Загружаем список категорий спека...'
+            : `Формат «Родитель / Тип». Список из ${specCategories.length} категорий — из спека ${platform}.`}
+        </p>
+
+        {/* Авто-экспорт */}
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            marginTop: '0.75rem',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+          }}
+        >
           <input
             type="checkbox"
             checked={autoExport}
             onChange={(e) => setAutoExport(e.target.checked)}
+            disabled={isInProgress}
           />
-          Сразу скачать файл для загрузки в кабинет {platform}
+          <span>Автоматически скачать XLSX для этого товара</span>
         </label>
+        <p className="form-hint">
+          Будет скачан XLSX <strong>только с этим товаром</strong>.
+          Для массовой выгрузки всех товаров используйте «Выгрузка для площадки».
+        </p>
 
+        {/* Прогресс */}
+        {isInProgress && (
+          <div style={{ marginTop: '0.75rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: '0.85rem',
+                marginBottom: '0.25rem',
+                color: 'var(--text-secondary)',
+              }}
+            >
+              <span>Миграция...</span>
+              <span>{percent}%</span>
+            </div>
+            <div
+              style={{
+                height: 6,
+                background: 'var(--bg-secondary)',
+                borderRadius: 3,
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  width: `${percent}%`,
+                  height: '100%',
+                  background: 'var(--primary, #3b82f6)',
+                  transition: 'width 0.3s',
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {isCompleted && (
+          <div className="alert alert-success" style={{ marginTop: '0.75rem' }}>
+            <div>
+              ✅ Карточка #{product.id} успешно мигрирована
+              {autoExport ? '. XLSX с этим товаром скачивается...' : ''}
+            </div>
+          </div>
+        )}
+
+        {isFailed && (
+          <div className="alert alert-error" style={{ marginTop: '0.75rem' }}>
+            <div>❌ Ошибка миграции: {progress?.error || 'неизвестная ошибка'}</div>
+          </div>
+        )}
+
+        {localError && !isInProgress && (
+          <div className="alert alert-error" style={{ marginTop: '0.75rem' }}>
+            <div>{localError}</div>
+          </div>
+        )}
+
+        {/* Действия */}
         <div className="modal-actions">
-          <Button variant="outline" onClick={onClose}>Отмена</Button>
+          <Button variant="outline" onClick={onClose} disabled={isInProgress}>
+            {isCompleted || isFailed ? 'Закрыть' : 'Отмена'}
+          </Button>
           <Button
-            onClick={handleConfirm}
-            disabled={loading || categoryInvalid}
-            loading={loading}
-            title={categoryInvalid ? 'Категория не из списка спеков' : undefined}
+            onClick={handleSubmit}
+            disabled={loading || isInProgress || priceInvalid || isCompleted}
+            loading={loading && !progress}
           >
             <Icon name="migrate" size={16} /> Мигрировать
           </Button>

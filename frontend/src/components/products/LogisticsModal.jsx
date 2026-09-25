@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Button from '../common/Button';
 import Icon from '../icons';
 import { api } from '../../api';
 
-// ✅ Точно как в dropdown XLS-шаблона Ozon (скрин 23.09.2026): порядок и значения 1:1
+// ✅ Значения НДС точно как в XLS-шаблоне Ozon
 const VAT_OPTIONS = [
   { value: 'none', label: 'Не облагается' },
   { value: '22',   label: '22' },
@@ -12,7 +12,7 @@ const VAT_OPTIONS = [
   { value: '5',    label: '5' },
 ];
 
-// ✅ Дефолтные значения формы — защищают от undefined в первом рендере
+// ✅ Дефолты формы — защищают от undefined при первом рендере
 const DEFAULT_FORM = {
   barcode: '',
   weight_grams: '',
@@ -25,47 +25,54 @@ const DEFAULT_FORM = {
   units_per_item: 1,
 };
 
+// Хелпер: безопасное приведение к числу (пустая строка → null)
+const num = (v) => (v === '' || v == null ? null : Number(v));
+
 const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
-  // ✅ Сразу правильные дефолты — никаких undefined при первом рендере
   const [form, setForm] = useState(DEFAULT_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // ✅ Заполняем форму актуальными данными товара при каждом открытии.
+  // Зависимость от product.id — гарантирует перезаполнение даже если
+  // родительский products-список ещё не обновился.
   useEffect(() => {
-    if (isOpen && product) {
-      setForm({
-        barcode: product.barcode ?? '',
-        weight_grams: product.weight_grams ?? '',
-        package_weight_grams: product.package_weight_grams ?? '',
-        package_width_mm: product.package_width_mm ?? '',
-        package_height_mm: product.package_height_mm ?? '',
-        package_length_mm: product.package_length_mm ?? '',
-        vat_rate: product.vat_rate ?? '',
-        okpd_code: product.okpd_code ?? '',
-        units_per_item: product.units_per_item ?? 1,
-      });
-      setError('');
-    } else if (!isOpen) {
-      // Сброс при закрытии — следующий товар откроется с чистой формой
-      setForm(DEFAULT_FORM);
-    }
-  }, [isOpen, product]);
+    if (!isOpen || !product) return;
+    setForm({
+      barcode: product.barcode ?? '',
+      weight_grams: product.weight_grams ?? '',
+      package_weight_grams: product.package_weight_grams ?? '',
+      package_width_mm: product.package_width_mm ?? '',
+      package_height_mm: product.package_height_mm ?? '',
+      package_length_mm: product.package_length_mm ?? '',
+      vat_rate: product.vat_rate ?? '',
+      okpd_code: product.okpd_code ?? '',
+      units_per_item: product.units_per_item ?? 1,
+    });
+    setError('');
+  }, [isOpen, product?.id]);
+
+  // Сброс флага ошибки при закрытии
+  useEffect(() => {
+    if (!isOpen) setError('');
+  }, [isOpen]);
+
+  const set = useCallback((key) => (e) => {
+    setForm((f) => ({ ...f, [key]: e.target.value }));
+  }, []);
 
   if (!isOpen || !product) return null;
 
-  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
-  const num = (v) => (v === '' || v == null ? null : Number(v));
-
   const mainPhoto = (product.photos || [])[0] || '';
 
-  // Инлайн-проверка обязательных полей шаблона Ozon
+  // Инлайн-валидация обязательных полей шаблона Ozon
   const missingRequired = [];
   if (!form.vat_rate) missingRequired.push('НДС, %');
   if (!form.okpd_code) missingRequired.push('ТН ВЭД коды ЕАЭС');
-  if (!form.package_weight_grams) missingRequired.push('Вес в упаковке, г');
-  if (!form.package_width_mm) missingRequired.push('Ширина упаковки, мм');
-  if (!form.package_height_mm) missingRequired.push('Высота упаковки, мм');
-  if (!form.package_length_mm) missingRequired.push('Длина упаковки, мм');
+  if (!num(form.package_weight_grams)) missingRequired.push('Вес в упаковке, г');
+  if (!num(form.package_width_mm)) missingRequired.push('Ширина упаковки, мм');
+  if (!num(form.package_height_mm)) missingRequired.push('Высота упаковки, мм');
+  if (!num(form.package_length_mm)) missingRequired.push('Длина упаковки, мм');
   if (!mainPhoto) missingRequired.push('Ссылка на главное фото (окно «Фото»)');
 
   const handleSave = async () => {
@@ -81,12 +88,21 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
         package_length_mm: num(form.package_length_mm),
         vat_rate: form.vat_rate || null,
         okpd_code: form.okpd_code || null,
-        units_per_item: num(form.units_per_item),
+        units_per_item: num(form.units_per_item) ?? 1,
       });
-      if (onSaved) onSaved();
+
+      // ✅ Ждём, пока родительский список обновится — тогда при следующем
+      // открытии модалки `product` уже будет со свежими значениями
+      if (onSaved) {
+        try { await onSaved(); }
+        catch (e) { console.warn('onSaved failed:', e); }
+      }
+
+      // Закрываем только после успешного обновления списка
       onClose();
     } catch (e) {
-      setError(e.message);
+      // ✅ НЕ закрываем модалку при ошибке — пользователь видит причину
+      setError(`Ошибка сохранения: ${e.message || 'Неизвестная ошибка'}`);
     } finally {
       setSaving(false);
     }
@@ -101,7 +117,13 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           <h2 className="modal-title">
             <Icon name="box" size={22} /> Логистика и налоги
           </h2>
-          <button type="button" className="close-btn" onClick={onClose} disabled={saving} title="Закрыть">
+          <button
+            type="button"
+            className="close-btn"
+            onClick={onClose}
+            disabled={saving}
+            title="Закрыть"
+          >
             <Icon name="close" size={16} />
           </button>
         </div>
@@ -137,36 +159,83 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           placeholder="Например: 6109100010"
           disabled={saving}
         />
-        <p className="form-hint">Обязателен для категорий одежда, обувь, парфюмерия, лекарства и др. Не знаете код — уточните у таможенного представителя.</p>
+        <p className="form-hint">
+          Обязателен для категорий одежда, обувь, парфюмерия, лекарства и др.
+          Не знаете код — уточните у таможенного представителя.
+        </p>
 
         {/* ================= Габариты упаковки (ОВХ) ================= */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.5rem' }}>
           <div>
             <label className="form-label">Вес в упаковке, г{req}</label>
-            <input className="form-input" type="number" min="1" value={form.package_weight_grams} onChange={set('package_weight_grams')} disabled={saving} />
+            <input
+              className="form-input"
+              type="number"
+              min="1"
+              value={form.package_weight_grams}
+              onChange={set('package_weight_grams')}
+              disabled={saving}
+            />
           </div>
           <div>
             <label className="form-label">Вес товара, г</label>
-            <input className="form-input" type="number" min="1" value={form.weight_grams} onChange={set('weight_grams')} disabled={saving} />
+            <input
+              className="form-input"
+              type="number"
+              min="1"
+              value={form.weight_grams}
+              onChange={set('weight_grams')}
+              disabled={saving}
+            />
           </div>
           <div>
             <label className="form-label">Ширина упаковки, мм{req}</label>
-            <input className="form-input" type="number" min="1" value={form.package_width_mm} onChange={set('package_width_mm')} disabled={saving} />
+            <input
+              className="form-input"
+              type="number"
+              min="1"
+              value={form.package_width_mm}
+              onChange={set('package_width_mm')}
+              disabled={saving}
+            />
           </div>
           <div>
             <label className="form-label">Высота упаковки, мм{req}</label>
-            <input className="form-input" type="number" min="1" value={form.package_height_mm} onChange={set('package_height_mm')} disabled={saving} />
+            <input
+              className="form-input"
+              type="number"
+              min="1"
+              value={form.package_height_mm}
+              onChange={set('package_height_mm')}
+              disabled={saving}
+            />
           </div>
           <div>
             <label className="form-label">Длина упаковки, мм{req}</label>
-            <input className="form-input" type="number" min="1" value={form.package_length_mm} onChange={set('package_length_mm')} disabled={saving} />
+            <input
+              className="form-input"
+              type="number"
+              min="1"
+              value={form.package_length_mm}
+              onChange={set('package_length_mm')}
+              disabled={saving}
+            />
           </div>
           <div>
             <label className="form-label">Единиц в одном товаре</label>
-            <input className="form-input" type="number" min="1" value={form.units_per_item} onChange={set('units_per_item')} disabled={saving} />
+            <input
+              className="form-input"
+              type="number"
+              min="1"
+              value={form.units_per_item}
+              onChange={set('units_per_item')}
+              disabled={saving}
+            />
           </div>
         </div>
-        <p className="form-hint">Только числа без единиц измерения. Ozon сверяет ОВХ с фактическими при приёмке.</p>
+        <p className="form-hint">
+          Только числа без единиц измерения. Ozon сверяет ОВХ с фактическими при приёмке.
+        </p>
 
         {/* ================= Штрихкод (НЕ обязательный) ================= */}
         <label className="form-label">Штрихкод (Серийный номер / EAN)</label>
@@ -180,11 +249,14 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
         />
         <p className="form-hint">
           ✅ Поле НЕ обязательное в шаблоне Ozon. Свои коды (несколько — через «;») полезны для FBO-приёмки
-          и компенсаций при утере, но экспорт пройдёт и без них.
+          и компенсий при утере, но экспорт пройдёт и без них.
         </p>
 
         {/* ================= Индикатор главного фото ================= */}
-        <div className={`alert ${mainPhoto ? 'alert-success' : 'alert-error'}`} style={{ marginTop: '0.75rem' }}>
+        <div
+          className={`alert ${mainPhoto ? 'alert-success' : 'alert-error'}`}
+          style={{ marginTop: '0.75rem' }}
+        >
           <div>
             {mainPhoto
               ? <>✅ Ссылка на главное фото* установлена: {String(mainPhoto).slice(0, 60)}…</>
@@ -202,11 +274,15 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           </div>
         )}
 
-        {error && <div className="alert alert-error" style={{ marginTop: '0.5rem' }}><div>{error}</div></div>}
+        {error && (
+          <div className="alert alert-error" style={{ marginTop: '0.5rem' }}>
+            <div>{error}</div>
+          </div>
+        )}
 
         <div className="modal-actions">
           <Button variant="outline" onClick={onClose} disabled={saving}>Отмена</Button>
-          <Button onClick={handleSave} loading={saving}>
+          <Button onClick={handleSave} loading={saving} disabled={saving}>
             <Icon name="save" size={16} /> Сохранить
           </Button>
         </div>
