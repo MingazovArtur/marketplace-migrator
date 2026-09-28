@@ -32,7 +32,7 @@ import OnboardingTour from './components/onboarding/OnboardingTour';
 import LogisticsModal from './components/products/LogisticsModal';
 import SpecsPage from './pages/SpecsPage';
 import ProductsPage from './pages/ProductsPage';
-
+import TemplatesPage from './pages/TemplatesPage';
 
 function App() {
   const [hash, setHash] = useState(window.location.hash);
@@ -354,6 +354,7 @@ function App() {
       case 'mapping':   return <CategoryMapping onBack={() => setCurrentView('products')} />;
       case 'history':   return <HistoryView />;
       case 'specs':     return <SpecsPage />;
+      case 'templates': return <TemplatesPage onNotify={setMessage} />;
       case 'products':
         return (
           <ProductsPage
@@ -454,6 +455,7 @@ function App() {
         onClose={() => setShowExportModal(false)}
         onExport={handleExportForPlatform}
         loading={productsLoading}
+        onOpenTemplates={() => setCurrentView('templates')}
       />
 
       <BulkEditModal
