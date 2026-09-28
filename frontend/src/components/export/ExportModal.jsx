@@ -10,6 +10,7 @@ const STATUS_OPTIONS = [
   { value: 'all',     label: 'Все' },
 ];
 
+// Канонические 13 полей XLS-шаблона Ozon (эталон 23–25.09.2026)
 const OZON_TEMPLATE_REQUIRED = [
   { field: 'article',      label: 'Артикул' },
   { field: 'price',        label: 'Предельная цена без акций, руб.' },
@@ -43,7 +44,11 @@ const canonFieldFor = (field) => {
   return field;
 };
 
-const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
+/**
+ * ✅ v5 (облегчённый): форма загрузки эталонов УБРАНА на страницу «Шаблоны площадок».
+ * Здесь только: статус эталонов по категориям текущей выгрузки + чек-лист + сводка + предпросмотр.
+ */
+const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) => {
   const [platform, setPlatform] = useState('ozon');
   const [status, setStatus] = useState('success');
   const [preview, setPreview] = useState(null);
@@ -52,18 +57,9 @@ const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
   const [downloaded, setDownloaded] = useState(false);
   const [validation, setValidation] = useState(null);
 
-  // ---- Эталонные шаблоны ----
-  const [specNames, setSpecNames] = useState([]);
-  const [tplCategory, setTplCategory] = useState('');
-  const [tplFile, setTplFile] = useState(null);
-  const [tplUploading, setTplUploading] = useState(false);
-  const [tplList, setTplList] = useState([]);
-  const [tplMessage, setTplMessage] = useState('');
-
-  const loadTplList = useCallback(async () => {
-    const d = await api.listOzonTemplates();
-    setTplList(d.templates || []);
-  }, []);
+  // ✅ Категории текущей выгрузки + множество категорий с эталонами
+  const [categoryCounts, setCategoryCounts] = useState({});
+  const [tplSet, setTplSet] = useState(new Set());
 
   const loadPreview = useCallback(async () => {
     setPreviewLoading(true);
@@ -71,12 +67,23 @@ const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
     setPreview(null);
     setValidation(null);
     try {
-      const [pv, vv] = await Promise.all([
+      const [pv, vv, prods, tpls] = await Promise.all([
         api.exportPreview(platform, status),
         api.validateExport(platform, status).catch(() => null),
+        api.getProducts({ status: status === 'all' ? undefined : status, limit: 10000 })
+          .catch(() => ({ products: [] })),
+        platform === 'ozon' ? api.listOzonTemplates().catch(() => ({ templates: [] })) : { templates: [] },
       ]);
       setPreview(pv);
       setValidation(vv);
+      setTplSet(new Set(tpls.templates || []));
+
+      const counts = {};
+      (prods.products || []).forEach((p) => {
+        const c = p.mapped_category || p.category || 'Без категории';
+        counts[c] = (counts[c] || 0) + 1;
+      });
+      setCategoryCounts(counts);
     } catch (e) {
       setPreviewError(e.message);
     } finally {
@@ -88,12 +95,8 @@ const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
     if (isOpen) {
       setDownloaded(false);
       loadPreview();
-      loadTplList();
-      if (platform === 'ozon') {
-        api.getSpecNames('ozon').then(setSpecNames).catch(() => setSpecNames([]));
-      }
     }
-  }, [isOpen, loadPreview, loadTplList, platform]);
+  }, [isOpen, loadPreview]);
 
   useEffect(() => { setDownloaded(false); }, [platform, status]);
 
@@ -124,6 +127,11 @@ const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
   );
   const missingAny = checklist.some((f) => f.count > 0);
 
+  // ✅ Категории выгрузки, для которых НЕТ эталона
+  const missingTemplates = Object.keys(categoryCounts)
+    .filter((c) => platform === 'ozon' && !tplSet.has(c))
+    .sort((a, b) => categoryCounts[b] - categoryCounts[a]);
+
   const handleDownload = () => {
     if (downloaded || loading) return;
     setDownloaded(true);
@@ -132,34 +140,6 @@ const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
 
   const handleTemplate = () => {
     api.exportTemplate(platform).catch((e) => setPreviewError(e.message));
-  };
-
-  const handleUploadTpl = async () => {
-    if (!tplCategory.trim() || !tplFile) return;
-    setTplUploading(true);
-    setTplMessage('');
-    setPreviewError('');
-    try {
-      const r = await api.uploadOzonTemplate(tplCategory.trim(), tplFile);
-      setTplMessage(`✅ ${r.message || 'Эталон сохранён'}`);
-      setTplFile(null);
-      await loadTplList();
-      loadPreview();
-    } catch (e) {
-      setPreviewError(e.message);
-    } finally {
-      setTplUploading(false);
-    }
-  };
-
-  const handleDeleteTpl = async (cat) => {
-    try {
-      await api.deleteOzonTemplate(cat);
-      setTplMessage(`🗑 Эталон для «${cat}» удалён — выгрузка вернётся к генерации из спека.`);
-      await loadTplList();
-    } catch (e) {
-      setPreviewError(e.message);
-    }
   };
 
   const groupIssues = (issues) => ({
@@ -200,60 +180,62 @@ const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
           </div>
         </div>
 
-        {/* ✅ Эталонные шаблоны Ozon */}
-        {platform === 'ozon' && (
+        {/* ✅ Статус эталонов по категориям текущей выгрузки */}
+        {platform === 'ozon' && Object.keys(categoryCounts).length > 0 && (
           <div className="card" style={{ padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
             <h4 style={{ margin: '0 0 0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Icon name="template" size={16} /> Эталонный шаблон Ozon для категории
+              <Icon name="template" size={16} /> Эталонные шаблоны категорий выгрузки
             </h4>
-            <p className="form-hint" style={{ marginTop: 0, marginBottom: '0.6rem' }}>
-              Скачайте XLSX-шаблон в кабинете Ozon для нужной категории и загрузите его здесь.
-              Система возьмёт его формат (колонки, порядок, цвета, выпадающие списки, доп. листы)
-              как основу и подставит только строки товаров — файл будет идентичен шаблону площадки.
-            </p>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              <input
-                className="form-input"
-                list="tpl-categories"
-                placeholder="Одежда / Футболка"
-                value={tplCategory}
-                onChange={(e) => setTplCategory(e.target.value)}
-                style={{ flex: 1, minWidth: 220 }}
-              />
-              <datalist id="tpl-categories">
-                {specNames.map((n) => (<option key={n} value={n} />))}
-              </datalist>
-              <input
-                type="file"
-                accept=".xlsx"
-                onChange={(e) => setTplFile(e.target.files?.[0] || null)}
-              />
-              <Button onClick={handleUploadTpl} disabled={!tplCategory.trim() || !tplFile || tplUploading} loading={tplUploading}>
-                Сохранить эталон
-              </Button>
-            </div>
-            {tplList.length > 0 && (
-              <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Загружены эталоны:{' '}
-                {tplList.map((cat) => (
-                  <span key={cat} style={{ marginRight: '0.6rem', whiteSpace: 'nowrap' }}>
-                    ✅ {cat}{' '}
-                    <button
-                      type="button"
-                      title="Удалить эталон"
-                      onClick={() => handleDeleteTpl(cat)}
-                      style={{ background: 'none', border: 'none', color: 'var(--danger, #ef4444)', cursor: 'pointer', padding: 0 }}
-                    >
-                      ✕
-                    </button>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+              {Object.entries(categoryCounts)
+                .sort((a, b) => b[1] - a[1])
+                .map(([cat, n]) => (
+                  <span
+                    key={cat}
+                    title={tplSet.has(cat)
+                      ? `Эталон загружен — файл соберётся на его основе (${n} тов.)`
+                      : `Эталона нет — файл сгенерируется из спека (${n} тов.)`}
+                    style={{
+                      padding: '0.2rem 0.6rem',
+                      borderRadius: 999,
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      background: tplSet.has(cat) ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                      color: tplSet.has(cat) ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)',
+                      border: `1px solid ${tplSet.has(cat) ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)'}`,
+                    }}
+                  >
+                    {tplSet.has(cat) ? '✅' : '❌'} {cat} · {n}
                   </span>
                 ))}
+            </div>
+            {missingTemplates.length > 0 && (
+              <div className="alert alert-error" style={{ marginTop: '0.6rem', marginBottom: 0 }}>
+                <div>
+                  ❌ Нет эталонов для категорий: {missingTemplates.join(', ')}.
+                  Выгрузка по ним соберётся из спека и может отличаться от шаблона кабинета Ozon.
+                  {onOpenTemplates && (
+                    <>
+                      {' '}
+                      <button
+                        type="button"
+                        onClick={() => { onClose(); onOpenTemplates(); }}
+                        style={{
+                          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                          color: 'var(--primary, #3b82f6)', textDecoration: 'underline', fontWeight: 700,
+                        }}
+                      >
+                        Открыть страницу «Шаблоны площадок» →
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
-            {tplMessage && (
-              <div className="alert alert-success" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-                <div>{tplMessage}</div>
-              </div>
+            {missingTemplates.length === 0 && (
+              <p className="form-hint" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                ✅ Все категории выгрузки обеспечены эталонными шаблонами — файлы будут идентичны шаблонам Ozon.
+              </p>
             )}
           </div>
         )}
@@ -288,7 +270,7 @@ const ExportModal = ({ isOpen, onClose, onExport, loading }) => {
             )}
             {missingAny && (
               <div className="alert alert-error" style={{ marginTop: '0.6rem', marginBottom: 0 }}>
-                <div>❌ Заполните поля со значком ❌ через «Логистику», «Характеристики» или «Фото» и повторите экспорт.</div>
+                <div>❌ Заполните поля со значком ❌ через «Логистику», «Характеристики», «Фото» или «Дефолты» и повторите экспорт.</div>
               </div>
             )}
           </div>

@@ -4,12 +4,10 @@ import { api } from '../api';
 /**
  * Хук для управления миграцией товаров.
  *
- * ✅ Исправлено:
- *   - migrateProduct теперь ВОЗВРАЩАЕТ Promise, который резолвится
- *     ТОЛЬКО ПОСЛЕ завершения Celery-задачи (устранён race condition с экспортом)
- *   - polling реализован через async/await цикл (без setInterval)
- *   - убран страховочный setTimeout — заменён maxAttempts
- *   - сохранена обратная совместимость с BatchMigrateModal
+ * ✅ v3:
+ *   - migrateProduct возвращает Promise после завершения Celery-задачи
+ *   - migrateBatchWithExport: пакетная миграция + авто-экспорт всех успешных товаров
+ *   - Обработка ZIP (несколько категорий) и ошибок экспорта
  */
 export const useMigration = (loadData, onMessage) => {
   const [isMigratingProductId, setIsMigratingProductId] = useState(null);
@@ -18,7 +16,6 @@ export const useMigration = (loadData, onMessage) => {
   // Внутренний polling: ждёт завершения Celery-задачи
   // =====================================================================
   const pollUntilDone = useCallback(async (taskId, maxAttempts = 90) => {
-    // 90 попыток × 1 сек = до 90 секунд ожидания
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
@@ -35,9 +32,7 @@ export const useMigration = (loadData, onMessage) => {
             progress,
           };
         }
-        // status === 'pending' / 'progress' — продолжаем polling
       } catch (err) {
-        // Сетевая ошибка — не прерываем цикл, пробуем ещё раз
         if (attempt >= maxAttempts) {
           return {
             status: 'failed',
@@ -47,7 +42,6 @@ export const useMigration = (loadData, onMessage) => {
       }
     }
 
-    // Таймаут
     return {
       status: 'failed',
       error: 'Таймаут ожидания миграции (90 сек). Проверьте логи Celery.',
@@ -62,7 +56,6 @@ export const useMigration = (loadData, onMessage) => {
     onMessage?.('⏳ Идет перенос товара...');
 
     try {
-      // 1. Старт задачи в Celery
       const startResult = await api.migrateProduct(productId, targetPlatform, editedData);
 
       if (!startResult.success && !startResult.task_id) {
@@ -74,14 +67,12 @@ export const useMigration = (loadData, onMessage) => {
 
       const taskId = startResult.task_id;
       if (!taskId) {
-        // Старое синхронное API — считаем выполненным
         setIsMigratingProductId(null);
         loadData?.();
         onMessage?.('✅ Товар успешно перенесён!');
         return startResult;
       }
 
-      // 2. Ждём завершения задачи (до 90 сек)
       const result = await pollUntilDone(taskId);
 
       setIsMigratingProductId(null);
@@ -89,22 +80,20 @@ export const useMigration = (loadData, onMessage) => {
 
       if (result.status === 'completed') {
         onMessage?.('✅ Товар успешно перенесён!');
-        return result.progress;  // ← возвращаем финальный прогресс
+        return result.progress;
       }
 
-      // Ошибка — пробрасываем дальше, чтобы App.jsx мог поймать и показать
       throw new Error(result.error);
     } catch (err) {
       setIsMigratingProductId(null);
       loadData?.();
       onMessage?.('❌ ' + err.message);
-      throw err;  // ← пробрасываем — App.jsx решит, вызывать ли экспорт
+      throw err;
     }
   }, [loadData, onMessage, pollUntilDone]);
 
   // =====================================================================
   // ПАКЕТНАЯ МИГРАЦИЯ (просто старт — возвращает {batch_id, total})
-  // Polling прогресса делает сама BatchMigrateModal через pollBatchProgress
   // =====================================================================
   const migrateBatch = useCallback(async (productIds, targetPlatform) => {
     const data = await api.migrateBatch(productIds, targetPlatform);
@@ -118,24 +107,89 @@ export const useMigration = (loadData, onMessage) => {
   }, []);
 
   // =====================================================================
+  // ✅ ПАКЕТНАЯ МИГРАЦИЯ + АВТО-ЭКСПОРТ (для "Мигрировать выбранные")
+  // =====================================================================
+  const migrateBatchWithExport = useCallback(async (productIds, targetPlatform) => {
+    onMessage?.(`⏳ Запускаем пакетную миграцию ${productIds.length} товаров...`);
+
+    // 1. Старт пакетной миграции
+    const batchData = await migrateBatch(productIds, targetPlatform);
+    const batchId = batchData.batch_id;
+
+    onMessage?.(`⏳ Миграция запущена (batch_id: ${batchId}). Ожидаем завершения...`);
+
+    // 2. Polling до завершения (до 5 минут для больших пакетов)
+    const result = await pollUntilDone(batchId, 300);
+
+    loadData?.();
+
+    if (result.status === 'failed') {
+      throw new Error(result.error);
+    }
+
+    // 3. Миграция завершена — скачиваем файл ВСЕХ успешных товаров
+    const progress = result.progress || {};
+    const successCount = progress.success || 0;
+    const errorCount = progress.errors || 0;
+
+    if (successCount === 0) {
+      onMessage?.(
+        `⚠️ Пакетная миграция завершена, но все ${errorCount} товаров отклонены. ` +
+        `Проверьте цены, категории и обязательные поля.`
+      );
+      return { success: 0, errors: errorCount, filename: null };
+    }
+
+    onMessage?.(`✅ Миграция завершена (${successCount}/${productIds.length} успешно). Скачиваем файл...`);
+
+    try {
+      // ✅ Вызов экспорта БЕЗ product_id — скачиваем ВСЕ успешные товары
+      const filename = await api.exportXlsxV2(targetPlatform, 'success');
+
+      // Определение ZIP (несколько категорий)
+      if (filename.endsWith('.zip')) {
+        onMessage?.(
+          `⚠️ Скачан ZIP-архив: товары лежат в разных категориях, у каждой свой шаблон.\n\n` +
+          `📦 Распакуйте архив и загружайте каждый XLSX отдельно в кабинете ${targetPlatform}.\n` +
+          `✅ Миграция: ${successCount} успешно, ${errorCount} с ошибками.`
+        );
+      } else {
+        onMessage?.(
+          `✅ Пакетная миграция завершена. Файл «${filename}» скачан.\n` +
+          `📊 Успешно: ${successCount}, с ошибками: ${errorCount}.\n\n` +
+          `Загрузите файл в кабинете ${targetPlatform}.`
+        );
+      }
+
+      return { success: successCount, errors: errorCount, filename };
+    } catch (exportErr) {
+      // Экспорт не удался — миграция прошла, но файл не сформирован
+      onMessage?.(
+        `✅ Пакетная миграция завершена (${successCount} успешно, ${errorCount} с ошибками), ` +
+        `но файл не сформирован: ${exportErr.message}\n\n` +
+        `Откройте «Выгрузка» — там видно, каким товарам чего не хватает.`
+      );
+      return { success: successCount, errors: errorCount, filename: null, exportError: exportErr.message };
+    }
+  }, [migrateBatch, pollUntilDone, loadData, onMessage]);
+
+  // =====================================================================
   // ПОЛУЧЕНИЕ ПРОГРЕССА ПАКЕТНОЙ МИГРАЦИИ (один запрос)
-  // Используется в BatchMigrateModal через await pollBatchProgress(batchId)
   // =====================================================================
   const pollBatchProgress = useCallback(async (taskId) => {
     return await api.getTaskProgress(taskId);
   }, []);
 
   // =====================================================================
-  // Cleanup (оставлен для обратной совместимости — теперь no-op)
+  // Cleanup (no-op для обратной совместимости)
   // =====================================================================
-  const cleanupPolling = useCallback(() => {
-    // polling теперь внутри async-цикла — внешнего interval нет
-  }, []);
+  const cleanupPolling = useCallback(() => {}, []);
 
   return {
     isMigratingProductId,
     migrateProduct,
     migrateBatch,
+    migrateBatchWithExport,  // ✅ новый метод
     pollBatchProgress,
     cleanupPolling,
   };

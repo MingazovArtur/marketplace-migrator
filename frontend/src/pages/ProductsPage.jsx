@@ -39,6 +39,9 @@ const GAP_LABELS = {
   main_photo: 'Главное фото',
 };
 
+// ✅ Поля, которые БЛОКИРУЮТ миграцию (критические)
+const BLOCKING_GAP_FIELDS = ['price', 'main_photo'];
+
 const ProductsPage = ({
   isAdmin = false,
   refreshKey = 0,
@@ -66,10 +69,10 @@ const ProductsPage = ({
   const [showBulkUpdate, setShowBulkUpdate] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
 
-  // ✅ Дефолты экспорта и счётчик пропусков
   const [showDefaults, setShowDefaults] = useState(false);
   const [gaps, setGaps] = useState(null);
   const [gapsLoading, setGapsLoading] = useState(false);
+  const [applyLoading, setApplyLoading] = useState(false);
   const [specNames, setSpecNames] = useState([]);
 
   // ==================== Загрузка ====================
@@ -95,13 +98,8 @@ const ProductsPage = ({
   }, [search, status, sort, skip, limit]);
 
   const loadRef = useRef(load);
-  useEffect(() => {
-    loadRef.current = load;
-  }, [load]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { loadRef.current = load; }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
     if (refreshKey > 0) {
@@ -116,7 +114,7 @@ const ProductsPage = ({
     return () => clearTimeout(t);
   }, [message]);
 
-  // ✅ Загрузка счётчика пропусков (для кнопки «Заполнить пропуски» и DefaultsModal)
+  // ✅ Загрузка счётчика пропусков
   const loadGaps = useCallback(async () => {
     setGapsLoading(true);
     try {
@@ -129,7 +127,6 @@ const ProductsPage = ({
     }
   }, []);
 
-  // ✅ Имена спеков Ozon — для dropdown в DefaultsModal
   const loadSpecNames = useCallback(async () => {
     try {
       const names = await api.getSpecNames('ozon');
@@ -139,7 +136,6 @@ const ProductsPage = ({
     }
   }, []);
 
-  // Обновляем gaps при refreshKey (после миграций, удаления, дефолтов)
   useEffect(() => {
     loadGaps();
     loadSpecNames();
@@ -239,11 +235,11 @@ const ProductsPage = ({
     }
   };
 
-  // ✅ Массовое заполнение пропусков из дефолтов
-  const handleApplyDefaults = async () => {
-    setGapsLoading(true);
+  // ==================== Дозаполнение пропусков ====================
+  const handleApplyDefaults = async (mode = 'all') => {
+    setApplyLoading(true);
     try {
-      const r = await api.applyDefaults('all');
+      const r = await api.applyDefaults(mode === 'selected' ? { product_ids: selected } : 'all');
       const summary = Object.entries(r.fields || {})
         .map(([k, v]) => `${GAP_LABELS[k] || k}: ${v}`)
         .join(', ');
@@ -251,27 +247,81 @@ const ProductsPage = ({
         `🩹 Дозаполнено товаров: ${r.updated} из ${r.total}` +
         (summary ? ` (${summary})` : '')
       );
+      if (mode === 'selected') setSelected([]);
       await loadGaps();
       await load();
     } catch (e) {
       setError(e.message);
     } finally {
-      setGapsLoading(false);
+      setApplyLoading(false);
     }
   };
 
-  // ✅ Категории текущих товаров (для dropdown в DefaultsModal)
-  const productCategories = useMemo(() => {
-    const all = [...products];
-    if (all.length < total) {
-      // если показывается только часть — добавим mapped_category из products
-      // но в любом случае у нас есть список из products, что достаточно для dropdown
+  // ✅ Миграция с проверкой пропусков в выделенных товарах
+  const handleMigrateSelected = () => {
+    if (!onMigrate || selected.length === 0) return;
+
+    // Считаем пропуски среди ВЫДЕЛЕННЫХ
+    const selectedProducts = products.filter((p) => selected.includes(p.id));
+    const localGaps = { price: 0, main_photo: 0 };
+    selectedProducts.forEach((p) => {
+      const price = Number(p.price);
+      if (!price || price <= 0 || isNaN(price)) localGaps.price += 1;
+      if (!p.photos || p.photos.length === 0) localGaps.main_photo += 1;
+    });
+    const blockingCount = (localGaps.price || 0) + (localGaps.main_photo || 0);
+
+    if (blockingCount > 0) {
+      const lines = [];
+      if (localGaps.price) lines.push(`— Цена 0/пустая: ${localGaps.price} шт.`);
+      if (localGaps.main_photo) lines.push(`— Нет главного фото: ${localGaps.main_photo} шт.`);
+      const msg = (
+        `⚠️ В ${blockingCount} из ${selected.length} выделенных товаров есть блокирующие пропуски:\n\n` +
+        lines.join('\n') +
+        `\n\nПродолжить миграцию? Товары с пропусками будут отклонены валидатором.`
+      );
+      // eslint-disable-next-line no-alert
+      if (!window.confirm(msg)) return;
     }
-    return Array.from(new Set(all.map((p) => p.mapped_category || p.category).filter(Boolean))).sort();
-  }, [products]);
+    onMigrate(selected);
+  };
+
+  // ==================== Категории текущих товаров ====================
+  const productCategories = useMemo(
+    () => Array.from(new Set(products.map((p) => p.mapped_category || p.category).filter(Boolean))).sort(),
+    [products]
+  );
 
   const gapEntries = gaps ? Object.entries(gaps.gaps || {}).filter(([, n]) => n > 0) : [];
   const gapsTotal = gapEntries.reduce((acc, [, n]) => acc + n, 0);
+
+  // ✅ Пропуски в ВЫДЕЛЕННЫХ товарах (для badge и confirm)
+  const selectedGaps = useMemo(() => {
+    if (selected.length === 0) return null;
+    const selectedProducts = products.filter((p) => selected.includes(p.id));
+    const gapsLocal = {};
+    selectedProducts.forEach((p) => {
+      const price = Number(p.price);
+      if (!price || price <= 0 || isNaN(price)) gapsLocal.price = (gapsLocal.price || 0) + 1;
+      if (!p.photos || p.photos.length === 0) gapsLocal.main_photo = (gapsLocal.main_photo || 0) + 1;
+      ['vat_rate', 'okpd_code', 'package_weight_grams', 'package_width_mm',
+       'package_height_mm', 'package_length_mm'].forEach((f) => {
+        if (p[f] === null || p[f] === undefined || p[f] === '' || p[f] === 0) {
+          gapsLocal[f] = (gapsLocal[f] || 0) + 1;
+        }
+      });
+    });
+    return gapsLocal;
+  }, [selected, products]);
+
+  const selectedBlockingTotal = selectedGaps
+    ? BLOCKING_GAP_FIELDS.reduce((acc, k) => acc + (selectedGaps[k] || 0), 0)
+    : 0;
+  const selectedFillableTotal = selectedGaps
+    ? Object.entries(selectedGaps)
+        .filter(([k]) => !BLOCKING_GAP_FIELDS.includes(k))
+        .reduce((acc, [, n]) => acc + n, 0)
+    : 0;
 
   const page = Math.floor(skip / limit) + 1;
   const pages = Math.max(1, Math.ceil(total / limit));
@@ -316,14 +366,23 @@ const ProductsPage = ({
               <strong>
                 {gapEntries.map(([k, n]) => `${GAP_LABELS[k] || k} — ${n}`).join('; ')}
               </strong>
+              {selected.length > 0 && selectedBlockingTotal + selectedFillableTotal > 0 && (
+                <span style={{ display: 'block', marginTop: '0.25rem', fontSize: '0.85rem', opacity: 0.9 }}>
+                  ↳ в выделенных ({selected.length}):{' '}
+                  {Object.entries(selectedGaps || {})
+                    .filter(([, n]) => n > 0)
+                    .map(([k, n]) => `${GAP_LABELS[k] || k} — ${n}`)
+                    .join('; ')}
+                </span>
+              )}
             </div>
-            <Button size="small" onClick={handleApplyDefaults} loading={gapsLoading}>
-              🩹 Заполнить пропуски из дефолтов
+            <Button size="small" onClick={() => handleApplyDefaults('all')} loading={applyLoading}>
+              🩹 Заполнить пропуски из дефолтов (все товары)
             </Button>
           </div>
           <p style={{ margin: '0.4rem 0 0', fontSize: '0.85rem', opacity: 0.9 }}>
             Значения берутся из <strong>Дефолтов экспорта</strong>: глобальных и по категориям.
-            Один клик — и все 5000 товаров получат НДС, ТН ВЭД, ОВХ и вес.
+            Один клик — и все товары получат НДС, ТН ВЭД, ОВХ и вес.
           </p>
         </div>
       )}
@@ -358,15 +417,14 @@ const ProductsPage = ({
           </Button>
         )}
 
-        {/* ✅ Кнопки дефолтов и заполнения пропусков */}
         <Button variant="secondary" onClick={() => setShowDefaults(true)}>
           <Icon name="settings" size={16} /> Дефолты
         </Button>
         {gapsTotal > 0 && (
           <Button
             variant="outline"
-            onClick={handleApplyDefaults}
-            loading={gapsLoading}
+            onClick={() => handleApplyDefaults('all')}
+            loading={applyLoading}
             title="Дозаполнит пустые НДС/ТН ВЭД/ОВХ/вес из дефолтов по всем товарам"
           >
             <Icon name="edit" size={16} /> Заполнить пропуски ({gapsTotal})
@@ -379,7 +437,7 @@ const ProductsPage = ({
 
       {/* ==================== Панель массовых действий ==================== */}
       {selected.length > 0 && (
-        <div className="products-toolbar" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem' }}>
+        <div className="products-toolbar" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
           <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
             Выбрано: <strong>{selected.length}</strong>
           </span>
@@ -387,8 +445,44 @@ const ProductsPage = ({
             <Icon name="edit" size={15} /> Обновить цену/бренд
           </Button>
           {onMigrate && (
-            <Button variant="secondary" size="small" onClick={() => onMigrate(selected)}>
+            <Button
+              variant="secondary"
+              size="small"
+              onClick={handleMigrateSelected}
+              title={
+                selectedBlockingTotal > 0
+                  ? `⚠️ В ${selectedBlockingTotal} товарах есть блокирующие пропуски — миграция может завершиться с ошибками`
+                  : 'Запустить миграцию выделенных товаров'
+              }
+            >
               <Icon name="migrate" size={15} /> Мигрировать выбранные
+              {selectedBlockingTotal > 0 && (
+                <span
+                  style={{
+                    marginLeft: '0.4rem',
+                    padding: '0 0.4rem',
+                    background: 'var(--danger, #ef4444)',
+                    color: '#fff',
+                    borderRadius: '999px',
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                  }}
+                >
+                  ⚠ {selectedBlockingTotal}
+                </span>
+              )}
+            </Button>
+          )}
+          {/* ✅ Кнопка дозаполнения ТОЛЬКО выделенных (независимо от баннера) */}
+          {selectedFillableTotal > 0 && (
+            <Button
+              variant="outline"
+              size="small"
+              onClick={() => handleApplyDefaults('selected')}
+              loading={applyLoading}
+              title="Дозаполнит пустые поля (НДС, ТН ВЭД, ОВХ, вес) из дефолтов только у выделенных товаров"
+            >
+              <Icon name="edit" size={15} /> Заполнить пропуски выделенных ({selectedFillableTotal})
             </Button>
           )}
           <Button variant="secondary" size="small" onClick={() => setDeleteMode('bulk')}>
@@ -450,6 +544,10 @@ const ProductsPage = ({
             <tbody>
               {products.map((p) => {
                 const st = STATUS_META[p.status] || STATUS_META.pending;
+                const price = Number(p.price);
+                const priceBad = !price || price <= 0 || isNaN(price);
+                const photoBad = !p.photos || p.photos.length === 0;
+                const hasBlocking = priceBad || photoBad;
                 return (
                   <tr key={p.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
                     <td style={{ padding: '0.6rem', overflow: 'hidden' }}>
@@ -472,8 +570,14 @@ const ProductsPage = ({
                         <div style={{ fontSize: '0.75rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>→ {p.mapped_category}</div>
                       )}
                     </td>
-                    <td style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 600, overflow: 'hidden' }}>
-                      {p.price != null ? `${p.price} ₽` : '—'}
+                    <td
+                      style={{
+                        padding: '0.6rem', textAlign: 'right', fontWeight: 600, overflow: 'hidden',
+                        color: priceBad ? 'var(--danger, #ef4444)' : undefined,
+                      }}
+                      title={priceBad ? '❌ Цена не указана или = 0 — миграция будет отклонена' : undefined}
+                    >
+                      {priceBad ? '❌ —' : `${p.price} ₽`}
                     </td>
                     <td style={{ padding: '0.6rem', textAlign: 'center', overflow: 'hidden' }}>
                       <span className={`badge ${st.cls}`}>{st.label}</span>
@@ -504,12 +608,24 @@ const ProductsPage = ({
                           </Button>
                         )}
                         {onPhotos && (
-                          <Button variant="secondary" size="small" title="Фото" onClick={() => onPhotos(p)}>
+                          <Button
+                            variant="secondary"
+                            size="small"
+                            title={photoBad ? '❌ Фото отсутствует — миграция будет отклонена' : 'Фото'}
+                            onClick={() => onPhotos(p)}
+                            style={photoBad ? { boxShadow: '0 0 0 2px var(--danger, #ef4444)' } : undefined}
+                          >
                             <Icon name="photo" size={15} />
                           </Button>
                         )}
                         {onMigrate && (
-                          <Button variant="secondary" size="small" title="Мигрировать" onClick={() => onMigrate(p)}>
+                          <Button
+                            variant="secondary"
+                            size="small"
+                            title={hasBlocking ? '⚠️ Товар имеет блокирующие пропуски' : 'Мигрировать'}
+                            onClick={() => onMigrate(p)}
+                            style={hasBlocking ? { boxShadow: '0 0 0 2px var(--warning, #f59e0b)' } : undefined}
+                          >
                             <Icon name="migrate" size={15} />
                           </Button>
                         )}

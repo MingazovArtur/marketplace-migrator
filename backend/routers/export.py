@@ -1,9 +1,8 @@
 """
 Роутер экспорта: выгрузка файлов для ЛК площадок, предпросмотр, валидация, шаблоны.
 
-✅ v3: добавлено хранилище ЭТАЛОННЫХ шаблонов Ozon (файлы, скачанные пользователем
-в кабинете селлера): upload / list / status / delete. При выгрузке XLSX v2 эталон
-используется как каркас — формат совпадает с площадкой на 100%.
+✅ v4: эталонные шаблоны Ozon получили метаданные (кто/когда загрузил, число колонок)
+   + endpoint скачивания текущего эталона. Шаблоны ОБЩИЕ для всех пользователей.
 
 Rate-limits:
   - /export/preview/{platform}    : 30/min
@@ -14,6 +13,7 @@ Rate-limits:
 """
 import io
 import logging
+import re as _re
 import time
 from datetime import datetime
 from urllib.parse import quote
@@ -46,6 +46,33 @@ def _safe_disposition(filename: str) -> str:
     return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded}'
 
 
+def _normalize_category_name(name: str, platform: str = "ozon") -> str:
+    """
+    Приводит имя категории к системному формату (последние 2 уровня пути)
+    и сверяет со спеками:
+      «Одежда > Аксессуары > Панама» → «Аксессуары / Панама»
+      «Одежда / Аксессуары / Панама» → «Аксессуары / Панама»
+      «Аксессуары / Панама»          → без изменений
+    """
+    raw = (name or "").strip()
+    parts = [p.strip() for p in _re.split(r"[>/\\]", raw) if p.strip()]
+    candidate = " / ".join(parts[-2:]) if len(parts) >= 2 else raw
+
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(PlatformCategorySpec)
+            .filter(
+                PlatformCategorySpec.platform == platform,
+                PlatformCategorySpec.category_name == candidate,
+            )
+            .first()
+        )
+        return row.category_name if row else candidate
+    finally:
+        db.close()
+
+
 def _get_products_for_export(current_user: User, status: str) -> list:
     is_admin = current_user.role == "admin"
     result = repo.get_all(user_id=current_user.id, is_admin=is_admin, limit=10000)
@@ -55,7 +82,7 @@ def _get_products_for_export(current_user: User, status: str) -> list:
     return products
 
 
-# ==================== ЭТАЛОННЫЕ ШАБЛОНЫ OZON (файлы пользователя) ====================
+# ==================== ЭТАЛОННЫЕ ШАБЛОНЫ OZON (общие для всех пользователей) ====================
 
 @router.post("/export/ozon-template/upload")
 async def upload_official_template(
@@ -66,9 +93,10 @@ async def upload_official_template(
 ):
     """
     Приём эталонного XLSX-шаблона, скачанного в кабинете Ozon для категории.
-    Файл проверяется на похожесть структуры и сохраняется как каркас для выгрузки.
+    ✅ Имя категории нормализуется («Одежда > Аксессуары > Панама» → «Аксессуары / Панама»).
+    ✅ Шаблон общий: доступен всем пользователям системы.
     """
-    category_name = (category_name or "").strip()
+    category_name = _normalize_category_name(category_name, "ozon")
     if not category_name:
         raise HTTPException(status_code=400, detail="Укажите категорию (формат «Родитель / Тип»)")
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
@@ -82,18 +110,31 @@ async def upload_official_template(
     if problem:
         raise HTTPException(status_code=400, detail=f"Это не шаблон Ozon: {problem}")
 
-    template_filler.save_official_template(category_name, data)
+    meta = template_filler.save_official_template(
+        category_name, data, uploaded_by=current_user.username
+    )
     return {
         "ok": True,
         "category": category_name,
         "size": len(data),
-        "message": f"Эталон для «{category_name}» сохранён. Выгрузка будет собрана на его основе.",
+        "columns": meta.get("columns"),
+        "message": f"Эталон для «{category_name}» сохранён ({meta.get('columns')} колонок). "
+                   f"Выгрузка будет собрана на его основе.",
     }
 
 
 @router.get("/export/ozon-template/list")
 def list_official_templates(current_user: User = Depends(get_current_user)):
-    """Список категорий, для которых загружен эталонный шаблон."""
+    """Имена категорий с эталонами (обратная совместимость)."""
+    return {"templates": template_filler.list_template_names()}
+
+
+@router.get("/export/ozon-template/meta")
+def list_official_templates_meta(current_user: User = Depends(get_current_user)):
+    """
+    ✅ Метаданные всех эталонов для страницы «Шаблоны площадок»:
+    категория, имя файла, дата загрузки, кто загрузил, число колонок.
+    """
     return {"templates": template_filler.list_official_templates()}
 
 
@@ -102,10 +143,30 @@ def ozon_template_status(
     category_name: str,
     current_user: User = Depends(get_current_user),
 ):
+    cat = _normalize_category_name(category_name, "ozon")
     return {
-        "category": category_name,
-        "has_official_template": template_filler.has_official_template(category_name),
+        "category": cat,
+        "has_official_template": template_filler.has_official_template(cat),
+        "meta": template_filler.get_template_meta(cat),
     }
+
+
+@router.get("/export/ozon-template/download")
+def download_official_template(
+    category_name: str,
+    current_user: User = Depends(get_current_user),
+):
+    """✅ Скачивание текущего эталона категории (посмотреть/передать коллеге)."""
+    cat = _normalize_category_name(category_name, "ozon")
+    data = template_filler.read_template_bytes(cat)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"Эталон для «{cat}» не найден")
+    fname = f"ozon_{cat.replace('/', '_').strip()}.xlsx"
+    return Response(
+        content=data,
+        media_type=XLSX_MIME,
+        headers={"Content-Disposition": _safe_disposition(fname)},
+    )
 
 
 @router.delete("/export/ozon-template")
@@ -113,10 +174,12 @@ def delete_official_template(
     category_name: str,
     current_user: User = Depends(get_current_user),
 ):
-    deleted = template_filler.delete_official_template(category_name.strip())
+    cat = _normalize_category_name(category_name, "ozon")
+    deleted = template_filler.delete_official_template(cat)
     if not deleted:
         raise HTTPException(status_code=404, detail="Эталон для этой категории не найден")
-    return {"ok": True, "category": category_name}
+    logger.info(f"🗑 Эталон удалён: '{cat}' (пользователь {current_user.username})")
+    return {"ok": True, "category": cat}
 
 
 # ==================== ПРЕДПРОСМОТР ВЫГРУЗКИ ====================
@@ -399,10 +462,9 @@ def export_xlsx_v2(
 ):
     """
     XLSX v2: файл под реальный шаблон площадки.
-    ✅ Если для категории загружен ЭТАЛОННЫЙ шаблон Ozon — файл собирается НА НЁМ
-       (формат 1:1, кабинет распознаёт всегда).
+    ✅ Если для категории загружен ЭТАЛОН — файл собирается НА НЁМ (формат 1:1).
     ✅ Иначе — генерация из спека категории (fallback).
-    ✅ Отсев товаров с error-issues; громкая ошибка при отсутствии спека.
+    ✅ Отсев товаров с error-issues; громкая ошибка при отсутствии спека/эталона.
     """
     if not status or status not in ("success", "pending", "processing", "error", "all"):
         status = "success"
@@ -455,7 +517,7 @@ def export_xlsx_v2(
 
         no_spec_categories = sorted(cat for cat in categories if cat not in specs_by_name)
         if no_spec_categories and platform == "ozon":
-            # ✅ Эталон заменяет спек: если шаблон загружен — спек не требуем
+            # ✅ Эталон заменяет спек: требуем спек только там, где эталона нет
             without_template = [c for c in no_spec_categories
                                 if not template_filler.has_official_template(c)]
             if without_template:
@@ -465,7 +527,7 @@ def export_xlsx_v2(
                         f"Для {len(without_template)} категорий нет спека Ozon: "
                         f"{', '.join(without_template[:5])}"
                         f"{'…' if len(without_template) > 5 else ''}. "
-                        f"Загрузите эталонный шаблон категории в окне «Выгрузка» "
+                        f"Загрузите эталонный шаблон категории на странице «Шаблоны площадок» "
                         f"или выберите точную категорию в маппинге («Родитель / Тип»)."
                     ),
                 )

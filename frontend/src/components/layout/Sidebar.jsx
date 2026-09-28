@@ -7,6 +7,7 @@ const NAV = [
   { id: 'import', label: 'Импорт', icon: 'import' },
   { id: 'mapping', label: 'Маппинг', icon: 'mapping' },
   { id: 'specs', label: 'Спецификации', icon: 'layers' },
+  { id: 'templates', label: 'Шаблоны', icon: 'template' },   // ✅ управление эталонами Ozon
   { id: 'history', label: 'История', icon: 'history' },
 ];
 

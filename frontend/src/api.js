@@ -24,11 +24,8 @@ async function safeError(res, fallback) {
     const data = await res.json();
     if (data.detail) {
       if (Array.isArray(data.detail)) {
-        return data.detail
-          .map((d) => `${(d.loc || []).join('.')} — ${d.msg}`)
-          .join('; ');
+        return data.detail.map((d) => `${(d.loc || []).join('.')} — ${d.msg}`).join('; ');
       }
-      // ✅ Поддержка структурированных ошибок (409 summary + problems и т.п.)
       if (typeof data.detail === 'object') {
         if (data.detail.message) return data.detail.message;
         return JSON.stringify(data.detail);
@@ -42,32 +39,19 @@ async function safeError(res, fallback) {
 }
 
 /**
- * ✅ Извлечь имя файла из заголовка Content-Disposition.
- * Поддерживает RFC 5987:
- *   attachment; filename="fallback.xlsx"; filename*=UTF-8''%D0%9E...
- * Приоритет: filename*=UTF-8''... (оригинальное имя с кириллицей),
- *            затем filename="..." (fallback с латиницей).
+ * ✅ Извлечь имя файла из Content-Disposition (RFC 5987):
+ * приоритет filename*=UTF-8''... (кириллица), затем filename="...".
  */
 const parseContentDisposition = (header, fallback = 'export.xlsx') => {
   if (!header) return fallback;
-
-  // Приоритет 1: RFC 5987 filename*=UTF-8''... (с кириллицей)
   const utf8Match = header.match(/filename\*\s*=\s*UTF-8''([^;\s]+)/i);
   if (utf8Match) {
-    try {
-      return decodeURIComponent(utf8Match[1]);
-    } catch {
-      // Если decode упал — падаем на обычный filename
-    }
+    try { return decodeURIComponent(utf8Match[1]); } catch { /* fallthrough */ }
   }
-
-  // Приоритет 2: filename="..." или filename=... (без кавычек)
   const quotedMatch = header.match(/filename\s*=\s*"([^"]+)"/i);
   if (quotedMatch) return quotedMatch[1];
-
   const plainMatch = header.match(/filename\s*=\s*([^;\s]+)/i);
   if (plainMatch) return plainMatch[1];
-
   return fallback;
 };
 
@@ -112,7 +96,7 @@ export const api = {
     return res.json();
   },
 
-  /* ==================== Email (верификация + восстановление) ==================== */
+  /* ==================== Email ==================== */
 
   verifyEmail: async (token) => {
     const res = await fetch(`${API_URL}/auth/verify-email`, {
@@ -166,8 +150,7 @@ export const api = {
     if (params.limit !== undefined) q.append('limit', params.limit);
 
     const qs = q.toString();
-    const url = `${API_URL}/products${qs ? '?' + qs : ''}`;
-    const res = await fetch(url, { headers: getHeaders() });
+    const res = await fetch(`${API_URL}/products${qs ? '?' + qs : ''}`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить товары'));
     return res.json();
   },
@@ -233,9 +216,7 @@ export const api = {
   },
 
   getVariants: async (productId) => {
-    const res = await fetch(`${API_URL}/products/${enc(productId)}/variants`, {
-      headers: getHeaders(),
-    });
+    const res = await fetch(`${API_URL}/products/${enc(productId)}/variants`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка загрузки вариаций'));
     return res.json();
   },
@@ -284,7 +265,6 @@ export const api = {
     return res.json();
   },
 
-  // Алиас для обратной совместимости (LogisticsModal и др.)
   updateProductLogistics: (id, payload) => api.updateLogistics(id, payload),
 
   /* ==================== Platforms & categories ==================== */
@@ -295,13 +275,6 @@ export const api = {
     return res.json();
   },
 
-  /**
-   * ✅ Категории площадки.
-   * ВАЖНО: маршрут /categories/{platform} на бэкенде существует НЕ для всех
-   * источников (для source-строк вида «Магнит Маркет (Файл) → Ozon» его нет → 404).
-   * Поэтому: кодируем путь и при 404 мягко возвращаем [] — UI покажет
-   * предупреждение и предложит выбрать категорию из списка спеков.
-   */
   getCategories: async (platform) => {
     const res = await fetch(`${API_URL}/categories/${enc(platform)}`, { headers: getHeaders() });
     if (res.status === 404) return [];
@@ -309,18 +282,12 @@ export const api = {
     return res.json();
   },
 
-  /**
-   * ✅ Канонический эндпоинт маппинга категорий (в логах бэкенда отвечает 200).
-   * Query-параметры кодирует URLSearchParams — кириллица и «→» безопасны.
-   */
   getCategoryMapping: async (sourcePlatform, targetPlatform) => {
     const q = new URLSearchParams({
       source_platform: sourcePlatform || '',
       target_platform: targetPlatform || '',
     });
-    const res = await fetch(`${API_URL}/category-mapping?${q.toString()}`, {
-      headers: getHeaders(),
-    });
+    const res = await fetch(`${API_URL}/category-mapping?${q.toString()}`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить маппинг категорий'));
     return res.json();
   },
@@ -376,9 +343,7 @@ export const api = {
   },
 
   migrateBatch: async (productIds, platform) => {
-    const ids = (productIds || [])
-      .map((id) => Number(id))
-      .filter((id) => !isNaN(id) && id > 0);
+    const ids = (productIds || []).map((id) => Number(id)).filter((id) => !isNaN(id) && id > 0);
     if (!ids.length) throw new Error('Нет валидных товаров для миграции');
 
     const res = await fetch(`${API_URL}/migrate/batch`, {
@@ -390,14 +355,10 @@ export const api = {
     return res.json();
   },
 
-  // Алиас для useMigration.js
   startBatchMigration: (ids, platform) => api.migrateBatch(ids, platform),
 
-  // ✅ Прогресс Celery-задачи (миграция / specs refresh — один эндпоинт)
   getTaskProgress: async (taskId) => {
-    const res = await fetch(`${API_URL}/migrate/batch/${enc(taskId)}/progress`, {
-      headers: getAuthHeaders(),
-    });
+    const res = await fetch(`${API_URL}/migrate/batch/${enc(taskId)}/progress`, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось получить прогресс'));
     return res.json();
   },
@@ -459,7 +420,117 @@ export const api = {
     a.remove();
     URL.revokeObjectURL(url);
   },
-    /* ==================== Эталонные шаблоны Ozon (файлы пользователя) ==================== */
+
+  validateExport: async (platform, status = 'all', productId = null) => {
+    const q = new URLSearchParams();
+    if (status) q.append('status', status);
+    if (productId) q.append('product_id', productId);
+    const res = await fetch(`${API_URL}/export/validate/${enc(platform)}?${q.toString()}`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка проверки готовности к экспорту'));
+    return res.json();
+  },
+
+  /**
+   * ✅ XLSX v2: файл под реальный шаблон площадки (эталон优先, иначе спек).
+   * Защита: JSON под видом файла не сохраняется, ZIP получает расширение .zip.
+   */
+  exportXlsxV2: async (platform, status = 'success', productId = null) => {
+    const q = new URLSearchParams();
+    if (status) q.append('status', status);
+    if (productId) q.append('product_id', productId);
+
+    const res = await fetch(`${API_URL}/export/xlsx/${enc(platform)}?${q.toString()}`, {
+      headers: getHeaders(),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.detail && typeof data.detail === 'object') {
+        const sum = Object.entries(data.detail.summary || {})
+          .map(([k, v]) => `${k}: ${v.count} шт.`).join(', ');
+        throw new Error(`${data.detail.message}\nПроблемы: ${sum}${data.detail.fix_hint ? `\n\n${data.detail.fix_hint}` : ''}`);
+      }
+      const detail = typeof data.detail === 'string'
+        ? data.detail
+        : (data.detail?.message || JSON.stringify(data.detail || {}));
+      throw new Error(productId
+        ? `Товар #${productId} не прошёл валидацию:\n\n${detail}`
+        : `${detail}\n\nОткройте «Выгрузка» — блок валидации покажет, каких полей не хватает.`);
+    }
+
+    const blob = await res.blob();
+
+    // ✅ ЗАЩИТА: JSON под видом файла → читаемая ошибка, а не «битый xlsx»
+    if (blob.type && blob.type.includes('application/json')) {
+      const data = JSON.parse(await blob.text());
+      throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail));
+    }
+
+    const cd = res.headers.get('content-disposition');
+    let filename = parseContentDisposition(cd, `${platform}_export.xlsx`);
+    if (blob.type === 'application/zip' && !filename.toLowerCase().endsWith('.zip')) {
+      filename = filename.replace(/\.xlsx$/i, '') + '.zip';
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return filename;
+  },
+
+  /* ==================== Дефолты экспорта ==================== */
+
+  getDefaults: async () => {
+    const res = await fetch(`${API_URL}/defaults`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить дефолты'));
+    return res.json();
+  },
+
+  saveDefaults: async (payload) => {
+    const res = await fetch(`${API_URL}/defaults`, {
+      method: 'PUT', headers: getHeaders(), body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось сохранить дефолты'));
+    return res.json();
+  },
+
+  deleteCategoryDefaults: async (categoryName) => {
+    const res = await fetch(`${API_URL}/defaults/category?category_name=${enc(categoryName)}`, {
+      method: 'DELETE', headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось удалить дефолты категории'));
+    return res.json();
+  },
+
+  getGaps: async (status = 'all') => {
+    const res = await fetch(`${API_URL}/defaults/gaps?status=${enc(status)}`, { headers: getHeaders() });
+    if (!res.ok) return { total: 0, gaps: {} };
+    return res.json();
+  },
+
+  /**
+   * ✅ Массовое дозаполнение пропусков.
+   * 'all' | 'pending' | ... — по всем товарам статуса;
+   * { product_ids: [...] } — только по выделенным.
+   */
+  applyDefaults: async (modeOrPayload = 'all') => {
+    const body = (modeOrPayload && typeof modeOrPayload === 'object') ? modeOrPayload : null;
+    const q = (!body && modeOrPayload) ? `?status=${enc(modeOrPayload)}` : '';
+    const res = await fetch(`${API_URL}/products/apply-defaults${q}`, {
+      method: 'POST',
+      headers: body ? getHeaders() : getAuthHeaders(),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось заполнить пропуски'));
+    return res.json();
+  },
+
+  /* ==================== Эталонные шаблоны Ozon (общие для всех пользователей) ==================== */
 
   uploadOzonTemplate: async (categoryName, file) => {
     const fd = new FormData();
@@ -480,13 +551,40 @@ export const api = {
     return res.json();
   },
 
+  /** ✅ Метаданные эталонов: категория, файл, дата, кто загрузил, число колонок */
+  listOzonTemplatesMeta: async () => {
+    const res = await fetch(`${API_URL}/export/ozon-template/meta`, { headers: getHeaders() });
+    if (!res.ok) return { templates: [] };
+    return res.json();
+  },
+
   getOzonTemplateStatus: async (categoryName) => {
     const res = await fetch(
       `${API_URL}/export/ozon-template/status?category_name=${enc(categoryName)}`,
       { headers: getHeaders() }
     );
-    if (!res.ok) return { has_official_template: false };
+    if (!res.ok) return { has_official_template: false, meta: null };
     return res.json();
+  },
+
+  /** ✅ Скачать текущий эталон категории (посмотреть / передать коллеге) */
+  downloadOzonTemplate: async (categoryName) => {
+    const res = await fetch(
+      `${API_URL}/export/ozon-template/download?category_name=${enc(categoryName)}`,
+      { headers: getHeaders() }
+    );
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось скачать эталон'));
+    const blob = await res.blob();
+    const filename = parseContentDisposition(res.headers.get('content-disposition'), 'ozon_template.xlsx');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return filename;
   },
 
   deleteOzonTemplate: async (categoryName) => {
@@ -496,94 +594,6 @@ export const api = {
     );
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка удаления эталона'));
     return res.json();
-  },
-
-  /**
-   * ✅ Валидация готовности товаров к экспорту.
-   * @param {string} platform - площадка (ozon, yandex, wildberries)
-   * @param {string} status - фильтр по статусу (success, pending, all)
-   * @param {number|null} productId - ID одного товара (для модалки миграции)
-   */
-  validateExport: async (platform, status = 'all', productId = null) => {
-    const q = new URLSearchParams();
-    if (status) q.append('status', status);
-    if (productId) q.append('product_id', productId);
-
-    const res = await fetch(`${API_URL}/export/validate/${enc(platform)}?${q.toString()}`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error(await safeError(res, 'Ошибка проверки готовности к экспорту'));
-    return res.json();
-  },
-
-  /**
-   * ✅ XLSX v2: файл под реальный шаблон площадки.
-   *
-   * @param {string} platform - площадка (ozon, yandex, wildberries)
-   * @param {string} status - фильтр по статусу (success, pending, all)
-   * @param {number|null} productId - ID одного товара (для авто-экспорта из модалки миграции)
-   *
-   * 409 — структурированный detail (summary + fix_hint).
-   * 400 — валидатор не пропустил ни один товар: показываем detail целиком.
-   *
-   * ✅ Поддержка RFC 5987 filename*: имя с кириллицей в загрузках браузера.
-   */
-  exportXlsxV2: async (platform, status = 'success', productId = null) => {
-    const q = new URLSearchParams();
-    if (status) q.append('status', status);
-    if (productId) q.append('product_id', productId);  // ✅ фильтр по одному товару
-
-    const res = await fetch(`${API_URL}/export/xlsx/${enc(platform)}?${q.toString()}`, {
-      headers: getHeaders(),
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-
-      if (res.status === 409 && data.detail && typeof data.detail === 'object') {
-        const sum = Object.entries(data.detail.summary || {})
-          .map(([k, v]) => `${k}: ${v.count} шт.`)
-          .join(', ');
-        const hint = data.detail.fix_hint ? `\n\n${data.detail.fix_hint}` : '';
-        throw new Error(`${data.detail.message}\nПроблемы: ${sum}${hint}`);
-      }
-
-      if (res.status === 400) {
-        const detail = typeof data.detail === 'string'
-          ? data.detail
-          : (data.detail?.message || JSON.stringify(data.detail || {}));
-
-        // ✅ Для одиночного товара — просто показываем конкретные ошибки
-        if (productId) {
-          throw new Error(
-            `Товар #${productId} не прошёл валидацию:\n\n${detail}\n\n` +
-            `Исправьте поля через кнопки «Логистика», «Характеристики», «Фото» и повторите миграцию.`
-          );
-        }
-
-        throw new Error(
-          `${detail}\n\nОткройте «Выгрузка» — блок валидации покажет, каких полей не хватает каждому товару.`
-        );
-      }
-
-      throw new Error(await safeError(res, `HTTP ${res.status}`));
-    }
-
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-
-    // ✅ RFC 5987: сначала пытаемся filename*=UTF-8''... (кириллица), потом filename=...
-    const cd = res.headers.get('content-disposition');
-    const filename = parseContentDisposition(cd, `${platform}_export.xlsx`);
-
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    return filename;
   },
 
   /* ==================== Stats / History ==================== */
@@ -604,7 +614,7 @@ export const api = {
     return res.json();
   },
 
-  /* ==================== Спецификации категорий площадок ==================== */
+  /* ==================== Спецификации категорий ==================== */
 
   getSpecs: async (platform) => {
     const res = await fetch(`${API_URL}/specs/${enc(platform)}`, { headers: getHeaders() });
@@ -612,7 +622,6 @@ export const api = {
     return res.json();
   },
 
-  // ✅ ЛЁГКИЙ список имён категорий (для datalist модалки миграции и страницы спеков)
   getSpecNames: async (platform) => {
     const res = await fetch(`${API_URL}/specs/${enc(platform)}/names`, { headers: getHeaders() });
     if (!res.ok) {
@@ -648,9 +657,7 @@ export const api = {
 
   getSpecKeySource: async (platform) => {
     try {
-      const res = await fetch(`${API_URL}/specs/${enc(platform)}/key-source`, {
-        headers: getHeaders(),
-      });
+      const res = await fetch(`${API_URL}/specs/${enc(platform)}/key-source`, { headers: getHeaders() });
       if (!res.ok) return { has_server_key: false };
       return await res.json();
     } catch {
@@ -664,44 +671,6 @@ export const api = {
       { headers: getHeaders() }
     );
     if (!res.ok) return { status: 'unknown' };
-    return res.json();
-  },
-
-    /* ==================== Дефолты экспорта ==================== */
-
-  getDefaults: async () => {
-    const res = await fetch(`${API_URL}/defaults`, { headers: getHeaders() });
-    if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить дефолты'));
-    return res.json();
-  },
-
-  saveDefaults: async (payload) => {
-    const res = await fetch(`${API_URL}/defaults`, {
-      method: 'PUT', headers: getHeaders(), body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(await safeError(res, 'Не удалось сохранить дефолты'));
-    return res.json();
-  },
-
-  deleteCategoryDefaults: async (categoryName) => {
-    const res = await fetch(`${API_URL}/defaults/category?category_name=${enc(categoryName)}`, {
-      method: 'DELETE', headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error(await safeError(res, 'Не удалось удалить дефолты категории'));
-    return res.json();
-  },
-
-  getGaps: async (status = 'all') => {
-    const res = await fetch(`${API_URL}/defaults/gaps?status=${enc(status)}`, { headers: getHeaders() });
-    if (!res.ok) return { total: 0, gaps: {} };
-    return res.json();
-  },
-
-  applyDefaults: async (status = 'all') => {
-    const res = await fetch(`${API_URL}/products/apply-defaults?status=${enc(status)}`, {
-      method: 'POST', headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error(await safeError(res, 'Не удалось заполнить пропуски'));
     return res.json();
   },
 };

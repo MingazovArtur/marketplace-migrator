@@ -8,12 +8,26 @@ data validation, скрытые листы-словари и доп. листы 
 остаются нетронутыми — мы лишь дописываем строки товаров с 5-й строки,
 раскладывая значения по колонкам через имена заголовков строки 2.
 
-Результат гарантированно распознаётся кабинетом Ozon, т.к. это ИХ файл.
+✅ ШАБЛОНЫ ОБЩИЕ ДЛЯ ВСЕХ ПОЛЬЗОВАТЕЛЕЙ: хранятся в volume /app/templates/ozon,
+   привязка только к имени категории (без user_id). uploaded_by — лишь аудит.
+
+Формат index.json (v2):
+{
+  "Одежда / Футболка": {
+    "file": "odezhda_futbolka.xlsx",
+    "uploaded_at": "2026-09-28T10:00:00",
+    "uploaded_by": "admin",
+    "columns": 80
+  },
+  ...
+}
+Обратная совместимость v1 ({"категория": "file.xlsx"}) поддерживается при чтении.
 """
 import io
 import json
 import logging
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -52,62 +66,132 @@ def _normalize_multi(value: str) -> str:
     return ";".join(p.strip() for p in parts if p.strip())
 
 
-def _load_index() -> Dict[str, str]:
-    if INDEX_PATH.exists():
-        try:
-            return json.loads(INDEX_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-    return {}
+def _load_index() -> Dict[str, dict]:
+    """Читает index.json с миграцией старого формата v1 → v2."""
+    if not INDEX_PATH.exists():
+        return {}
+    try:
+        raw = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    out: Dict[str, dict] = {}
+    for cat, val in (raw or {}).items():
+        if isinstance(val, str):                      # v1: просто имя файла
+            out[cat] = {"file": val, "uploaded_at": None, "uploaded_by": None, "columns": None}
+        elif isinstance(val, dict) and val.get("file"):
+            out[cat] = {
+                "file": val.get("file"),
+                "uploaded_at": val.get("uploaded_at"),
+                "uploaded_by": val.get("uploaded_by"),
+                "columns": val.get("columns"),
+            }
+    return out
 
 
-def _save_index(index: Dict[str, str]) -> None:
+def _save_index(index: Dict[str, dict]) -> None:
     TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
     INDEX_PATH.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _find_header_row(ws) -> Optional[int]:
+    """Строка заголовков: обычно 2-я; ищем «Артикул» на случай сдвига."""
+    for row in range(1, 6):
+        for cell in ws[row]:
+            if cell.value and _norm(str(cell.value).rstrip("*")) == "артикул":
+                return row
+    return None
+
+
+def _count_columns(data: bytes) -> Optional[int]:
+    """Число колонок шаблона (непустые заголовки строки 2) — для метаданных."""
+    try:
+        wb = load_workbook(io.BytesIO(data), read_only=True)
+        try:
+            ws = wb["Шаблон"] if "Шаблон" in wb.sheetnames else wb.active
+            row = _find_header_row(ws) or 2
+            return sum(1 for c in ws[row] if c.value not in (None, ""))
+        finally:
+            wb.close()
+    except Exception:
+        return None
 
 
 # ==================== Публичный API хранилища ====================
 
 def has_official_template(category_name: str) -> bool:
+    meta = _load_index().get(category_name)
+    return bool(meta) and (TEMPLATES_DIR / meta["file"]).exists()
+
+
+def template_path(category_name: str) -> Optional[Path]:
+    meta = _load_index().get(category_name)
+    if not meta:
+        return None
+    p = TEMPLATES_DIR / meta["file"]
+    return p if p.exists() else None
+
+
+def get_template_meta(category_name: str) -> Optional[dict]:
+    meta = _load_index().get(category_name)
+    if not meta or not (TEMPLATES_DIR / meta["file"]).exists():
+        return None
+    return {"category_name": category_name, **meta}
+
+
+def list_official_templates() -> List[dict]:
+    """✅ Метаданные всех эталонов (для страницы «Шаблоны площадок»)."""
     idx = _load_index()
-    fname = idx.get(category_name)
-    return bool(fname) and (TEMPLATES_DIR / fname).exists()
+    res = []
+    for cat, meta in idx.items():
+        if (TEMPLATES_DIR / meta["file"]).exists():
+            res.append({"category_name": cat, **meta})
+    return sorted(res, key=lambda x: x["category_name"])
 
 
-def list_official_templates() -> List[str]:
-    idx = _load_index()
-    return sorted(cat for cat, fname in idx.items() if (TEMPLATES_DIR / fname).exists())
+def list_template_names() -> List[str]:
+    """Имена категорий с эталонами (обратная совместимость со старым UI)."""
+    return [t["category_name"] for t in list_official_templates()]
 
 
-def save_official_template(category_name: str, data: bytes) -> None:
+def read_template_bytes(category_name: str) -> Optional[bytes]:
+    p = template_path(category_name)
+    return p.read_bytes() if p else None
+
+
+def save_official_template(category_name: str, data: bytes, uploaded_by: Optional[str] = None) -> dict:
     TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
     idx = _load_index()
     fname = f"{_slug(category_name)}.xlsx"
     # Защита от коллизий slug между разными категориями
-    owner = next((cat for cat, f in idx.items() if f == fname), None)
+    owner = next((cat for cat, m in idx.items() if m["file"] == fname), None)
     if owner and owner != category_name:
         fname = f"{_slug(category_name)}_{abs(hash(category_name)) % 10000}.xlsx"
     (TEMPLATES_DIR / fname).write_bytes(data)
-    idx[category_name] = fname
+    meta = {
+        "file": fname,
+        "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+        "uploaded_by": uploaded_by,
+        "columns": _count_columns(data),
+    }
+    idx[category_name] = meta
     _save_index(idx)
-    logger.info(f"💾 Эталонный шаблон Ozon сохранён: категория '{category_name}' → {fname}")
+    logger.info(f"💾 Эталон Ozon сохранён: '{category_name}' → {fname} "
+                f"(колонок: {meta['columns']}, загрузил: {uploaded_by})")
+    return meta
 
 
 def delete_official_template(category_name: str) -> bool:
     idx = _load_index()
-    fname = idx.pop(category_name, None)
+    meta = idx.pop(category_name, None)
     _save_index(idx)
-    if fname and (TEMPLATES_DIR / fname).exists():
-        (TEMPLATES_DIR / fname).unlink()
+    if meta and (TEMPLATES_DIR / meta["file"]).exists():
+        (TEMPLATES_DIR / meta["file"]).unlink()
         return True
     return False
 
 
 def validate_template_bytes(data: bytes) -> Optional[str]:
-    """
-    Быстрая проверка, что файл похож на шаблон Ozon.
-    Возвращает текст ошибки или None, если всё хорошо.
-    """
+    """Быстрая проверка, что файл похож на шаблон Ozon. Возвращает ошибку или None."""
     try:
         wb = load_workbook(io.BytesIO(data), read_only=True)
     except Exception as e:
@@ -123,15 +207,6 @@ def validate_template_bytes(data: bytes) -> Optional[str]:
         return None
     finally:
         wb.close()
-
-
-def _find_header_row(ws) -> Optional[int]:
-    """Строка заголовков: обычно 2-я; ищем «Артикул» на случай сдвига."""
-    for row in range(1, 6):
-        for cell in ws[row]:
-            if cell.value and _norm(str(cell.value).rstrip("*")) == "артикул":
-                return row
-    return None
 
 
 # ==================== Значения строки товара ====================
@@ -210,12 +285,11 @@ def fill_official_template(category_name: str, products: list, spec: Optional[di
     Открывает эталонный файл Ozon категории и дописывает товары с 5-й строки.
     Формат (строки 1–4, стили, списки, листы) остаётся нетронутым.
     """
-    idx = _load_index()
-    fname = idx.get(category_name)
-    if not fname:
+    path = template_path(category_name)
+    if not path:
         raise ValueError(f"Эталонный шаблон для категории '{category_name}' не загружен")
 
-    wb = load_workbook(io.BytesIO((TEMPLATES_DIR / fname).read_bytes()))
+    wb = load_workbook(io.BytesIO(path.read_bytes()))
     ws = wb["Шаблон"] if "Шаблон" in wb.sheetnames else wb.active
 
     header_row = _find_header_row(ws) or 2
@@ -225,7 +299,7 @@ def fill_official_template(category_name: str, products: list, spec: Optional[di
         if h:
             headers[_norm(str(h).rstrip("*").strip())] = col
 
-    # ✅ Зачищаем примеры/старые данные ниже шапки (в скачанных файлах бывает тест-строка)
+    # ✅ Зачищаем примеры/старые данные ниже шапки
     if ws.max_row >= DATA_START_ROW:
         ws.delete_rows(DATA_START_ROW, ws.max_row - DATA_START_ROW + 1)
 
