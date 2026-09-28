@@ -51,6 +51,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     volumes:
       - media:/app/media
+      - ozon_templates:/app/templates/ozon
     depends_on:
       db:
         condition: service_healthy
@@ -77,6 +78,7 @@ services:
       REDIS_URL: ${REDIS_URL}
     volumes:
       - media:/app/media
+      - ozon_templates:/app/templates/ozon
     depends_on:
       backend:
         condition: service_healthy
@@ -121,6 +123,7 @@ volumes:
   media:
   certs:
   webroot:
+  ozon_templates:
 
 networks:
   internal:
