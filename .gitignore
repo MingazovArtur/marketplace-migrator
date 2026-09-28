@@ -66,3 +66,20 @@ secrets/
 .env.*
 !.env.example
 .env
+
+# SQL-бэкапы
+*.sql
+backup_*.sql
+*.dump
+
+# Большие файлы (>50 МБ)
+*.zip
+*.tar.gz
+*.rar
+
+# Логи
+*.log
+
+# Временные файлы
+*.tmp
+*.bak
