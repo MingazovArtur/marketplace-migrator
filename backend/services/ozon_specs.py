@@ -1,15 +1,15 @@
 """
 Загрузчик спецификаций категорий Ozon через официальный Seller API.
 
-v2 — ПАРАЛЛЕЛЬНАЯ загрузка:
-  - asyncio.Semaphore(15): до 15 одновременных запросов (лимит Ozon ~40 rps)
-  - на категорию: 1 запрос атрибутов + N запросов словарей — всё параллельно
-  - запись в БД пакетами по 200 категорий (один commit вместо 200)
-  - прогресс-колбэк каждые 25 категорий
-  - retry с backoff на 429 и транспортных ошибках
-  - словари ограничены 1000 значений (не раздуваем БД)
+v3 — ОПТИМИЗАЦИЯ ПАМЯТИ:
+  - CONCURRENCY снижен с 15 до 5 (меньше одновременных запросов)
+  - DB_CHUNK снижен с 200 до 50 (чаще коммитим, меньше буфер)
+  - MAX_VALUES_PER_ATTR снижен с 1000 до 500 (словари меньше)
+  - MAX_DICT_PAGES снижен с 5 до 3
+  - Явный вызов gc.collect() после каждого чанка
+  - Очистка буферов и кэшей после commit
 
-Ожидаемое время полной загрузки (~8000 категорий): 10–20 минут вместо 3–4 часов.
+Ожидаемое время загрузки: 20-40 минут (медленнее, но стабильно на 2GB RAM)
 
 Эндпоинты Ozon:
 - POST /v1/description-category/tree             → дерево категорий
@@ -17,6 +17,7 @@ v2 — ПАРАЛЛЕЛЬНАЯ загрузка:
 - POST /v1/description-category/attribute/values → значения словаря
 """
 import asyncio
+import gc
 import hashlib
 import json
 import logging
@@ -33,15 +34,15 @@ logger = logging.getLogger(__name__)
 OZON_API_BASE = "https://api-seller.ozon.ru"
 
 # =====================================================================
-# Конфигурация параллелизма
+# Конфигурация параллелизма (ОПТИМИЗИРОВАНО ДЛЯ ПАМЯТИ)
 # =====================================================================
-CONCURRENCY = 15                # одновременных запросов к API Ozon
-TIMEOUT = 60.0                  # таймаут одного запроса
-MAX_VALUES_PER_ATTR = 1000      # потолок значений словаря
-MAX_DICT_PAGES = 5              # максимум страниц на словарь (при limit=1000 это 5000 значений)
-DB_CHUNK = 200                  # категорий на один commit в БД
-PROGRESS_EVERY = 25             # частота вызова progress_cb
-MAX_RETRIES = 3                 # попыток на запрос
+CONCURRENCY = 5                   # одновременных запросов к API Ozon (было 15)
+TIMEOUT = 60.0                    # таймаут одного запроса
+MAX_VALUES_PER_ATTR = 500         # потолок значений словаря (было 1000)
+MAX_DICT_PAGES = 3                # максимум страниц на словарь (было 5)
+DB_CHUNK = 50                     # категорий на один commit (было 200)
+PROGRESS_EVERY = 10               # частота вызова progress_cb (чаще для мониторинга)
+MAX_RETRIES = 3                   # попыток на запрос
 
 BASE_REQUIRED_FIELDS = [
     "Артикул",
@@ -212,7 +213,7 @@ async def _fetch_values(
     last_value_id = 0
 
     try:
-        for _ in range(MAX_DICT_PAGES):
+        for page in range(MAX_DICT_PAGES):
             data = await _post(
                 client, sem,
                 "/v1/description-category/attribute/values",
@@ -372,7 +373,7 @@ async def _build_spec(
 
 
 # =====================================================================
-# Пакетная запись в БД
+# Пакетная запись в БД (ОПТИМИЗИРОВАНО)
 # =====================================================================
 
 def _flush_buffer(user_id: int, buffer: list[tuple[dict, dict]]) -> None:
@@ -471,7 +472,7 @@ async def refresh_ozon_specs(
     concurrency: int = CONCURRENCY,
 ) -> dict:
     """
-    Фоновая загрузка спеков Ozon с параллелизмом.
+    Фоновая загрузка спеков Ozon с оптимизацией памяти.
     Возвращает {"platform", "fetched", "errors", "error_details"}.
     """
     client_id, api_key = _parse_ozon_key(raw_api_key)
@@ -549,12 +550,19 @@ async def refresh_ozon_specs(
                             "type_id": leaf.get("type_id"),
                             "error": f"DB commit failed: {e}",
                         })
+            
+            # ✅ ОЧИСТКА ПАМЯТИ после каждого чанка
             buffer.clear()
+            gc.collect()
 
             logger.info(
                 f"📦 Прогресс Ozon: {done_count}/{total} "
                 f"(успех {fetched}, ошибок {errors})"
             )
+
+    # Финальная очистка
+    buffer.clear()
+    gc.collect()
 
     logger.info(
         f"✅ Ozon refresh complete: fetched={fetched}, errors={errors}"

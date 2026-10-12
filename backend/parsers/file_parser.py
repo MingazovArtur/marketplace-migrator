@@ -2,40 +2,52 @@
 Парсер файлов маркетплейсов (Магнит Маркет, Ozon, Wildberries, Яндекс Маркет).
 Поддерживает форматы: XLSX, CSV.
 
+Для Ozon — специальный парсер, который:
+  - динамически находит строку заголовков (пропуская служебные инструкции),
+  - игнорирует строки с подсказками ("Обязательное поле", "Заполняйте только"),
+  - корректно очищает цены, НДС, габариты и ТН ВЭД.
+
 Для Магнит Маркета — специальный парсер, который:
-  - находит лист с товарами (пропуская служебные листы: Инструкция, Бренды и т.д.),
-  - пропускает маркерные строки ("Не менять", "---"),
-  - обрабатывает каждую строку как отдельный SKU (вариант) для массового обновления,
-  - фото разбивает по ';' или ','.
+  - находит лист с товарами (пропуская служебные листы),
+  - пропускает маркерные строки,
+  - обрабатывает каждую строку как отдельный SKU.
 """
 import io
 import re
 import logging
 from typing import Dict, List, Optional, Any
+
 import pandas as pd
+import openpyxl
 
 logger = logging.getLogger(__name__)
 
-# Маркерные строки, которые нужно пропускать в файлах Магнит Маркета
-MAGNIT_SERVICE_MARKERS = [
+# Маркерные строки, которые нужно пропускать в файлах Магнит Маркета и Ozon
+SERVICE_MARKERS = [
     "не менять",
     "не изменяйте",
     "---",
-    "заполните",
+    "заполняйте только",
     "обязательное поле",
     "пример заполнения",
+    "ознакомьтесь с требованиями",
+    "блок можно не заполнять",
+    "для всех вариантов товара",
+    "вы можете заполнить эти поля",
+    "самые популярные способы",
+    "цены и акции",
 ]
 
 # Маппинг колонок для разных платформ
 COLUMN_MAPPINGS = {
     "ozon": {
         "name": ["Название товара", "Название", "Наименование"],
-        "price": ["Цена", "Цена, руб", "Цена продажи", "Стоимость"],
-        "sku": ["Артикул", "Артикул продавца", "Артикул продавца (внутренний)"],
+        "price": ["Предельная цена без акций, руб.", "Цена на сайте, ₽", "Цена", "Стоимость"],
+        "sku": ["Артикул", "Артикул*", "Артикул продавца"],
         "category": ["Категория", "Раздел"],
-        "photo": ["Ссылка на фото", "Фото", "Ссылки на фото"],
-        "desc": ["Описание"],
-        "brand": ["Бренд"],
+        "photo": ["Ссылка на главное фото", "Ссылка на главное фото*", "Фото"],
+        "desc": ["Описание", "Аннотация"],
+        "brand": ["Бренд", "Бренд*"],
         "stock": ["Остаток"],
     },
     "wildberries": {
@@ -89,19 +101,14 @@ def _clean_value(value: Any) -> str:
 
 
 def _find_column(columns: List[str], candidates: List[str]) -> Optional[str]:
-    """
-    Ищет колонку по списку возможных названий.
-    Сначала ищет точное совпадение (без учета регистра), затем — по подстроке.
-    """
+    """Ищет колонку по списку возможных названий."""
     col_lower_map = {str(c).lower().strip(): str(c) for c in columns}
 
-    # Точное совпадение
     for candidate in candidates:
         key = candidate.lower().strip()
         if key in col_lower_map:
             return col_lower_map[key]
 
-    # Нечеткий поиск: колонка содержит кандидат как подстроку
     for candidate in candidates:
         candidate_lower = candidate.lower().strip()
         for col_lower, col_orig in col_lower_map.items():
@@ -129,7 +136,7 @@ def _parse_price(price_str: str) -> float:
     if not price_str:
         return 0.0
     cleaned = (
-        price_str
+        str(price_str)
         .replace(" ", "")
         .replace("\u00a0", "")
         .replace("₽", "")
@@ -147,45 +154,216 @@ def _parse_stock(stock_str: str) -> int:
     """Парсит остаток из строки."""
     if not stock_str:
         return 0
-    cleaned = stock_str.replace(" ", "").replace(",", "")
+    cleaned = str(stock_str).replace(" ", "").replace(",", "")
     try:
         return int(float(cleaned))
     except ValueError:
         return 0
 
 
+def _clean_vat(vat_str: str) -> str:
+    """Очищает НДС и приводит к стандартному формату."""
+    if not vat_str:
+        return "none"
+    vat_str = str(vat_str).strip().lower()
+    vat_map = {
+        "не облагается": "none",
+        "не облагается ндс": "none",
+        "0%": "none",
+        "0": "none",
+        "5%": "5",
+        "5": "5",
+        "10%": "10",
+        "10": "10",
+        "20%": "20",
+        "20": "20",
+        "22%": "22",
+        "22": "22",
+    }
+    return vat_map.get(vat_str, vat_str.replace("%", ""))
+
+
+def _parse_int(val_str: str) -> Optional[int]:
+    """Парсит целое число из строки (для габаритов и веса)."""
+    if not val_str:
+        return None
+    try:
+        return int(float(str(val_str).replace(",", ".").replace(" ", "")))
+    except (ValueError, TypeError):
+        return None
+
+
+def _clean_okpd(okpd_str: str) -> Optional[str]:
+    """Очищает код ТН ВЭД, оставляя только первые 10 цифр."""
+    if not okpd_str:
+        return None
+    digits = re.sub(r"[^\d]", "", str(okpd_str))
+    return digits[:10] if digits else None
+
+
+# ==================== Парсер Ozon ====================
+
+def _parse_ozon(file_content: bytes, file_type: str) -> Dict:
+    """Специализированный парсер для сложных XLSX-файлов Ozon (шаблоны и отчеты)."""
+    if file_type != "xlsx":
+        raise ValueError("Для Ozon поддерживается только формат XLSX")
+    
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(file_content), data_only=True)
+    except Exception as e:
+        raise ValueError(f"Не удалось открыть XLSX файл: {e}")
+    
+    sheet_name = "Шаблон" if "Шаблон" in wb.sheetnames else wb.sheetnames[0]
+    ws = wb[sheet_name]
+    
+    # 1. Находим строку заголовков (где есть и "Артикул", и "Название товара")
+    header_row_idx = None
+    for idx, row in enumerate(ws.iter_rows(min_row=1, max_row=50, values_only=True)):
+        row_text = " ".join(str(cell).lower() for cell in row if cell is not None)
+        if "артикул" in row_text and "название товара" in row_text:
+            header_row_idx = idx + 1  # 1-based index для openpyxl
+            break
+            
+    if header_row_idx is None:
+        raise ValueError("Не найдена строка заголовков (Артикул, Название товара) в файле Ozon")
+    
+    # 2. Извлекаем заголовки
+    header_cells = list(ws[header_row_idx])
+    headers = [str(cell.value).strip() if cell.value else f"col_{i}" for i, cell in enumerate(header_cells)]
+    
+    # 3. Маппинг колонок Ozon (расширенный для шаблонов и отчетов)
+    ozon_mapping = {
+        "name": ["название товара", "название"],
+        "price": ["предельная цена без акций, руб.", "цена на сайте, ₽", "цена"],
+        "old_price": ["зачёркнутая цена, руб."],
+        "vat": ["ндс, %", "размер ндс, %"],
+        "sku": ["артикул", "артикул*"],
+        "external_id": ["sku", "ozon product id"],
+        "barcode": ["штрихкод (серийный номер / ean)", "штрихкод"],
+        "okpd": ["тн вэд коды еаэс*", "тн вэд коды еаэс"],
+        "weight": ["вес в упаковке, г*", "вес в упаковке, г"],
+        "width": ["ширина упаковки, мм*", "ширина упаковки, мм"],
+        "height": ["высота упаковки, мм*", "высота упаковки, мм"],
+        "length": ["длина упаковки, мм*", "длина упаковки, мм"],
+        "photo": ["ссылка на главное фото*", "ссылка на главное фото"],
+        "photos": ["ссылки на дополнительные фото"],
+        "brand": ["бренд*", "бренд"],
+        "type": ["тип*", "тип"],
+        "category": ["категория"],
+        "description": ["аннотация", "описание"],
+    }
+    
+    col_indices = {}
+    for key, candidates in ozon_mapping.items():
+        for i, h in enumerate(headers):
+            h_lower = h.lower().strip()
+            if any(cand in h_lower for cand in candidates):
+                col_indices[key] = i
+                break
+                
+    if "name" not in col_indices or "sku" not in col_indices:
+        raise ValueError("Не найдены обязательные колонки 'Артикул' или 'Название товара'")
+        
+    products = []
+    errors = []
+    
+    # 4. Читаем строки данных, пропуская инструкции
+    for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
+        row_text = " ".join(str(cell).lower() for cell in row if cell is not None)
+        
+        # Пропускаем строки с подсказками и инструкциями
+        if any(marker in row_text for marker in SERVICE_MARKERS):
+            continue
+            
+        # Пропускаем полностью пустые строки
+        if not any(cell for cell in row):
+            continue
+            
+        def get_val(key):
+            idx = col_indices.get(key)
+            if idx is not None and idx < len(row):
+                val = row[idx]
+                return str(val).strip() if val is not None else ""
+            return ""
+            
+        sku = get_val("sku")
+        name = get_val("name")
+        
+        # Если нет ни артикула, ни названия — это хвост файла
+        if not sku and not name:
+            continue
+            
+        if not name:
+            errors.append({"row": row_idx, "error": "Пустое название товара"})
+            continue
+            
+        # Парсинг полей
+        price = _parse_price(get_val("price"))
+        
+        photos = []
+        main_photo = get_val("photo")
+        if main_photo:
+            photos.extend(_split_photos(main_photo))
+        add_photos = get_val("photos")
+        if add_photos:
+            photos.extend(_split_photos(add_photos))
+        photos = list(dict.fromkeys(photos))[:15]  # Уникализируем, макс 15
+        
+        product = {
+            "name": name,
+            "price": price,
+            "sku": sku,
+            "external_id": get_val("external_id") or sku,
+            "barcode": get_val("barcode"),
+            "description": get_val("description"),
+            "photos": photos,
+            "category": get_val("category") or "Не указана",
+            "brand": get_val("brand"),
+            "product_type": get_val("type"),
+            "package_weight_grams": _parse_int(get_val("weight")),
+            "package_width_mm": _parse_int(get_val("width")),
+            "package_height_mm": _parse_int(get_val("height")),
+            "package_length_mm": _parse_int(get_val("length")),
+            "vat_rate": _clean_vat(get_val("vat")),
+            "okpd_code": _clean_okpd(get_val("okpd")),
+        }
+        products.append(product)
+        
+    wb.close()
+    
+    return {
+        "products": products,
+        "errors": errors,
+        "warnings": [],
+        "total_rows": len(products) + len(errors),
+        "imported": len(products),
+        "failed": len(errors),
+    }
+
+
 # ==================== Парсер Магнит Маркет ====================
 
 def _parse_magnit(file_content: bytes) -> Dict:
-    """
-    Парсер файла Магнит Маркет («Массовое обновление карточек»).
-    Каждая строка в таком файле — это независимый SKU, поэтому мы импортируем каждую строку отдельно.
-    """
+    """Парсер файла Магнит Маркет («Массовое обновление карточек»)."""
     xls = pd.ExcelFile(io.BytesIO(file_content))
 
-    # --- Шаг 1: ищем лист с данными ---
     data_sheet = None
     skip_keywords = ["инструкция", "бренд", "справочник", "шаблон", "пример"]
 
     for sheet_name in xls.sheet_names:
         sheet_lower = sheet_name.lower()
-        # Пропускаем служебные листы
         if any(skip in sheet_lower for skip in skip_keywords):
             continue
 
-        # Читаем первые 30 строк для поиска заголовков
         try:
             df_tmp = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=30)
         except Exception:
             continue
 
-        # Ищем строку заголовков
         for _, row in df_tmp.iterrows():
             row_text = " ".join(str(v).lower() for v in row.values if pd.notna(v))
-            # Пропускаем маркерные строки
             if any(marker in row_text for marker in ["не менять", "не изменяйте"]):
                 continue
-            # Ищем заголовки товаров
             if "название товара" in row_text or ("название" in row_text and "артикул" in row_text):
                 data_sheet = sheet_name
                 break
@@ -194,22 +372,15 @@ def _parse_magnit(file_content: bytes) -> Dict:
             break
 
     if data_sheet is None:
-        raise ValueError(
-            "Не найден лист с данными товаров в файле Магнит Маркета. "
-            "Убедитесь, что файл содержит лист с товарами (например, 'SKU')."
-        )
+        raise ValueError("Не найден лист с данными товаров в файле Магнит Маркета.")
 
-    # --- Шаг 2: читаем весь лист без заголовков ---
     df = pd.read_excel(xls, sheet_name=data_sheet, header=None)
 
-    # --- Шаг 3: находим строку заголовков ---
     header_row_idx = None
     for idx, row in df.iterrows():
         row_text = " ".join(str(v).lower() for v in row.values if pd.notna(v))
-        # Пропускаем маркерные строки
         if any(marker in row_text for marker in ["не менять", "не изменяйте"]):
             continue
-        # Ищем заголовки
         if "название товара" in row_text or ("название" in row_text and "артикул" in row_text):
             header_row_idx = idx
             break
@@ -217,24 +388,17 @@ def _parse_magnit(file_content: bytes) -> Dict:
     if header_row_idx is None:
         raise ValueError("Не найдена строка заголовков в файле Магнит Маркета")
 
-    # --- Шаг 4: формируем заголовки и данные ---
     header_row = df.iloc[header_row_idx]
-    headers = [
-        str(v).strip() if pd.notna(v) else f"col_{i}"
-        for i, v in enumerate(header_row.values)
-    ]
+    headers = [str(v).strip() if pd.notna(v) else f"col_{i}" for i, v in enumerate(header_row.values)]
 
     data = df.iloc[header_row_idx + 1:].copy()
     data.columns = headers
 
-    # --- Шаг 5: фильтруем служебные и пустые строки ---
     filtered_rows = []
     for _, row in data.iterrows():
         row_text = " ".join(str(v).lower() for v in row.values if pd.notna(v))
-        # Пропускаем маркерные строки (включая "---" и "не менять" из подвала файла)
-        if any(marker in row_text for marker in MAGNIT_SERVICE_MARKERS):
+        if any(marker in row_text for marker in SERVICE_MARKERS):
             continue
-        # Пропускаем пустые строки
         non_empty = [str(v).strip() for v in row.values if pd.notna(v) and str(v).strip()]
         if not non_empty:
             continue
@@ -251,65 +415,50 @@ def _parse_magnit(file_content: bytes) -> Dict:
         }
 
     filtered_df = pd.DataFrame(filtered_rows)
-
-    # --- Шаг 6: определяем колонки ---
     mapping = COLUMN_MAPPINGS["magnit"]
     cols = filtered_df.columns.tolist()
 
-    name_col        = _find_column(cols, mapping["name"])
-    price_col       = _find_column(cols, mapping["price"])
-    sku_col         = _find_column(cols, mapping["sku"])          # Seller SKU ID
-    external_id_col = _find_column(cols, mapping["external_id"])  # Product ID
-    barcode_col     = _find_column(cols, mapping["barcode"])      # ШК
-    category_col    = _find_column(cols, mapping["category"])
-    photo_col       = _find_column(cols, mapping["photo"])
-    photo_sku_col   = _find_column(cols, mapping.get("photo_sku", []))
-    desc_col        = _find_column(cols, mapping["desc"])
-    short_desc_col  = _find_column(cols, mapping["short_desc"])
-    brand_col       = _find_column(cols, mapping["brand"])
-    stock_col       = _find_column(cols, mapping["stock"])
-    okpd2_col       = _find_column(cols, mapping["okpd2"])
-    tn_ved_col      = _find_column(cols, mapping["tn_ved"])
+    name_col = _find_column(cols, mapping["name"])
+    price_col = _find_column(cols, mapping["price"])
+    sku_col = _find_column(cols, mapping["sku"])
+    external_id_col = _find_column(cols, mapping["external_id"])
+    barcode_col = _find_column(cols, mapping["barcode"])
+    category_col = _find_column(cols, mapping["category"])
+    photo_col = _find_column(cols, mapping["photo"])
+    photo_sku_col = _find_column(cols, mapping.get("photo_sku", []))
+    desc_col = _find_column(cols, mapping["desc"])
+    short_desc_col = _find_column(cols, mapping["short_desc"])
+    brand_col = _find_column(cols, mapping["brand"])
+    stock_col = _find_column(cols, mapping["stock"])
+    okpd2_col = _find_column(cols, mapping["okpd2"])
+    tn_ved_col = _find_column(cols, mapping["tn_ved"])
 
     if not name_col:
         raise ValueError("Не найдена колонка 'Название товара' в файле Магнит Маркета")
 
-    logger.info(
-        f"Магнит: name={name_col!r}, sku={sku_col!r}, "
-        f"product_id={external_id_col!r}, photo={photo_col!r}, photo_sku={photo_sku_col!r}"
-    )
-
-    # --- Шаг 7: парсим строки ---
-    # ВАЖНО: В файле Магнита для массового обновления каждая строка — это отдельный SKU.
-    # Мы НЕ группируем их с потерей данных, а импортируем каждую строку как самостоятельную единицу.
     products: List[Dict] = []
     errors: List[Dict] = []
 
     for idx, row in filtered_df.iterrows():
         row_num = idx + 2
-
         name = _clean_value(row.get(name_col))
         if not name:
             errors.append({"row": row_num, "error": "Пустое название товара"})
             continue
 
-        # Цена
         price = _parse_price(_clean_value(row.get(price_col))) if price_col else 0.0
 
-        # Фото (общее) + фото SKU
         photos: List[str] = []
         if photo_col:
             photos.extend(_split_photos(_clean_value(row.get(photo_col))))
         if photo_sku_col:
             photos.extend(_split_photos(_clean_value(row.get(photo_sku_col))))
-        photos = list(dict.fromkeys(photos))[:10]  # уникализируем, максимум 10
+        photos = list(dict.fromkeys(photos))[:10]
 
-        # Описание: полное, иначе краткое
         description = _clean_value(row.get(desc_col)) if desc_col else ""
         if not description and short_desc_col:
             description = _clean_value(row.get(short_desc_col))
 
-        # SKU: Seller SKU ID → фолбэк ШК
         sku = _clean_value(row.get(sku_col)) if sku_col else ""
         if not sku and barcode_col:
             sku = _clean_value(row.get(barcode_col))
@@ -328,18 +477,13 @@ def _parse_magnit(file_content: bytes) -> Dict:
             "okpd2": _clean_value(row.get(okpd2_col)) if okpd2_col else "",
             "tn_ved": _clean_value(row.get(tn_ved_col)) if tn_ved_col else "",
         }
-
         products.append(product)
 
-    # --- Шаг 8: предупреждения ---
     warnings = []
     if products and all(p["price"] == 0 for p in products):
         warnings.append({
             "type": "magnit_no_price",
-            "message": (
-                "В файле Магнит Маркета нет цен или все цены равны 0. "
-                "Задайте цены вручную после импорта."
-            ),
+            "message": "В файле Магнит Маркета нет цен или все цены равны 0. Задайте цены вручную после импорта.",
         })
 
     return {
@@ -352,11 +496,10 @@ def _parse_magnit(file_content: bytes) -> Dict:
     }
 
 
-# ==================== Парсер плоских файлов (Ozon, WB, Яндекс) ====================
+# ==================== Парсер плоских файлов (WB, Яндекс) ====================
 
 def _parse_flat(file_content: bytes, platform: str, file_type: str) -> Dict:
-    """Парсер плоских файлов (CSV / XLSX) для Ozon, Wildberries, Яндекс Маркета."""
-    # Читаем файл
+    """Парсер плоских файлов (CSV / XLSX) для Wildberries, Яндекс Маркета."""
     if file_type == "csv":
         try:
             df = pd.read_csv(io.BytesIO(file_content))
@@ -399,41 +542,24 @@ def _parse_flat(file_content: bytes, platform: str, file_type: str) -> Dict:
     errors: List[Dict] = []
 
     for idx, row in df.iterrows():
-        row_num = idx + 2  # +2: строка заголовков = 1, индексация с 0
-
+        row_num = idx + 2
         name = _clean_value(row.get(name_col))
         if not name:
             errors.append({"row": row_num, "error": "Пустое название товара"})
             continue
 
-        # Цена
         price = 0.0
         if price_col:
-            price_str = _clean_value(row.get(price_col))
-            price = _parse_price(price_str)
+            price = _parse_price(_clean_value(row.get(price_col)))
 
-        # Фото
         photos = []
         if photo_col:
-            photo_str = _clean_value(row.get(photo_col))
-            photos = _split_photos(photo_str)
+            photos = _split_photos(_clean_value(row.get(photo_col)))
 
-        # Описание
         description = _clean_value(row.get(desc_col)) if desc_col else ""
-
-        # Категория
         category = _clean_value(row.get(category_col)) if category_col else "Не указана"
-
-        # Бренд
         brand = _clean_value(row.get(brand_col)) if brand_col else ""
-
-        # Остаток
-        stock = 0
-        if stock_col:
-            stock_str = _clean_value(row.get(stock_col))
-            stock = _parse_stock(stock_str)
-
-        # Артикул
+        stock = _parse_stock(_clean_value(row.get(stock_col))) if stock_col else 0
         sku = _clean_value(row.get(sku_col)) if sku_col else ""
 
         product = {
@@ -461,18 +587,17 @@ def _parse_flat(file_content: bytes, platform: str, file_type: str) -> Dict:
 # ==================== Точка входа ====================
 
 def parse_file(file_content: bytes, platform: str, file_type: str) -> Dict:
-    """
-    Точка входа для парсинга файла маркетплейса.
-    """
+    """Точка входа для парсинга файла маркетплейса."""
     platform = platform.lower().strip()
 
-    # Магнит Маркет — только XLSX, специальный парсер
+    if platform == "ozon":
+        return _parse_ozon(file_content, file_type)
+        
     if platform == "magnit":
         if file_type != "xlsx":
             raise ValueError("Для Магнит Маркета поддерживается только формат XLSX")
         return _parse_magnit(file_content)
 
-    # Остальные платформы — плоские файлы
     if platform not in COLUMN_MAPPINGS:
         raise ValueError(f"Неизвестная платформа: {platform}")
 
@@ -480,19 +605,13 @@ def parse_file(file_content: bytes, platform: str, file_type: str) -> Dict:
 
 
 def preview_file(file_content: bytes, platform: str, file_type: str, max_rows: int = 10) -> Dict:
-    """
-    Возвращает превью первых строк файла для предпросмотра перед импортом.
-    """
-    # Парсим файл
+    """Возвращает превью первых строк файла для предпросмотра перед импортом."""
     result = parse_file(file_content, platform, file_type)
 
     products = result.get("products", [])
     preview = products[:max_rows]
 
-    # Определяем колонки из первого продукта
-    columns = []
-    if preview:
-        columns = list(preview[0].keys())
+    columns = list(preview[0].keys()) if preview else []
 
     return {
         "columns": columns,

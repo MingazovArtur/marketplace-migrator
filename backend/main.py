@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from routers import defaults as defaults_router
+
 from core.config import settings
 from core.platforms import Platform, PLATFORM_CONFIG
 from core.rate_limit import (
@@ -34,6 +34,7 @@ from routers import (
     attributes,
     variants,
     stats,
+    defaults as defaults_router,
 )
 from routers.migrate_router import router as migrate_router
 from routers.health import router as health_router
@@ -46,7 +47,7 @@ app = FastAPI(title="Marketplace Migrator API", version="3.4")
 
 
 # ============================================================
-# 1. Ban-check middleware (декоратор — обрабатывается последним в цепочке)
+# 1. Ban-check middleware
 # ============================================================
 @app.middleware("http")
 async def ban_check_middleware(request: Request, call_next):
@@ -104,12 +105,27 @@ app.add_middleware(SlowAPIMiddleware)
 # ============================================================
 # 3. CORS — САМЫЙ ВНЕШНИЙ middleware (добавляется последним)
 # ============================================================
-# FastAPI применяет add_middleware в обратном порядке.
-# Добавляя CORS последним — он становится самым внешним и обрабатывает
-# OPTIONS-запросы ДО того, как они дойдут до бан-проверки и rate-limit.
+# ✅ ИСПРАВЛЕНИЕ: Явно добавляем адреса локальной разработки (Vite = 5173, React = 3000)
+# и безопасно объединяем их с настройками из .env (settings.CORS_ORIGINS)
+local_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+config_origins = []
+if hasattr(settings, "CORS_ORIGINS") and settings.CORS_ORIGINS:
+    if isinstance(settings.CORS_ORIGINS, str):
+        config_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+    else:
+        config_origins = list(settings.CORS_ORIGINS)
+
+allowed_origins = list(set(local_origins + config_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -133,6 +149,7 @@ app.include_router(email_router.router)
 app.include_router(categories.router)
 app.include_router(history.router)
 app.include_router(defaults_router.router)
+
 
 # ============================================================
 # Статика: раздача скачанных фото
