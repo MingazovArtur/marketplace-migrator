@@ -48,7 +48,9 @@ const SearchBar = ({ filters, updateFilters, sources = [] }) => (
       onChange={(e) => updateFilters({ status: e.target.value })}
     >
       {STATUS_OPTIONS.map((o) => (
-        <option key={o.value} value={o.value}>{o.label}</option>
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
       ))}
     </select>
 
@@ -61,7 +63,9 @@ const SearchBar = ({ filters, updateFilters, sources = [] }) => (
       >
         <option value="all">Все источники</option>
         {sources.map((s) => (
-          <option key={s} value={s}>{s}</option>
+          <option key={s} value={s}>
+            {s}
+          </option>
         ))}
       </select>
     )}
@@ -73,7 +77,9 @@ const SearchBar = ({ filters, updateFilters, sources = [] }) => (
       onChange={(e) => updateFilters({ sort: e.target.value })}
     >
       {SORT_OPTIONS.map((o) => (
-        <option key={o.value} value={o.value}>{o.label}</option>
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
       ))}
     </select>
   </div>

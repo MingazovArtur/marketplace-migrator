@@ -17,10 +17,10 @@ const DEFAULT_WIDTHS = {
   source: 160,
   attrs: 220,
   status: 110,
-  actions: 280,   // ✅ расширено с 250 до 280 — добавилась кнопка "Логистика"
+  actions: 280, // ✅ расширено с 250 до 280 — добавилась кнопка "Логистика"
 };
 
-const WIDTHS_KEY = 'product_table_widths_v3';   // ✅ v3: сбрасывает ширины с v2
+const WIDTHS_KEY = 'product_table_widths_v3'; // ✅ v3: сбрасывает ширины с v2
 
 /* ✅ Проверка готовности товара к экспорту (требования Ozon) */
 const getExportReadiness = (product) => {
@@ -56,7 +56,7 @@ const ProductTable = ({
   onEditAttributes,
   onEditVariants,
   onEditPhotos,
-  onEditLogistics,   // ✅ новый проп
+  onEditLogistics, // ✅ новый проп
   hasActiveFilters = false,
   onResetFilters = null,
 }) => {
@@ -67,14 +67,18 @@ const ProductTable = ({
     try {
       const saved = localStorage.getItem(WIDTHS_KEY);
       if (saved) return { ...DEFAULT_WIDTHS, ...JSON.parse(saved) };
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
     return DEFAULT_WIDTHS;
   });
 
   useEffect(() => {
     try {
       localStorage.setItem(WIDTHS_KEY, JSON.stringify(widths));
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
   }, [widths]);
 
   const startResize = useCallback((e, key) => {
@@ -162,7 +166,11 @@ const ProductTable = ({
   }
 
   return (
-    <div data-onboarding="products-table" className="card" style={{ padding: 0, overflow: 'hidden' }}>
+    <div
+      data-onboarding="products-table"
+      className="card"
+      style={{ padding: 0, overflow: 'hidden' }}
+    >
       <div className="table-scroll">
         <table className="product-table">
           <thead>
@@ -197,9 +205,7 @@ const ProductTable = ({
                 Статус
                 <Resizer colKey="status" />
               </th>
-              <th style={{ ...colStyle('actions'), textAlign: 'right' }}>
-                Действия
-              </th>
+              <th style={{ ...colStyle('actions'), textAlign: 'right' }}>Действия</th>
             </tr>
           </thead>
           <tbody>
@@ -235,7 +241,9 @@ const ProductTable = ({
                     />
                   </td>
                   <td>
-                    <div className="product-name" title={product.name}>{product.name}</div>
+                    <div className="product-name" title={product.name}>
+                      {product.name}
+                    </div>
                     <div className="product-sub">
                       {product.sku && <>арт: {product.sku}</>}
                       {product.sku && product.brand && <> · </>}
@@ -244,12 +252,16 @@ const ProductTable = ({
                     </div>
                   </td>
                   <td className="price-cell">
-                    {product.price
-                      ? `${Number(product.price).toLocaleString('ru-RU')} ₽`
-                      : <span className="price-missing">не задана</span>}
+                    {product.price ? (
+                      `${Number(product.price).toLocaleString('ru-RU')} ₽`
+                    ) : (
+                      <span className="price-missing">не задана</span>
+                    )}
                   </td>
                   <td>
-                    <span className="source-badge" title={product.source}>{product.source}</span>
+                    <span className="source-badge" title={product.source}>
+                      {product.source}
+                    </span>
                   </td>
                   <td>
                     {attrs.length === 0 ? (
@@ -257,14 +269,21 @@ const ProductTable = ({
                     ) : (
                       <div className="attributes-preview">
                         {attrs.slice(0, 2).map((attr, i) => (
-                          <span key={attr.id ?? i} className="attr-chip" title={`${attr.name}: ${attr.value}`}>
+                          <span
+                            key={attr.id ?? i}
+                            className="attr-chip"
+                            title={`${attr.name}: ${attr.value}`}
+                          >
                             {attr.name}: {attr.value}
                           </span>
                         ))}
                         {attrs.length > 2 && (
                           <span
                             className="attr-chip more"
-                            title={attrs.slice(2).map(a => `${a.name}: ${a.value}`).join('\n')}
+                            title={attrs
+                              .slice(2)
+                              .map((a) => `${a.name}: ${a.value}`)
+                              .join('\n')}
                           >
                             +{attrs.length - 2}
                           </span>
@@ -275,11 +294,18 @@ const ProductTable = ({
                   <td>
                     <span className={`badge ${badge.cls}`}>
                       {isProcessing ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                          <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+                        <span
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                        >
+                          <div
+                            className="spinner"
+                            style={{ width: 12, height: 12, borderWidth: 2 }}
+                          />
                           В работе
                         </span>
-                      ) : badge.label}
+                      ) : (
+                        badge.label
+                      )}
                     </span>
                   </td>
                   <td style={{ textAlign: 'right' }}>
@@ -308,7 +334,9 @@ const ProductTable = ({
                         onClick={() => onEditVariants && onEditVariants(product)}
                       >
                         <Icon name="variants" size={15} />
-                        {variants.length > 0 && <span className="btn-count">{variants.length}</span>}
+                        {variants.length > 0 && (
+                          <span className="btn-count">{variants.length}</span>
+                        )}
                       </Button>
 
                       {/* ✅ Кнопка "Логистика" с индикатором готовности */}
@@ -347,7 +375,9 @@ const ProductTable = ({
             })}
             {emptyRows.map((_, i) => (
               <tr key={`empty-${i}`} className="empty-row">
-                <td colSpan={7} style={{ height: 48, opacity: 0 }}>&nbsp;</td>
+                <td colSpan={7} style={{ height: 48, opacity: 0 }}>
+                  &nbsp;
+                </td>
               </tr>
             ))}
           </tbody>

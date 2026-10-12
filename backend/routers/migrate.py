@@ -1,16 +1,19 @@
 """
 Роутер для миграции товаров между маркетплейсами
 """
+
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from core.auth import get_current_user
+from core.platforms import Platform
+from database.models import User
 from database.repository import repo
-from models.schemas import MigrateRequest, BatchMigrateRequest
+from models.schemas import BatchMigrateRequest, MigrateRequest
 from services.category_mapper import CategoryMapper
 from services.category_service import category_service
-from core.platforms import Platform, PLATFORM_CONFIG
-from core.auth import get_current_user
-from database.models import User
-from tasks import migrate_product_task, migrate_batch_task, get_progress
+from tasks import get_progress, migrate_batch_task, migrate_product_task
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Migration"])
@@ -24,22 +27,21 @@ def detect_source_platform(source: str) -> str:
     """
     if not source:
         return None
-    source_platform = source.lower().split('→')[-1].strip()
-    if 'ozon' in source_platform:
-        return 'ozon'
-    elif 'wildberries' in source_platform or 'wb' in source_platform:
-        return 'wildberries'
-    elif 'яндекс' in source_platform or 'yandex' in source_platform:
-        return 'yandex'
-    elif 'магнит' in source_platform or 'magnit' in source_platform or 'kazan' in source_platform:
-        return 'magnit'
+    source_platform = source.lower().split("→")[-1].strip()
+    if "ozon" in source_platform:
+        return "ozon"
+    elif "wildberries" in source_platform or "wb" in source_platform:
+        return "wildberries"
+    elif "яндекс" in source_platform or "yandex" in source_platform:
+        return "yandex"
+    elif "магнит" in source_platform or "magnit" in source_platform or "kazan" in source_platform:
+        return "magnit"
     return source_platform
 
 
 @router.post("/migrate/preview")
 async def preview_migration(
-    request: MigrateRequest,
-    current_user: User = Depends(get_current_user)
+    request: MigrateRequest, current_user: User = Depends(get_current_user)
 ):
     """Предпросмотр миграции товара"""
     product = repo.get_by_id(request.product_id, user_id=current_user.id)
@@ -71,24 +73,21 @@ async def preview_migration(
             "original": {
                 "name": product.get("name"),
                 "price": product.get("price"),
-                "category": product.get("category") or "Не указана"
+                "category": product.get("category") or "Не указана",
             },
             "target": {
                 "name": product.get("name"),
                 "price": new_price,
                 "category": target_category_name,
-                "category_id": mapping["target_category_id"] if mapping else None
+                "category_id": mapping["target_category_id"] if mapping else None,
             },
-            "mapping_reason": reason
-        }
+            "mapping_reason": reason,
+        },
     }
 
 
 @router.post("/migrate")
-async def migrate_product(
-    request: MigrateRequest,
-    current_user: User = Depends(get_current_user)
-):
+async def migrate_product(request: MigrateRequest, current_user: User = Depends(get_current_user)):
     """Запустить миграцию одного товара"""
     product = repo.get_by_id(request.product_id, user_id=current_user.id)
     if not product:
@@ -96,8 +95,7 @@ async def migrate_product(
 
     if product.get("status") == "processing":
         raise HTTPException(
-            status_code=400,
-            detail="Товар уже находится в процессе переноса. Дождитесь завершения."
+            status_code=400, detail="Товар уже находится в процессе переноса. Дождитесь завершения."
         )
 
     target = request.target_marketplace.lower()
@@ -106,27 +104,25 @@ async def migrate_product(
 
     source_platform = (product.get("source") or "").lower()
     if target in source_platform and "→" not in source_platform:
-        raise HTTPException(status_code=400, detail=f"Нельзя перенести товар с {target} на {target}")
+        raise HTTPException(
+            status_code=400, detail=f"Нельзя перенести товар с {target} на {target}"
+        )
 
     task = migrate_product_task.delay(
-        request.product_id,
-        target,
-        current_user.id,
-        request.edited_data
+        request.product_id, target, current_user.id, request.edited_data
     )
 
     return {
         "success": True,
         "message": "Миграция запущена в фоновом режиме",
         "task_id": task.id,
-        "product": repo.get_by_id(request.product_id, user_id=current_user.id)
+        "product": repo.get_by_id(request.product_id, user_id=current_user.id),
     }
 
 
 @router.post("/migrate/batch")
 async def migrate_batch(
-    request: BatchMigrateRequest,
-    current_user: User = Depends(get_current_user)
+    request: BatchMigrateRequest, current_user: User = Depends(get_current_user)
 ):
     """Запустить пакетную миграцию товаров"""
     if not request.product_ids:
@@ -143,7 +139,7 @@ async def migrate_batch(
     if not available_ids:
         raise HTTPException(
             status_code=400,
-            detail="Все выбранные товары уже находятся в процессе переноса или не принадлежат вам"
+            detail="Все выбранные товары уже находятся в процессе переноса или не принадлежат вам",
         )
 
     target = request.target_marketplace.lower()
@@ -156,7 +152,7 @@ async def migrate_batch(
         "success": True,
         "task_id": task.id,
         "message": f"Запущена пакетная миграция {len(available_ids)} товаров на {target}",
-        "total": len(available_ids)
+        "total": len(available_ids),
     }
 
 

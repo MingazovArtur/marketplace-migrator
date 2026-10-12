@@ -9,18 +9,22 @@
 Правило безопасности: дефолты подставляются ТОЛЬКО в пустые/нулевые поля.
 Уже заполненные пользователем значения никогда не перезаписываются.
 """
+
 import logging
 import re
-from typing import Dict, Optional
 
-from database.session import SessionLocal
 from database.models import ExportDefault, Product
+from database.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
 BASE_FIELDS = [
-    "vat_rate", "okpd_code",
-    "package_weight_grams", "package_width_mm", "package_height_mm", "package_length_mm",
+    "vat_rate",
+    "okpd_code",
+    "package_weight_grams",
+    "package_width_mm",
+    "package_height_mm",
+    "package_length_mm",
 ]
 
 # Поля, участвующие в слиянии дефолтов (база + бренд/маркировка + цена)
@@ -35,14 +39,14 @@ def _is_empty(v) -> bool:
     return v is None or v == "" or v == 0
 
 
-def _to_float(v) -> Optional[float]:
+def _to_float(v) -> float | None:
     try:
         return float(v)
     except (TypeError, ValueError):
         return None
 
 
-def get_merged_defaults(user_id: int, category_name: Optional[str] = None) -> Dict[str, object]:
+def get_merged_defaults(user_id: int, category_name: str | None = None) -> dict[str, object]:
     """Слияние: глобальные дефолты ← дефолты категории (категория важнее)."""
     db = SessionLocal()
     try:
@@ -54,11 +58,12 @@ def get_merged_defaults(user_id: int, category_name: Optional[str] = None) -> Di
         if category_name:
             rows.append(
                 db.query(ExportDefault)
-                .filter(ExportDefault.user_id == user_id,
-                        ExportDefault.category_name == category_name)
+                .filter(
+                    ExportDefault.user_id == user_id, ExportDefault.category_name == category_name
+                )
                 .first()
             )
-        merged: Dict[str, object] = {}
+        merged: dict[str, object] = {}
         for row in rows:
             if not row:
                 continue
@@ -67,7 +72,7 @@ def get_merged_defaults(user_id: int, category_name: Optional[str] = None) -> Di
                 if v in (None, ""):
                     continue
                 if f == "price_default":
-                    v = _to_float(v)          # Decimal(Numeric) → float
+                    v = _to_float(v)  # Decimal(Numeric) → float
                     if v is None or v <= 0:
                         continue
                 merged[f] = v
@@ -76,7 +81,7 @@ def get_merged_defaults(user_id: int, category_name: Optional[str] = None) -> Di
         db.close()
 
 
-def compute_gaps(user_id: int, status: str = "all") -> Dict[str, object]:
+def compute_gaps(user_id: int, status: str = "all") -> dict[str, object]:
     """Счётчик пропусков по полям — для баннера «Заполнить пропуски (N)»."""
     db = SessionLocal()
     try:
@@ -84,7 +89,7 @@ def compute_gaps(user_id: int, status: str = "all") -> Dict[str, object]:
         if status and status != "all":
             q = q.filter(Product.status == status)
         products = q.all()
-        gaps = {f: 0 for f in BASE_FIELDS}
+        gaps = dict.fromkeys(BASE_FIELDS, 0)
         gaps["price"] = 0
         gaps["main_photo"] = 0
         for p in products:
@@ -101,14 +106,14 @@ def compute_gaps(user_id: int, status: str = "all") -> Dict[str, object]:
         db.close()
 
 
-def build_updates_for_product(product: Dict[str, object], user_id: int) -> Dict[str, object]:
+def build_updates_for_product(product: dict[str, object], user_id: int) -> dict[str, object]:
     """
     Какие поля дозаполнить из дефолтов (только пустые/нулевые).
     Принимает dict с ключами: price, vat_rate, okpd_code, package_*, mapped_category, category.
     """
     category = product.get("mapped_category") or product.get("category")
     d = get_merged_defaults(user_id, category)
-    updates: Dict[str, object] = {}
+    updates: dict[str, object] = {}
 
     # Базовые поля логистики
     for f in BASE_FIELDS:
@@ -123,7 +128,7 @@ def build_updates_for_product(product: Dict[str, object], user_id: int) -> Dict[
     return updates
 
 
-def derive_type_value(category_name: str, spec: Optional[dict]) -> Optional[str]:
+def derive_type_value(category_name: str, spec: dict | None) -> str | None:
     """✅ Умный Тип: часть после «/» категории, сверенная со словарём спека по регистру."""
     type_part = (category_name or "").split("/")[-1].strip()
     if not type_part or not spec:

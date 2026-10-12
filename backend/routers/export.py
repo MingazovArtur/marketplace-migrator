@@ -11,6 +11,7 @@ Rate-limits:
   - /export/report                : 5/min, 50/day
   - /export/xlsx/{platform}       : 30/min
 """
+
 import io
 import logging
 import re as _re
@@ -43,7 +44,7 @@ def _safe_disposition(filename: str) -> str:
     """Безопасный Content-Disposition для имён с кириллицей (RFC 5987)."""
     ascii_name = "".join(c if ord(c) < 128 else "_" for c in filename).strip("_") or "export.xlsx"
     encoded = quote(filename, safe="")
-    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded}'
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
 
 
 def _normalize_category_name(name: str, platform: str = "ozon") -> str:
@@ -84,6 +85,7 @@ def _get_products_for_export(current_user: User, status: str) -> list:
 
 # ==================== ЭТАЛОННЫЕ ШАБЛОНЫ OZON (общие для всех пользователей) ====================
 
+
 @router.post("/export/ozon-template/upload")
 async def upload_official_template(
     request: Request,
@@ -119,7 +121,7 @@ async def upload_official_template(
         "size": len(data),
         "columns": meta.get("columns"),
         "message": f"Эталон для «{category_name}» сохранён ({meta.get('columns')} колонок). "
-                   f"Выгрузка будет собрана на его основе.",
+        f"Выгрузка будет собрана на его основе.",
     }
 
 
@@ -184,6 +186,7 @@ def delete_official_template(
 
 # ==================== ПРЕДПРОСМОТР ВЫГРУЗКИ ====================
 
+
 @limiter.limit("30/minute")
 @router.get("/export/preview/{platform}")
 def export_preview(
@@ -199,8 +202,16 @@ def export_preview(
     products = _get_products_for_export(current_user, status)
     if not products:
         return {
-            "success": True, "columns": [], "rows": [],
-            "validation": {"total": 0, "ready": 0, "with_warnings": 0, "with_errors": 0, "issues": []},
+            "success": True,
+            "columns": [],
+            "rows": [],
+            "validation": {
+                "total": 0,
+                "ready": 0,
+                "with_warnings": 0,
+                "with_errors": 0,
+                "issues": [],
+            },
         }
 
     validation = validate_products(products, platform)
@@ -211,6 +222,7 @@ def export_preview(
 
 
 # ==================== ШАБЛОН ВЫГРУЗКИ ====================
+
 
 @limiter.limit("10/minute")
 @router.get("/export/template/{platform}")
@@ -243,25 +255,31 @@ def export_template(
         for i, col in enumerate(df.columns):
             ws.column_dimensions[chr(65 + i)].width = 30
 
-        instructions = pd.DataFrame({"Инструкция": [
-            f"Шаблон выгрузки для {platform}",
-            "1. Заполняйте по одной строке на товар.",
-            "2. Не меняйте заголовки колонок и имена листов.",
-            "3. Фото указывайте прямыми ссылками через '; '.",
-            "4. Готовый файл загрузите в личном кабинете площадки.",
-        ]})
+        instructions = pd.DataFrame(
+            {
+                "Инструкция": [
+                    f"Шаблон выгрузки для {platform}",
+                    "1. Заполняйте по одной строке на товар.",
+                    "2. Не меняйте заголовки колонок и имена листов.",
+                    "3. Фото указывайте прямыми ссылками через '; '.",
+                    "4. Готовый файл загрузите в личном кабинете площадки.",
+                ]
+            }
+        )
         instructions.to_excel(writer, index=False, sheet_name="Инструкция")
         writer.sheets["Инструкция"].column_dimensions["A"].width = 80
 
     output.seek(0)
     filename = f"template_{platform}.xlsx"
     return StreamingResponse(
-        output, media_type=XLSX_MIME,
+        output,
+        media_type=XLSX_MIME,
         headers={"Content-Disposition": _safe_disposition(filename)},
     )
 
 
 # ==================== ФАЙЛ ДЛЯ ЛК ПЛОЩАДКИ (старый путь) ====================
+
 
 @limiter.limit("10/minute;100/day")
 @router.get("/export/platform/{platform}")
@@ -286,7 +304,9 @@ def export_for_platform(
             valid_products.append(p)
 
     if skipped:
-        logger.warning(f"⚠️ Исключено из выгрузки {len(skipped)} товаров с ошибками: {skipped[:10]}")
+        logger.warning(
+            f"⚠️ Исключено из выгрузки {len(skipped)} товаров с ошибками: {skipped[:10]}"
+        )
     if not valid_products:
         raise HTTPException(
             status_code=400,
@@ -301,26 +321,37 @@ def export_for_platform(
     filename = f"upload_{platform}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
 
     op_log.log_file_operation(
-        user_id=current_user.id, operation="export", platform=platform,
-        filename=filename, status="success", total_rows=len(valid_products),
-        imported=0, updated=0, failed=len(skipped),
+        user_id=current_user.id,
+        operation="export",
+        platform=platform,
+        filename=filename,
+        status="success",
+        total_rows=len(valid_products),
+        imported=0,
+        updated=0,
+        failed=len(skipped),
         errors=[{"product_id": i, "error": "исключён: ошибки валидации"} for i in skipped[:10]],
     )
 
     t0 = time.perf_counter()
     stats_repo.record(
-        user_id=current_user.id, operation="export", platform=platform,
-        status="success", total_items=len(valid_products),
+        user_id=current_user.id,
+        operation="export",
+        platform=platform,
+        status="success",
+        total_items=len(valid_products),
         success_items=len(valid_products),
         duration_ms=int((time.perf_counter() - t0) * 1000),
     )
     return StreamingResponse(
-        output, media_type=XLSX_MIME,
+        output,
+        media_type=XLSX_MIME,
         headers={"Content-Disposition": _safe_disposition(filename)},
     )
 
 
 # ==================== ВАЛИДАЦИЯ ПО СПЕКАМ ====================
+
 
 @router.get("/export/validate/{platform}")
 def validate_export(
@@ -344,17 +375,28 @@ def validate_export(
 
         product_dicts = []
         for p in products:
-            product_dicts.append({
-                "id": p.id, "name": p.name, "sku": p.sku, "external_id": p.external_id,
-                "price": p.price, "category": p.category, "mapped_category": p.mapped_category,
-                "barcode": p.barcode, "vat_rate": p.vat_rate,
-                "package_weight_grams": p.package_weight_grams,
-                "package_width_mm": p.package_width_mm,
-                "package_height_mm": p.package_height_mm,
-                "package_length_mm": p.package_length_mm,
-                "okpd_code": p.okpd_code, "photos": p.photos or [],
-                "attributes": [{"name": a.name, "value": a.value} for a in (p.attributes or [])],
-            })
+            product_dicts.append(
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "sku": p.sku,
+                    "external_id": p.external_id,
+                    "price": p.price,
+                    "category": p.category,
+                    "mapped_category": p.mapped_category,
+                    "barcode": p.barcode,
+                    "vat_rate": p.vat_rate,
+                    "package_weight_grams": p.package_weight_grams,
+                    "package_width_mm": p.package_width_mm,
+                    "package_height_mm": p.package_height_mm,
+                    "package_length_mm": p.package_length_mm,
+                    "okpd_code": p.okpd_code,
+                    "photos": p.photos or [],
+                    "attributes": [
+                        {"name": a.name, "value": a.value} for a in (p.attributes or [])
+                    ],
+                }
+            )
 
         categories = {
             (p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts
@@ -373,23 +415,30 @@ def validate_export(
         specs_by_category = {cat: specs_by_name.get(cat) for cat in categories}
 
         from services.spec_validator import validate_products_by_specs
+
         result = validate_products_by_specs(product_dicts, specs_by_category, platform)
 
         result["missing_specs"] = missing_specs
         if missing_specs and platform == "ozon":
-            result.setdefault("issues", []).append({
-                "product_id": None, "product_name": "Система", "category": "—",
-                "issues": [{
-                    "field": "spec",
-                    "message": (
-                        f"Нет спека Ozon для {len(missing_specs)} категорий: "
-                        f"{', '.join(missing_specs[:5])}{'…' if len(missing_specs) > 5 else ''}. "
-                        f"В маппинге выберите точную категорию в формате «Родитель / Тип» "
-                        f"(список — на странице «Спецификации»)."
-                    ),
-                    "severity": "error",
-                }],
-            })
+            result.setdefault("issues", []).append(
+                {
+                    "product_id": None,
+                    "product_name": "Система",
+                    "category": "—",
+                    "issues": [
+                        {
+                            "field": "spec",
+                            "message": (
+                                f"Нет спека Ozon для {len(missing_specs)} категорий: "
+                                f"{', '.join(missing_specs[:5])}{'…' if len(missing_specs) > 5 else ''}. "
+                                f"В маппинге выберите точную категорию в формате «Родитель / Тип» "
+                                f"(список — на странице «Спецификации»)."
+                            ),
+                            "severity": "error",
+                        }
+                    ],
+                }
+            )
             result["errors"] = result.get("errors", 0) + 1
 
         return result
@@ -398,6 +447,7 @@ def validate_export(
 
 
 # ==================== ОТЧЁТ ПО ВСЕМ ТОВАРАМ ====================
+
 
 @limiter.limit("5/minute;50/day")
 @router.get("/export/report")
@@ -412,25 +462,37 @@ def export_migration_report(
 
     data = []
     for p in products:
-        data.append({
-            "ID": p["id"],
-            "Название товара": p["name"],
-            "Артикул (SKU)": p.get("sku") or f"SKU-{p['id']}",
-            "Источник": p["source"],
-            "Цена (₽)": p["price"],
-            "Категория (источник)": p.get("category") or "Не указана",
-            "Категория (назначение)": p.get("mapped_category") or "Не маппировалось",
-            "Статус": p["status"],
-            "Ошибка": p.get("error_message") or "",
-            "Дата выгрузки": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        })
+        data.append(
+            {
+                "ID": p["id"],
+                "Название товара": p["name"],
+                "Артикул (SKU)": p.get("sku") or f"SKU-{p['id']}",
+                "Источник": p["source"],
+                "Цена (₽)": p["price"],
+                "Категория (источник)": p.get("category") or "Не указана",
+                "Категория (назначение)": p.get("mapped_category") or "Не маппировалось",
+                "Статус": p["status"],
+                "Ошибка": p.get("error_message") or "",
+                "Дата выгрузки": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
 
     df = pd.DataFrame(data)
     if df.empty:
-        df = pd.DataFrame(columns=[
-            "ID", "Название товара", "Артикул (SKU)", "Источник", "Цена (₽)",
-            "Категория (источник)", "Категория (назначение)", "Статус", "Ошибка", "Дата выгрузки",
-        ])
+        df = pd.DataFrame(
+            columns=[
+                "ID",
+                "Название товара",
+                "Артикул (SKU)",
+                "Источник",
+                "Цена (₽)",
+                "Категория (источник)",
+                "Категория (назначение)",
+                "Статус",
+                "Ошибка",
+                "Дата выгрузки",
+            ]
+        )
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -441,15 +503,19 @@ def export_migration_report(
 
     output.seek(0)
     filename = f"migration_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-    logger.info(f"Сформирован отчёт Excel: {len(data)} строк для пользователя {current_user.username}")
+    logger.info(
+        f"Сформирован отчёт Excel: {len(data)} строк для пользователя {current_user.username}"
+    )
 
     return StreamingResponse(
-        output, media_type=XLSX_MIME,
+        output,
+        media_type=XLSX_MIME,
         headers={"Content-Disposition": _safe_disposition(filename)},
     )
 
 
 # ==================== XLSX v2 ПОД РЕАЛЬНЫЙ ШАБЛОН OZON ====================
+
 
 @limiter.limit("30/minute")
 @router.get("/export/xlsx/{platform}")
@@ -457,7 +523,9 @@ def export_xlsx_v2(
     request: Request,
     platform: str,
     status: str = "success",
-    product_id: int = Query(None, description="ID одного товара (авто-экспорт из модалки миграции)"),
+    product_id: int = Query(
+        None, description="ID одного товара (авто-экспорт из модалки миграции)"
+    ),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -481,26 +549,38 @@ def export_xlsx_v2(
 
         if not products:
             detail = (
-                f"Товар #{product_id} не найден" if product_id
+                f"Товар #{product_id} не найден"
+                if product_id
                 else f"Нет товаров со статусом '{status}'. Импортируйте товары и выполните "
-                     f"миграцию (кнопка «Мигрировать») перед выгрузкой."
+                f"миграцию (кнопка «Мигрировать») перед выгрузкой."
             )
             raise HTTPException(status_code=400, detail=detail)
 
         product_dicts = []
         for p in products:
-            product_dicts.append({
-                "id": p.id, "name": p.name, "sku": p.sku, "external_id": p.external_id,
-                "price": p.price, "category": p.category, "mapped_category": p.mapped_category,
-                "barcode": p.barcode, "vat_rate": p.vat_rate,
-                "package_weight_grams": p.package_weight_grams,
-                "package_width_mm": p.package_width_mm,
-                "package_height_mm": p.package_height_mm,
-                "package_length_mm": p.package_length_mm,
-                "okpd_code": p.okpd_code, "units_per_item": p.units_per_item,
-                "photos": p.photos or [],
-                "attributes": [{"name": a.name, "value": a.value} for a in (p.attributes or [])],
-            })
+            product_dicts.append(
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "sku": p.sku,
+                    "external_id": p.external_id,
+                    "price": p.price,
+                    "category": p.category,
+                    "mapped_category": p.mapped_category,
+                    "barcode": p.barcode,
+                    "vat_rate": p.vat_rate,
+                    "package_weight_grams": p.package_weight_grams,
+                    "package_width_mm": p.package_width_mm,
+                    "package_height_mm": p.package_height_mm,
+                    "package_length_mm": p.package_length_mm,
+                    "okpd_code": p.okpd_code,
+                    "units_per_item": p.units_per_item,
+                    "photos": p.photos or [],
+                    "attributes": [
+                        {"name": a.name, "value": a.value} for a in (p.attributes or [])
+                    ],
+                }
+            )
 
         categories = {
             (p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts
@@ -518,8 +598,9 @@ def export_xlsx_v2(
         no_spec_categories = sorted(cat for cat in categories if cat not in specs_by_name)
         if no_spec_categories and platform == "ozon":
             # ✅ Эталон заменяет спек: требуем спек только там, где эталона нет
-            without_template = [c for c in no_spec_categories
-                                if not template_filler.has_official_template(c)]
+            without_template = [
+                c for c in no_spec_categories if not template_filler.has_official_template(c)
+            ]
             if without_template:
                 raise HTTPException(
                     status_code=409,
@@ -535,6 +616,7 @@ def export_xlsx_v2(
         specs_by_category = {cat: specs_by_name.get(cat) for cat in categories}
 
         from services.spec_validator import validate_products_by_specs
+
         validation = validate_products_by_specs(product_dicts, specs_by_category, platform)
         bad_ids = {
             item["product_id"]
@@ -575,24 +657,35 @@ def export_xlsx_v2(
             cat for cat in categories if template_filler.has_official_template(cat)
         )
         op_log.log_file_operation(
-            user_id=current_user.id, operation="export", platform=platform,
-            filename=filename, status="success",
-            total_rows=len(product_dicts), imported=len(exportable),
-            updated=0, failed=len(bad_ids),
-            errors=[{"product_id": i, "error": "исключён: ошибки валидации"} for i in list(bad_ids)[:10]],
+            user_id=current_user.id,
+            operation="export",
+            platform=platform,
+            filename=filename,
+            status="success",
+            total_rows=len(product_dicts),
+            imported=len(exportable),
+            updated=0,
+            failed=len(bad_ids),
+            errors=[
+                {"product_id": i, "error": "исключён: ошибки валидации"} for i in list(bad_ids)[:10]
+            ],
         )
         if used_templates:
             logger.info(f"🧾 Выгрузка собрана на эталонных шаблонах: {used_templates}")
 
         t0 = time.perf_counter()
         stats_repo.record(
-            user_id=current_user.id, operation="export", platform=platform,
-            status="success", total_items=len(exportable),
-            success_items=len(exportable), failed_items=len(bad_ids),
+            user_id=current_user.id,
+            operation="export",
+            platform=platform,
+            status="success",
+            total_items=len(exportable),
+            success_items=len(exportable),
+            failed_items=len(bad_ids),
             duration_ms=int((time.perf_counter() - t0) * 1000),
         )
 
-        media = ("application/zip" if filename.endswith(".zip") else XLSX_MIME)
+        media = "application/zip" if filename.endswith(".zip") else XLSX_MIME
         return Response(
             content=data,
             media_type=media,

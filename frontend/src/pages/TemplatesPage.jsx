@@ -12,7 +12,10 @@ import { api } from '../api';
 const suggestCategoryFromFilename = (filename) => {
   const m = (filename || '').match(/^ozon_(.+)\.xlsx$/i);
   if (!m) return null;
-  const parts = m[1].split('_').map((p) => p.trim()).filter(Boolean);
+  const parts = m[1]
+    .split('_')
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (parts.length >= 2) return `${parts[0]} / ${parts.slice(1).join(' ')}`;
   return parts[0] ? parts[0].replace(/_/g, ' ').trim() : null;
 };
@@ -20,9 +23,15 @@ const suggestCategoryFromFilename = (filename) => {
 const fmtDate = (iso) => {
   if (!iso) return '—';
   const d = new Date(iso);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleString('ru-RU', {
-    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
+  return isNaN(d.getTime())
+    ? '—'
+    : d.toLocaleString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
 };
 
 /**
@@ -58,7 +67,10 @@ const TemplatesPage = ({ onNotify }) => {
 
   useEffect(() => {
     load();
-    api.getSpecNames('ozon').then(setSpecNames).catch(() => setSpecNames([]));
+    api
+      .getSpecNames('ozon')
+      .then(setSpecNames)
+      .catch(() => setSpecNames([]));
   }, [load]);
 
   useEffect(() => {
@@ -99,8 +111,12 @@ const TemplatesPage = ({ onNotify }) => {
   };
 
   const handleDelete = async (cat) => {
-    // eslint-disable-next-line no-alert
-    if (!window.confirm(`Удалить эталонный шаблон для категории «${cat}»?\nВыгрузка вернётся к генерации из спека.`)) return;
+    if (
+      !window.confirm(
+        `Удалить эталонный шаблон для категории «${cat}»?\nВыгрузка вернётся к генерации из спека.`
+      )
+    )
+      return;
     setBusyCat(cat);
     try {
       await api.deleteOzonTemplate(cat);
@@ -132,18 +148,32 @@ const TemplatesPage = ({ onNotify }) => {
       {/* ==================== Инструкция ==================== */}
       <div className="card" style={{ padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
         <h4 style={{ margin: '0 0 0.5rem' }}>Как получить эталонный шаблон</h4>
-        <ol style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-          <li>В кабинете Ozon: «Товары и цены» → «Загрузить товары по XLSX» → шаг 1 «Выберите категорию и тип».</li>
-          <li>Выберите категорию (например, «Одежда &gt; Аксессуары &gt; Панама») и скачайте шаблон.</li>
+        <ol
+          style={{
+            margin: 0,
+            paddingLeft: '1.2rem',
+            fontSize: '0.9rem',
+            color: 'var(--text-secondary)',
+            lineHeight: 1.6,
+          }}
+        >
           <li>
-            Переименуйте файл в <code>ozon_Родитель_Тип.xlsx</code> (необязательно, но категория подставится сама):
-            {' '}<code>ozon_Аксессуары_Панама.xlsx</code>.
+            В кабинете Ozon: «Товары и цены» → «Загрузить товары по XLSX» → шаг 1 «Выберите
+            категорию и тип».
+          </li>
+          <li>
+            Выберите категорию (например, «Одежда &gt; Аксессуары &gt; Панама») и скачайте шаблон.
+          </li>
+          <li>
+            Переименуйте файл в <code>ozon_Родитель_Тип.xlsx</code> (необязательно, но категория
+            подставится сама): <code>ozon_Аксессуары_Панама.xlsx</code>.
           </li>
           <li>Загрузите файл ниже — он станет общим для всех пользователей системы.</li>
         </ol>
         <p className="form-hint" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-          💡 В кабинете путь категории трёхуровневый («Одежда &gt; Аксессуары &gt; Панама»), а в системе —
-          двухуровневый («Аксессуары / Панама»). Вводите в любом формате: имя нормализуется и сверяется со спеками.
+          💡 В кабинете путь категории трёхуровневый («Одежда &gt; Аксессуары &gt; Панама»), а в
+          системе — двухуровневый («Аксессуары / Панама»). Вводите в любом формате: имя
+          нормализуется и сверяется со спеками.
         </p>
       </div>
 
@@ -162,7 +192,9 @@ const TemplatesPage = ({ onNotify }) => {
             style={{ flex: 1, minWidth: 260 }}
           />
           <datalist id="tpl-page-categories">
-            {specNames.map((n) => (<option key={n} value={n} />))}
+            {specNames.map((n) => (
+              <option key={n} value={n} />
+            ))}
           </datalist>
           <input
             type="file"
@@ -176,7 +208,11 @@ const TemplatesPage = ({ onNotify }) => {
               }
             }}
           />
-          <Button onClick={handleUpload} disabled={!category.trim() || !file || uploading} loading={uploading}>
+          <Button
+            onClick={handleUpload}
+            disabled={!category.trim() || !file || uploading}
+            loading={uploading}
+          >
             <Icon name="import" size={16} /> Сохранить эталон
           </Button>
         </div>
@@ -187,8 +223,16 @@ const TemplatesPage = ({ onNotify }) => {
         )}
       </div>
 
-      {error && <div className="alert alert-error"><div>{error}</div></div>}
-      {message && <div className="alert alert-success"><div>{message}</div></div>}
+      {error && (
+        <div className="alert alert-error">
+          <div>{error}</div>
+        </div>
+      )}
+      {message && (
+        <div className="alert alert-success">
+          <div>{message}</div>
+        </div>
+      )}
 
       {/* ==================== Список эталонов ==================== */}
       {loading && !templates.length ? (
@@ -219,10 +263,14 @@ const TemplatesPage = ({ onNotify }) => {
             <tbody>
               {templates.map((t) => (
                 <tr key={t.category_name} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                  <td style={{ padding: '0.6rem', fontWeight: 600 }}>
-                    ✅ {t.category_name}
-                  </td>
-                  <td style={{ padding: '0.6rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                  <td style={{ padding: '0.6rem', fontWeight: 600 }}>✅ {t.category_name}</td>
+                  <td
+                    style={{
+                      padding: '0.6rem',
+                      textAlign: 'center',
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
                     {t.columns ?? '—'}
                   </td>
                   <td style={{ padding: '0.6rem', color: 'var(--text-secondary)' }}>
@@ -234,7 +282,8 @@ const TemplatesPage = ({ onNotify }) => {
                   <td style={{ padding: '0.6rem' }}>
                     <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center' }}>
                       <Button
-                        variant="secondary" size="small"
+                        variant="secondary"
+                        size="small"
                         title="Скачать текущий эталон"
                         disabled={busyCat === t.category_name}
                         onClick={() => handleDownload(t.category_name)}
@@ -242,7 +291,8 @@ const TemplatesPage = ({ onNotify }) => {
                         <Icon name="template" size={15} />
                       </Button>
                       <Button
-                        variant="secondary" size="small"
+                        variant="secondary"
+                        size="small"
                         title="Удалить эталон"
                         disabled={busyCat === t.category_name}
                         onClick={() => handleDelete(t.category_name)}
@@ -261,7 +311,8 @@ const TemplatesPage = ({ onNotify }) => {
 
       <p className="form-hint" style={{ marginTop: '0.75rem' }}>
         ℹ️ Шаблоны общие: их видят и используют все пользователи системы. При выгрузке файл товара
-        собирается на эталоне его категории (mapped_category); если эталона нет — используется генерация из спека.
+        собирается на эталоне его категории (mapped_category); если эталона нет — используется
+        генерация из спека.
       </p>
     </>
   );

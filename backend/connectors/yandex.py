@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict
+
 from backend.parsers.yml_parser import YmlParser
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ class YandexMarketConnector:
     - Импорт через YML-фиды (без регистрации)
     - Mock-режим для тестирования
     """
-    
+
     def __init__(self, source: str = "", use_mock: bool = False):
         """
         Args:
@@ -22,12 +22,12 @@ class YandexMarketConnector:
         self.source = source
         self.use_mock = use_mock
         self.yml_parser = YmlParser(max_offers=50)
-    
-    async def get_products(self, limit: int = 50) -> List[Dict]:
+
+    async def get_products(self, limit: int = 50) -> list[dict]:
         """Получает список товаров"""
         if self.use_mock:
             return self._get_mock_products()
-        
+
         # Парсим YML-фид
         try:
             result = self.yml_parser.fetch_and_parse(self.source)
@@ -35,15 +35,15 @@ class YandexMarketConnector:
         except ValueError as e:
             logger.error(f" Ошибка парсинга YML: {e}")
             raise
-    
-    def parse_yandex_product(self, yml_product: Dict) -> Dict:
+
+    def parse_yandex_product(self, yml_product: dict) -> dict:
         """
         Преобразует товар из YML в универсальный формат.
         YML-парсер уже возвращает нужный формат, поэтому просто возвращаем как есть.
         """
         return yml_product
-    
-    def _get_mock_products(self) -> List[Dict]:
+
+    def _get_mock_products(self) -> list[dict]:
         """Тестовые данные для демонстрации"""
         return [
             {
@@ -59,7 +59,7 @@ class YandexMarketConnector:
                 "vendor": "Чайный дом",
                 "params": {"Вес": "200г", "Страна": "Индия"},
                 "available": True,
-                "source": "yandex_yml"
+                "source": "yandex_yml",
             },
             {
                 "external_id": "YML-002",
@@ -74,7 +74,7 @@ class YandexMarketConnector:
                 "vendor": "СветТех",
                 "params": {"Мощность": "12Вт", "Цвет": "Белый"},
                 "available": True,
-                "source": "yandex_yml"
+                "source": "yandex_yml",
             },
             {
                 "external_id": "YML-003",
@@ -89,6 +89,6 @@ class YandexMarketConnector:
                 "vendor": "ТехКнига",
                 "params": {"Автор": "Иванов И.И.", "Страниц": "500"},
                 "available": True,
-                "source": "yandex_yml"
-            }
+                "source": "yandex_yml",
+            },
         ]

@@ -1,19 +1,21 @@
 """
 Alembic environment configuration
 """
-from logging.config import fileConfig
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
-from alembic import context
+
 import os
 import sys
+from logging.config import fileConfig
+
+from sqlalchemy import engine_from_config, pool
+
+from alembic import context
 
 # Добавляем путь к проекту
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 # Импортируем модели (все классы регистрируются в Base.metadata)
-from database.models import Base
 from core.config import DATABASE_URL
+from database.models import Base
 
 # Alembic Config object
 config = context.config
@@ -66,8 +68,8 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            compare_type=True,              # ✅ замечать смену типов колонок
-            compare_server_default=True,    # ✅ замечать смену default-значений
+            compare_type=True,  # ✅ замечать смену типов колонок
+            compare_server_default=True,  # ✅ замечать смену default-значений
         )
 
         with context.begin_transaction():

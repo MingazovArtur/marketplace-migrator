@@ -88,7 +88,10 @@ const VariantsModal = ({ isOpen, onClose, product, onSave }) => {
             <tbody>
               {variants.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem' }}>
+                  <td
+                    colSpan={6}
+                    style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem' }}
+                  >
                     Вариаций нет. Добавьте первую или импортируйте из файла.
                   </td>
                 </tr>
@@ -138,7 +141,11 @@ const VariantsModal = ({ isOpen, onClose, product, onSave }) => {
                     />
                   </td>
                   <td>
-                    <button className="btn-icon-danger" onClick={() => handleRemove(idx)} title="Удалить">
+                    <button
+                      className="btn-icon-danger"
+                      onClick={() => handleRemove(idx)}
+                      title="Удалить"
+                    >
                       🗑
                     </button>
                   </td>
@@ -153,7 +160,9 @@ const VariantsModal = ({ isOpen, onClose, product, onSave }) => {
         </Button>
 
         <div className="modal-actions">
-          <Button variant="outline" onClick={onClose}>Отмена</Button>
+          <Button variant="outline" onClick={onClose}>
+            Отмена
+          </Button>
           <Button onClick={handleSave} disabled={loading} loading={loading}>
             Сохранить ({variants.length})
           </Button>

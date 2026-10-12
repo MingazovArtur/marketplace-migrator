@@ -1,20 +1,22 @@
 """
 Роутер управления фотографиями товара: порядок, добавление, удаление, скачивание копий.
 """
+
 import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import List
-from database.repository import repo
-from database.models import User
+
 from core.auth import get_current_user
+from database.models import User
+from database.repository import repo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/products", tags=["Photos"])
 
 
 class PhotosUpdate(BaseModel):
-    photos: List[str]
+    photos: list[str]
 
 
 @router.get("/{product_id}/photos")
@@ -73,5 +75,6 @@ def start_download_photos(
         raise HTTPException(status_code=400, detail="У товара нет фото для скачивания")
 
     from tasks import download_photos_task
+
     task = download_photos_task.delay(product_id, current_user.id)
     return {"success": True, "task_id": task.id, "photos": len(photos)}

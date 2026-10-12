@@ -23,21 +23,26 @@ const EmailVerificationBanner = ({ user }) => {
   };
 
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '0.75rem',
-      flexWrap: 'wrap',
-      padding: '0.6rem 1rem',
-      background: 'rgba(245, 158, 11, 0.12)',
-      borderBottom: '1px solid rgba(245, 158, 11, 0.35)',
-      color: '#f59e0b',
-      fontSize: '0.88rem',
-    }}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '0.75rem',
+        flexWrap: 'wrap',
+        padding: '0.6rem 1rem',
+        background: 'rgba(245, 158, 11, 0.12)',
+        borderBottom: '1px solid rgba(245, 158, 11, 0.35)',
+        color: '#f59e0b',
+        fontSize: '0.88rem',
+      }}
+    >
       <span>
         <Icon name="warning" size={18} />
-        <span>Подтвердите email <strong>{user.email}</strong> — без этого мы не сможем восстановить доступ к аккаунту.</span>
+        <span>
+          Подтвердите email <strong>{user.email}</strong> — без этого мы не сможем восстановить
+          доступ к аккаунту.
+        </span>
       </span>
       <button
         onClick={resend}

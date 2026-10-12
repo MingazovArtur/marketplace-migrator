@@ -1,20 +1,20 @@
 import React from 'react';
 import Spinner from './Spinner';
 
-const Button = ({ 
-  children, 
-  variant = 'primary', 
-  disabled = false, 
+const Button = ({
+  children,
+  variant = 'primary',
+  disabled = false,
   loading = false,
-  onClick, 
-  className = '', 
+  onClick,
+  className = '',
   type = 'button',
-  ...props 
+  ...props
 }) => {
   const variantClasses = {
     primary: 'btn-primary',
     secondary: 'btn-secondary',
-    outline: 'btn-outline'
+    outline: 'btn-outline',
   };
 
   const isLoading = loading || disabled;

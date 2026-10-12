@@ -2,18 +2,22 @@
 Репозиторий для работы с товарами в базе данных.
 Поддерживает фильтрацию, сортировку, пагинацию, массовые операции.
 Схему БД ведёт ТОЛЬКО Alembic (create_all не вызываем).
-"""
-from typing import Optional, List, Dict
 
-from sqlalchemy import desc, asc
+✅ v2 Оптимизация: добавлен selectinload для предотвращения N+1 запросов
+при загрузке товаров с их атрибутами и вариациями.
+"""
+
+
+from sqlalchemy import asc, desc
+from sqlalchemy.orm import selectinload
 
 from database.models import (
-    Product,
     FileOperationLog,
+    ImportExportStats,
     MigrationLog,
+    Product,
     ProductAttribute,
     ProductVariant,
-    ImportExportStats,
 )
 from database.session import SessionLocal
 
@@ -22,7 +26,7 @@ class ProductRepository:
 
     # ---------- внутренний хелпер сериализации ----------
     @staticmethod
-    def _to_dict(p: Product) -> Optional[Dict]:
+    def _to_dict(p: Product) -> dict | None:
         if p is None:
             return None
         return {
@@ -46,8 +50,7 @@ class ProductRepository:
             "stock": p.stock,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None,
-
-            # --- ✅ ЛОГИСТИКА И НАЛОГИ (без этого модалка открывается пустой) ---
+            # --- ✅ ЛОГИСТИКА И НАЛОГИ ---
             "barcode": p.barcode,
             "weight_grams": p.weight_grams,
             "package_weight_grams": p.package_weight_grams,
@@ -57,8 +60,7 @@ class ProductRepository:
             "vat_rate": p.vat_rate,
             "okpd_code": p.okpd_code,
             "units_per_item": p.units_per_item,
-
-            # --- связи ---
+            # --- связи (загружаются через selectinload) ---
             "attributes": [
                 {
                     "id": a.id,
@@ -100,9 +102,9 @@ class ProductRepository:
         self,
         user_id: int = None,
         is_admin: bool = False,
-        search: Optional[str] = None,
-        status: Optional[str] = None,
-        source: Optional[str] = None,
+        search: str | None = None,
+        status: str | None = None,
+        source: str | None = None,
         sort_by: str = "created_at",
         sort_order: str = "desc",
         skip: int = 0,
@@ -110,7 +112,10 @@ class ProductRepository:
     ):
         """Получить товары с фильтрацией, сортировкой и пагинацией."""
         with SessionLocal() as db:
-            query = db.query(Product)
+            # ✅ ОПТИМИЗАЦИЯ: Eager loading предотвращает N+1 запросов для attributes и variants
+            query = db.query(Product).options(
+                selectinload(Product.attributes), selectinload(Product.variants)
+            )
             query = self._apply_filters(query, user_id, is_admin, search, status, source)
 
             total = query.count()
@@ -128,17 +133,31 @@ class ProductRepository:
     def get_by_id(self, product_id: int, user_id: int = None):
         """Получить товар по ID. Если указан user_id — проверяет владельца."""
         with SessionLocal() as db:
-            query = db.query(Product).filter(Product.id == product_id)
+            # ✅ ОПТИМИЗАЦИЯ: Eager loading для модалок редактирования
+            query = (
+                db.query(Product)
+                .options(selectinload(Product.attributes), selectinload(Product.variants))
+                .filter(Product.id == product_id)
+            )
+
             if user_id is not None:
                 query = query.filter(Product.user_id == user_id)
+
             return self._to_dict(query.first())
 
-    def find_by_external(self, user_id: int, source: str, external_id: str = None, sku: str = None) -> Optional[Dict]:
+    def find_by_external(
+        self, user_id: int, source: str, external_id: str = None, sku: str = None
+    ) -> dict | None:
         """Найти существующий товар по external_id или sku (для upsert при повторном импорте)."""
         with SessionLocal() as db:
-            query = db.query(Product).filter(
-                Product.user_id == user_id,
-                Product.source == source,
+            # ✅ ОПТИМИЗАЦИЯ: Eager loading на случай, если потребуется сериализация
+            query = (
+                db.query(Product)
+                .options(selectinload(Product.attributes), selectinload(Product.variants))
+                .filter(
+                    Product.user_id == user_id,
+                    Product.source == source,
+                )
             )
             if external_id:
                 query = query.filter(Product.external_id == external_id)
@@ -167,7 +186,7 @@ class ProductRepository:
             db.refresh(new_product)
             return self._to_dict(new_product)
 
-    def update(self, product_id: int, update_data: Dict, user_id: int = None):
+    def update(self, product_id: int, update_data: dict, user_id: int = None):
         """Обновить товар. Если указан user_id — проверяет владельца."""
         with SessionLocal() as db:
             query = db.query(Product).filter(Product.id == product_id)
@@ -182,7 +201,7 @@ class ProductRepository:
                 return self._to_dict(product)
             return None
 
-    def bulk_update(self, product_ids: List[int], update_data: Dict, user_id: int = None) -> int:
+    def bulk_update(self, product_ids: list[int], update_data: dict, user_id: int = None) -> int:
         """Массовое обновление товаров. Возвращает кол-во обновлённых строк."""
         if not product_ids or not update_data:
             return 0
@@ -220,8 +239,11 @@ class ProductRepository:
             error = query.filter(Product.status == "error").count()
             processing = query.filter(Product.status == "processing").count()
             return {
-                "total": total, "pending": pending, "success": success,
-                "error": error, "processing": processing,
+                "total": total,
+                "pending": pending,
+                "success": success,
+                "error": error,
+                "processing": processing,
             }
 
 
@@ -229,35 +251,68 @@ class OperationLogRepository:
     """Репозиторий журнала операций (импорт/экспорт/миграции)"""
 
     def log_file_operation(
-        self, user_id: int, operation: str, platform: str = None, filename: str = None,
-        mode: str = None, status: str = "success", total_rows: int = 0,
-        imported: int = 0, updated: int = 0, failed: int = 0, errors: list = None,
+        self,
+        user_id: int,
+        operation: str,
+        platform: str = None,
+        filename: str = None,
+        mode: str = None,
+        status: str = "success",
+        total_rows: int = 0,
+        imported: int = 0,
+        updated: int = 0,
+        failed: int = 0,
+        errors: list = None,
     ) -> int:
         with SessionLocal() as db:
             entry = FileOperationLog(
-                user_id=user_id, operation=operation, platform=platform,
-                filename=filename, mode=mode, status=status,
-                total_rows=total_rows, imported=imported, updated=updated,
-                failed=failed, errors=errors or [],
+                user_id=user_id,
+                operation=operation,
+                platform=platform,
+                filename=filename,
+                mode=mode,
+                status=status,
+                total_rows=total_rows,
+                imported=imported,
+                updated=updated,
+                failed=failed,
+                errors=errors or [],
             )
             db.add(entry)
             db.commit()
             return entry.id
 
     def log_migration(
-        self, user_id: int, product_id: int, product_name: str, source_platform: str,
-        target_platform: str, old_price: float = None, new_price: float = None,
-        old_category: str = None, new_category: str = None, status: str = "success",
-        error_message: str = None, is_batch: bool = False, batch_id: str = None,
+        self,
+        user_id: int,
+        product_id: int,
+        product_name: str,
+        source_platform: str,
+        target_platform: str,
+        old_price: float = None,
+        new_price: float = None,
+        old_category: str = None,
+        new_category: str = None,
+        status: str = "success",
+        error_message: str = None,
+        is_batch: bool = False,
+        batch_id: str = None,
     ) -> int:
         with SessionLocal() as db:
             entry = MigrationLog(
-                user_id=user_id, product_id=product_id, product_name=product_name,
-                source_platform=source_platform, target_platform=target_platform,
-                old_price=old_price, new_price=new_price,
-                old_category=old_category, new_category=new_category,
-                status=status, error_message=error_message,
-                is_batch=is_batch, batch_id=batch_id,
+                user_id=user_id,
+                product_id=product_id,
+                product_name=product_name,
+                source_platform=source_platform,
+                target_platform=target_platform,
+                old_price=old_price,
+                new_price=new_price,
+                old_category=old_category,
+                new_category=new_category,
+                status=status,
+                error_message=error_message,
+                is_batch=is_batch,
+                batch_id=batch_id,
             )
             db.add(entry)
             db.commit()
@@ -275,8 +330,14 @@ class OperationLogRepository:
             return f"Импорт YML-фида ({e.platform or '?'})"
         return f"Импорт по ключу ({e.platform or '?'})"
 
-    def get_history(self, user_id: int, is_admin: bool = False, operation: str = None,
-                    limit: int = 50, skip: int = 0) -> list:
+    def get_history(
+        self,
+        user_id: int,
+        is_admin: bool = False,
+        operation: str = None,
+        limit: int = 50,
+        skip: int = 0,
+    ) -> list:
         """Единая лента истории: файлы + миграции, отсортированные по дате."""
         entries = []
 
@@ -290,54 +351,59 @@ class OperationLogRepository:
                 elif operation == "export":
                     q = q.filter(FileOperationLog.operation == "export")
                 for e in q.all():
-                    entries.append({
-                        "id": f"file-{e.id}",
-                        "type": (
-                            "import" if e.operation.startswith("import")
-                            else ("media" if e.operation == "media_download" else "export")
-                        ),
-                        "operation": e.operation,
-                        "platform": e.platform,
-                        "description": self._file_desc(e),
-                        "counts": (
-                            f"создано {e.imported} / обновлено {e.updated} / ошибок {e.failed}"
-                            if e.operation.startswith("import")
-                            else (
-                                f"сохранено {e.imported} из {e.total_rows}"
-                                if e.operation == "media_download"
-                                else f"{e.total_rows} строк"
-                            )
-                        ),
-                        "status": e.status,
-                        "created_at": e.created_at.isoformat() if e.created_at else None,
-                    })
+                    entries.append(
+                        {
+                            "id": f"file-{e.id}",
+                            "type": (
+                                "import"
+                                if e.operation.startswith("import")
+                                else ("media" if e.operation == "media_download" else "export")
+                            ),
+                            "operation": e.operation,
+                            "platform": e.platform,
+                            "description": self._file_desc(e),
+                            "counts": (
+                                f"создано {e.imported} / обновлено {e.updated} / ошибок {e.failed}"
+                                if e.operation.startswith("import")
+                                else (
+                                    f"сохранено {e.imported} из {e.total_rows}"
+                                    if e.operation == "media_download"
+                                    else f"{e.total_rows} строк"
+                                )
+                            ),
+                            "status": e.status,
+                            "created_at": e.created_at.isoformat() if e.created_at else None,
+                        }
+                    )
 
             if operation in (None, "", "migration"):
                 q = db.query(MigrationLog)
                 if not is_admin:
                     q = q.filter(MigrationLog.user_id == user_id)
                 for m in q.all():
-                    entries.append({
-                        "id": f"mig-{m.id}",
-                        "type": "migration",
-                        "operation": "batch" if m.is_batch else "single",
-                        "platform": m.target_platform,
-                        "description": f"«{m.product_name}» → {m.target_platform}",
-                        "counts": f"{m.old_price} → {m.new_price} ₽",
-                        "status": m.status,
-                        "error_message": m.error_message,
-                        "created_at": m.created_at.isoformat() if m.created_at else None,
-                    })
+                    entries.append(
+                        {
+                            "id": f"mig-{m.id}",
+                            "type": "migration",
+                            "operation": "batch" if m.is_batch else "single",
+                            "platform": m.target_platform,
+                            "description": f"«{m.product_name}» → {m.target_platform}",
+                            "counts": f"{m.old_price} → {m.new_price} ₽",
+                            "status": m.status,
+                            "error_message": m.error_message,
+                            "created_at": m.created_at.isoformat() if m.created_at else None,
+                        }
+                    )
 
         entries.sort(key=lambda x: x["created_at"] or "", reverse=True)
-        return entries[skip:skip + limit]
+        return entries[skip : skip + limit]
 
 
 class AttributeRepository:
     """Репозиторий характеристик товаров"""
 
     @staticmethod
-    def _to_dict(attr) -> Dict:
+    def _to_dict(attr) -> dict:
         return {
             "id": attr.id,
             "product_id": attr.product_id,
@@ -347,24 +413,25 @@ class AttributeRepository:
             "sort_order": attr.sort_order,
         }
 
-    def get_by_product(self, product_id: int) -> List[Dict]:
+    def get_by_product(self, product_id: int) -> list[dict]:
         """Получить все характеристики товара"""
         with SessionLocal() as db:
-            attrs = db.query(ProductAttribute).filter(
-                ProductAttribute.product_id == product_id
-            ).order_by(ProductAttribute.sort_order).all()
+            attrs = (
+                db.query(ProductAttribute)
+                .filter(ProductAttribute.product_id == product_id)
+                .order_by(ProductAttribute.sort_order)
+                .all()
+            )
             return [self._to_dict(a) for a in attrs]
 
-    def set_attributes(self, product_id: int, attributes: List[Dict]) -> List[Dict]:
+    def set_attributes(self, product_id: int, attributes: list[dict]) -> list[dict]:
         """
         Заменить все характеристики товара на новые.
         Используется при импорте и массовом редактировании.
         """
         with SessionLocal() as db:
             # Удаляем старые
-            db.query(ProductAttribute).filter(
-                ProductAttribute.product_id == product_id
-            ).delete()
+            db.query(ProductAttribute).filter(ProductAttribute.product_id == product_id).delete()
 
             # Создаём новые
             result = []
@@ -384,13 +451,17 @@ class AttributeRepository:
             db.commit()
             return result
 
-    def add_attribute(self, product_id: int, name: str, value: str,
-                      platform_attribute_id: str = None) -> Dict:
+    def add_attribute(
+        self, product_id: int, name: str, value: str, platform_attribute_id: str = None
+    ) -> dict:
         """Добавить одну характеристику"""
         with SessionLocal() as db:
-            max_order = db.query(ProductAttribute.sort_order).filter(
-                ProductAttribute.product_id == product_id
-            ).order_by(ProductAttribute.sort_order.desc()).first()
+            max_order = (
+                db.query(ProductAttribute.sort_order)
+                .filter(ProductAttribute.product_id == product_id)
+                .order_by(ProductAttribute.sort_order.desc())
+                .first()
+            )
             next_order = (max_order[0] or 0) + 1 if max_order else 0
 
             new_attr = ProductAttribute(
@@ -408,9 +479,7 @@ class AttributeRepository:
     def delete_attribute(self, attribute_id: int, user_id: int = None) -> bool:
         """Удалить характеристику (с проверкой владельца товара)"""
         with SessionLocal() as db:
-            attr = db.query(ProductAttribute).filter(
-                ProductAttribute.id == attribute_id
-            ).first()
+            attr = db.query(ProductAttribute).filter(ProductAttribute.id == attribute_id).first()
             if not attr:
                 return False
             if user_id is not None:
@@ -426,7 +495,7 @@ class VariantRepository:
     """Репозиторий вариаций товаров"""
 
     @staticmethod
-    def _to_dict(v) -> Dict:
+    def _to_dict(v) -> dict:
         return {
             "id": v.id,
             "product_id": v.product_id,
@@ -439,19 +508,20 @@ class VariantRepository:
             "sort_order": v.sort_order,
         }
 
-    def get_by_product(self, product_id: int) -> List[Dict]:
+    def get_by_product(self, product_id: int) -> list[dict]:
         with SessionLocal() as db:
-            variants = db.query(ProductVariant).filter(
-                ProductVariant.product_id == product_id
-            ).order_by(ProductVariant.sort_order).all()
+            variants = (
+                db.query(ProductVariant)
+                .filter(ProductVariant.product_id == product_id)
+                .order_by(ProductVariant.sort_order)
+                .all()
+            )
             return [self._to_dict(v) for v in variants]
 
-    def set_variants(self, product_id: int, variants: List[Dict]) -> List[Dict]:
+    def set_variants(self, product_id: int, variants: list[dict]) -> list[dict]:
         """Полностью заменить набор вариаций товара"""
         with SessionLocal() as db:
-            db.query(ProductVariant).filter(
-                ProductVariant.product_id == product_id
-            ).delete()
+            db.query(ProductVariant).filter(ProductVariant.product_id == product_id).delete()
 
             result = []
             for idx, v in enumerate(variants):
@@ -491,23 +561,35 @@ class VariantRepository:
 class StatsRepository:
     """Запись и агрегация статистики операций"""
 
-    def record(self, user_id: int, operation: str, platform: str = None,
-               status: str = "success", total_items: int = 0,
-               success_items: int = 0, failed_items: int = 0,
-               duration_ms: int = 0) -> int:
+    def record(
+        self,
+        user_id: int,
+        operation: str,
+        platform: str = None,
+        status: str = "success",
+        total_items: int = 0,
+        success_items: int = 0,
+        failed_items: int = 0,
+        duration_ms: int = 0,
+    ) -> int:
         with SessionLocal() as db:
             row = ImportExportStats(
-                user_id=user_id, operation=operation, platform=platform,
-                status=status, total_items=total_items,
-                success_items=success_items, failed_items=failed_items,
+                user_id=user_id,
+                operation=operation,
+                platform=platform,
+                status=status,
+                total_items=total_items,
+                success_items=success_items,
+                failed_items=failed_items,
                 duration_ms=duration_ms,
             )
             db.add(row)
             db.commit()
             return row.id
 
-    def get_dashboard(self, user_id: int, days: int = 7, is_admin: bool = False) -> Dict:
+    def get_dashboard(self, user_id: int, days: int = 7, is_admin: bool = False) -> dict:
         from datetime import datetime, timedelta
+
         since = datetime.utcnow() - timedelta(days=days)
 
         with SessionLocal() as db:
@@ -534,7 +616,11 @@ class StatsRepository:
             d = (datetime.utcnow() - timedelta(days=days - 1 - i)).date()
             by_day[d.isoformat()] = {
                 "date": d.isoformat(),
-                "import": 0, "export": 0, "migrate": 0, "other": 0, "error": 0,
+                "import": 0,
+                "export": 0,
+                "migrate": 0,
+                "other": 0,
+                "error": 0,
             }
         for r in rows:
             key = r.created_at.date().isoformat() if r.created_at else None
@@ -553,17 +639,24 @@ class StatsRepository:
                 b["other"] += 1
 
         # --- По типам операций ---
-        by_op: Dict[str, Dict] = {}
+        by_op: dict[str, dict] = {}
         for r in rows:
-            b = by_op.setdefault(r.operation, {
-                "operation": r.operation, "count": 0, "success": 0, "error": 0, "items": 0,
-            })
+            b = by_op.setdefault(
+                r.operation,
+                {
+                    "operation": r.operation,
+                    "count": 0,
+                    "success": 0,
+                    "error": 0,
+                    "items": 0,
+                },
+            )
             b["count"] += 1
             b["error" if r.status == "error" else "success"] += 1
             b["items"] += r.success_items or 0
 
         # --- По площадкам ---
-        by_platform: Dict[str, Dict] = {}
+        by_platform: dict[str, dict] = {}
         for r in rows:
             if not r.platform:
                 continue
@@ -582,13 +675,9 @@ class StatsRepository:
         }
 
 
+# Глобальные экземпляры репозиториев
 stats_repo = StatsRepository()
-
 variant_repo = VariantRepository()
-
 attr_repo = AttributeRepository()
-
 op_log = OperationLogRepository()
-
-# Глобальный экземпляр
 repo = ProductRepository()

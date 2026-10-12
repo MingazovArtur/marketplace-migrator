@@ -39,14 +39,16 @@
   - error: блокирует экспорт (площадка точно отклонит)
   - warning: потенциальная проблема или авто-исправимо при генерации
 """
+
 import json
 import re
 from collections import Counter
-from typing import Optional
 
 # Подакцизные товары (из официальной документации Ozon)
 EXCISABLE_CATEGORIES = {
-    "сахаросодержащие напитки", "моторные масла", "безалкогольное пиво",
+    "сахаросодержащие напитки",
+    "моторные масла",
+    "безалкогольное пиво",
 }
 
 HASHTAG_RE = re.compile(r"^#[A-Za-zА-Яа-яЁё0-9_]{1,30}$")
@@ -60,6 +62,7 @@ VALID_PHOTO_EXT = (".jpg", ".jpeg", ".png")
 # Убираем ВСЁ кроме букв и цифр, приводим к нижнему регистру.
 # Это позволяет распознавать «Название модели (для объединения в одну карточку)»
 # и «Названиемоделидляобъединенияводнукарточку» как ОДИН канон.
+
 
 def _norm_name(s: str) -> str:
     """Нормализация имени атрибута: только буквы+цифры в нижнем регистре."""
@@ -93,153 +96,186 @@ TEMPLATE_REQUIRED_ATTRS_RAW = {
 
 # Обратный индекс: нормализованное имя спека -> канон
 _SYNONYM_INDEX = {
-    _norm_name(syn): canon
-    for canon, syns in TEMPLATE_REQUIRED_ATTRS_RAW.items()
-    for syn in syns
+    _norm_name(syn): canon for canon, syns in TEMPLATE_REQUIRED_ATTRS_RAW.items() for syn in syns
 }
 
 CANON_LABELS = {
-    "brand":   "Бренд",
-    "model":   "Название модели (для объединения в одну карточку)",
-    "type":    "Тип",
+    "brand": "Бренд",
+    "model": "Название модели (для объединения в одну карточку)",
+    "type": "Тип",
     "marking": "Нужен код маркировки",
 }
 
 # Порядок для чек-листа на фронте (канонические 13 полей шаблона Ozon)
 OZON_TEMPLATE_REQUIRED_ORDER = [
-    "Артикул", "Предельная цена без акций, руб.", "НДС, %", "ТН ВЭД коды ЕАЭС",
-    "Вес в упаковке, г", "Ширина упаковки, мм", "Высота упаковки, мм", "Длина упаковки, мм",
-    "Ссылка на главное фото", "Бренд",
+    "Артикул",
+    "Предельная цена без акций, руб.",
+    "НДС, %",
+    "ТН ВЭД коды ЕАЭС",
+    "Вес в упаковке, г",
+    "Ширина упаковки, мм",
+    "Высота упаковки, мм",
+    "Длина упаковки, мм",
+    "Ссылка на главное фото",
+    "Бренд",
     "Название модели (для объединения в одну карточку)",
-    "Тип", "Нужен код маркировки",
+    "Тип",
+    "Нужен код маркировки",
 ]
 
 
-def _is_canon_attr(name: str) -> Optional[str]:
+def _is_canon_attr(name: str) -> str | None:
     """Вернуть канон атрибута, если он входит в обязательные 13 полей шаблона."""
     return _SYNONYM_INDEX.get(_norm_name(name))
 
 
 # ==================== Базовые поля Ozon ====================
 
+
 def _validate_ozon_base(product: dict, issues: list):
     """Проверка базовых колонок шаблона Ozon (эталон 23.09.2026)."""
 
     # Артикул: генератор подставит fallback, но явный SKU предпочтителен
     if not (product.get("sku") or product.get("external_id")):
-        issues.append({
-            "field": "article",
-            "message": "Артикул* не указан — будет подставлен внутренний ID",
-            "severity": "warning",
-        })
+        issues.append(
+            {
+                "field": "article",
+                "message": "Артикул* не указан — будет подставлен внутренний ID",
+                "severity": "warning",
+            }
+        )
 
     # Предельная цена без акций, руб.*
     price = product.get("price")
     try:
         price_val = float(price) if price is not None else 0.0
     except (TypeError, ValueError):
-        issues.append({
-            "field": "price",
-            "message": f"Некорректный формат цены: {price}",
-            "severity": "error",
-        })
+        issues.append(
+            {
+                "field": "price",
+                "message": f"Некорректный формат цены: {price}",
+                "severity": "error",
+            }
+        )
         price_val = 0.0
 
     if price_val <= 0:
-        issues.append({
-            "field": "price",
-            "message": "Предельная цена без акций, руб.* не указана или ≤ 0 (обязательное поле)",
-            "severity": "error",
-        })
+        issues.append(
+            {
+                "field": "price",
+                "message": "Предельная цена без акций, руб.* не указана или ≤ 0 (обязательное поле)",
+                "severity": "error",
+            }
+        )
 
     # Зачёркнутая цена: должна быть выше предельной
     strike = product.get("strike_price")
     if strike and price_val > 0:
         try:
             if float(strike) <= price_val:
-                issues.append({
-                    "field": "strike_price",
-                    "message": "Зачёркнутая цена должна быть выше предельной цены",
-                    "severity": "error",
-                })
+                issues.append(
+                    {
+                        "field": "strike_price",
+                        "message": "Зачёркнутая цена должна быть выше предельной цены",
+                        "severity": "error",
+                    }
+                )
         except (TypeError, ValueError):
-            issues.append({
-                "field": "strike_price",
-                "message": f"Некорректный формат зачёркнутой цены: {strike}",
-                "severity": "warning",
-            })
+            issues.append(
+                {
+                    "field": "strike_price",
+                    "message": f"Некорректный формат зачёркнутой цены: {strike}",
+                    "severity": "warning",
+                }
+            )
 
     # НДС, %*
     vat = product.get("vat_rate")
     if not vat:
-        issues.append({
-            "field": "vat_rate",
-            "message": "НДС, %* не указан — поле обязательное в шаблоне Ozon",
-            "severity": "error",
-        })
+        issues.append(
+            {
+                "field": "vat_rate",
+                "message": "НДС, %* не указан — поле обязательное в шаблоне Ozon",
+                "severity": "error",
+            }
+        )
     elif str(vat) not in ("none", "22", "10", "7", "5", "0"):
-        issues.append({
-            "field": "vat_rate",
-            "message": f"Некорректное значение НДС: {vat} (допустимо: none, 22, 10, 7, 5)",
-            "severity": "error",
-        })
+        issues.append(
+            {
+                "field": "vat_rate",
+                "message": f"Некорректное значение НДС: {vat} (допустимо: none, 22, 10, 7, 5)",
+                "severity": "error",
+            }
+        )
 
     # ТН ВЭД коды ЕАЭС* — обязательны во всех категориях (эталон 23.09.2026)
     okpd = product.get("okpd_code")
     if not okpd:
-        issues.append({
-            "field": "okpd_code",
-            "message": "ТН ВЭД коды ЕАЭС* не указан — поле обязательное в шаблоне Ozon",
-            "severity": "error",
-        })
+        issues.append(
+            {
+                "field": "okpd_code",
+                "message": "ТН ВЭД коды ЕАЭС* не указан — поле обязательное в шаблоне Ozon",
+                "severity": "error",
+            }
+        )
     elif not OKPD_RE.match(str(okpd).replace(".", "").replace("-", "").strip()):
-        issues.append({
-            "field": "okpd_code",
-            "message": f"ТН ВЭД код «{okpd}» имеет нестандартный формат (ожидается 4-11 цифр)",
-            "severity": "warning",
-        })
+        issues.append(
+            {
+                "field": "okpd_code",
+                "message": f"ТН ВЭД код «{okpd}» имеет нестандартный формат (ожидается 4-11 цифр)",
+                "severity": "warning",
+            }
+        )
 
     # Габариты упаковки (4 обязательных поля)
     dims = {
         "package_weight_grams": "Вес в упаковке, г",
-        "package_width_mm":    "Ширина упаковки, мм",
-        "package_height_mm":   "Высота упаковки, мм",
-        "package_length_mm":   "Длина упаковки, мм",
+        "package_width_mm": "Ширина упаковки, мм",
+        "package_height_mm": "Высота упаковки, мм",
+        "package_length_mm": "Длина упаковки, мм",
     }
     missing_dims = [label for key, label in dims.items() if not product.get(key)]
     if missing_dims:
-        issues.append({
-            "field": "dimensions",
-            "message": f"Не заполнены обязательные габариты*: {', '.join(missing_dims)}",
-            "severity": "error",
-        })
+        issues.append(
+            {
+                "field": "dimensions",
+                "message": f"Не заполнены обязательные габариты*: {', '.join(missing_dims)}",
+                "severity": "error",
+            }
+        )
 
     # Ссылка на главное фото*
     photos = product.get("photos") or []
     if not photos:
-        issues.append({
-            "field": "main_photo",
-            "message": "Нет ссылки на главное фото* — поле обязательное в шаблоне Ozon",
-            "severity": "error",
-        })
+        issues.append(
+            {
+                "field": "main_photo",
+                "message": "Нет ссылки на главное фото* — поле обязательное в шаблоне Ozon",
+                "severity": "error",
+            }
+        )
     else:
         main_url = str(photos[0]).lower().strip()
         if not _is_valid_photo_url(main_url):
-            issues.append({
-                "field": "main_photo",
-                "message": "Ссылка на главное фото должна вести напрямую на JPG/JPEG/PNG "
-                           "или быть ссылкой на Яндекс.Диск",
-                "severity": "warning",
-            })
+            issues.append(
+                {
+                    "field": "main_photo",
+                    "message": "Ссылка на главное фото должна вести напрямую на JPG/JPEG/PNG "
+                    "или быть ссылкой на Яндекс.Диск",
+                    "severity": "warning",
+                }
+            )
 
     # Штрихкод: в шаблоне НЕ помечен обязательным (Ozon генерирует сам)
     if not product.get("barcode"):
-        issues.append({
-            "field": "barcode",
-            "message": "Штрихкод не указан — Ozon сгенерирует его автоматически, "
-                       "но для FBO-приёмки и компенсаций при утере лучше свой",
-            "severity": "warning",
-        })
+        issues.append(
+            {
+                "field": "barcode",
+                "message": "Штрихкод не указан — Ozon сгенерирует его автоматически, "
+                "но для FBO-приёмки и компенсаций при утере лучше свой",
+                "severity": "warning",
+            }
+        )
 
 
 def _is_valid_photo_url(url: str) -> bool:
@@ -258,6 +294,7 @@ def _is_valid_photo_url(url: str) -> bool:
 
 
 # ==================== Атрибуты категории (спек) ====================
+
 
 def _validate_attributes(product: dict, spec: dict, issues: list):
     """
@@ -288,7 +325,7 @@ def _validate_attributes(product: dict, spec: dict, issues: list):
         allowed = attr_spec.get("values") or []
         allowed_lower = {str(v).strip().lower() for v in allowed}
 
-        canon = _is_canon_attr(name)            # None или 'brand'/'model'/'type'/'marking'
+        canon = _is_canon_attr(name)  # None или 'brand'/'model'/'type'/'marking'
         is_spec_required = bool(attr_spec.get("required"))
 
         # ---------- Пустое значение ----------
@@ -297,32 +334,38 @@ def _validate_attributes(product: dict, spec: dict, issues: list):
             # внизу функции через filled_canons. Пустой СИНОНИМ (например «Модель» при
             # заполненном «Объединить на одной карточке») ошибкой НЕ считается.
             if not canon and is_spec_required:
-                issues.append({
-                    "field": f"attr:{name}",
-                    "message": f"Атрибут «{name}» помечен required в API-спеке, "
-                               f"но в XLS-шаблоне Ozon не обязателен — рекомендуем заполнить",
-                    "severity": "warning",
-                })
+                issues.append(
+                    {
+                        "field": f"attr:{name}",
+                        "message": f"Атрибут «{name}» помечен required в API-спеке, "
+                        f"но в XLS-шаблоне Ozon не обязателен — рекомендуем заполнить",
+                        "severity": "warning",
+                    }
+                )
             continue
 
         # ---------- Множественный выбор: разделитель и лимит ----------
         if is_multi:
             if "; " in value or ", " in value or "," in value:
-                issues.append({
-                    "field": f"attr:{name}",
-                    "message": f"«{name}»: значения будут приведены к формату «a;b» "
-                               "(точка с запятой без пробелов) при генерации",
-                    "severity": "warning",
-                })
+                issues.append(
+                    {
+                        "field": f"attr:{name}",
+                        "message": f"«{name}»: значения будут приведены к формату «a;b» "
+                        "(точка с запятой без пробелов) при генерации",
+                        "severity": "warning",
+                    }
+                )
             parts = [p.strip() for p in re.split(r"[;,]", value) if p.strip()]
             max_count = attr_spec.get("max_count")
             if max_count and len(parts) > max_count:
-                issues.append({
-                    "field": f"attr:{name}",
-                    "message": f"«{name}»: превышен лимит значений "
-                               f"({len(parts)} > {max_count}) — шаблон: «Не более {max_count} вариантов»",
-                    "severity": "error" if canon else "warning",
-                })
+                issues.append(
+                    {
+                        "field": f"attr:{name}",
+                        "message": f"«{name}»: превышен лимит значений "
+                        f"({len(parts)} > {max_count}) — шаблон: «Не более {max_count} вариантов»",
+                        "severity": "error" if canon else "warning",
+                    }
+                )
         else:
             parts = [value.strip()]
 
@@ -333,98 +376,121 @@ def _validate_attributes(product: dict, spec: dict, issues: list):
                 if p in allowed:
                     continue
                 if p.lower() in allowed_lower:
-                    issues.append({
-                        "field": f"attr:{name}",
-                        "message": f"«{name}»: значение «{p}» отличается регистром от словаря — "
-                                   f"при генерации будет исправлено автоматически",
-                        "severity": "warning",
-                    })
+                    issues.append(
+                        {
+                            "field": f"attr:{name}",
+                            "message": f"«{name}»: значение «{p}» отличается регистром от словаря — "
+                            f"при генерации будет исправлено автоматически",
+                            "severity": "warning",
+                        }
+                    )
                     continue
 
                 # ✅ КОЛОНКА «Название модели (для объединения в одну карточку)*» в XLS-шаблоне
                 # принимает СВОБОДНЫЙ текст (селлеры подставляют название товара/артикул).
                 # Словарь API-атрибута «Модель» к этой колонке НЕ применяется → только warning.
                 if canon == "model":
-                    issues.append({
-                        "field": f"attr:{name}",
-                        "message": f"«{name}»: значение «{p}» не из словаря API, но колонка "
-                                   f"XLS-шаблона принимает свободный текст — будет записано как есть",
-                        "severity": "warning",
-                    })
+                    issues.append(
+                        {
+                            "field": f"attr:{name}",
+                            "message": f"«{name}»: значение «{p}» не из словаря API, но колонка "
+                            f"XLS-шаблона принимает свободный текст — будет записано как есть",
+                            "severity": "warning",
+                        }
+                    )
                 elif attr_spec.get("type") in ("select", "multiselect"):
                     # Словарные колонки шаблона (Бренд, Тип, Маркировка…) — значение обязано быть в словаре
-                    issues.append({
-                        "field": f"attr:{name}",
-                        "message": f"«{name}»: значение «{p}» отсутствует в словаре площадки",
-                        "severity": "error" if canon else "warning",
-                    })
+                    issues.append(
+                        {
+                            "field": f"attr:{name}",
+                            "message": f"«{name}»: значение «{p}» отсутствует в словаре площадки",
+                            "severity": "error" if canon else "warning",
+                        }
+                    )
                 else:
                     # Текстовые/числовые атрибуты со словарём-подсказкой — не блокируем
-                    issues.append({
-                        "field": f"attr:{name}",
-                        "message": f"«{name}»: значение «{p}» не из словаря-подсказки",
-                        "severity": "warning",
-                    })
+                    issues.append(
+                        {
+                            "field": f"attr:{name}",
+                            "message": f"«{name}»: значение «{p}» не из словаря-подсказки",
+                            "severity": "warning",
+                        }
+                    )
 
         # ---------- Числа ----------
         if attr_spec.get("type") == "number" and not attr_spec.get("allow_unit_in_value"):
             for p in parts:
                 if re.search(r"[A-Za-zА-Яа-яЁё]", p):
-                    issues.append({
-                        "field": f"attr:{name}",
-                        "message": f"«{name}»: число должно быть без единиц измерения (найдено: {p})",
-                        "severity": "error" if canon else "warning",
-                    })
+                    issues.append(
+                        {
+                            "field": f"attr:{name}",
+                            "message": f"«{name}»: число должно быть без единиц измерения (найдено: {p})",
+                            "severity": "error" if canon else "warning",
+                        }
+                    )
                 elif "," in p:
-                    issues.append({
-                        "field": f"attr:{name}",
-                        "message": f"«{name}»: десятичный разделитель — точка (найдена запятая: {p})",
-                        "severity": "warning",
-                    })
+                    issues.append(
+                        {
+                            "field": f"attr:{name}",
+                            "message": f"«{name}»: десятичный разделитель — точка (найдена запятая: {p})",
+                            "severity": "warning",
+                        }
+                    )
 
         # ---------- JSON-атрибуты ----------
         if name.upper().endswith("JSON"):
             try:
                 json.loads(value)
             except (ValueError, TypeError):
-                issues.append({
-                    "field": f"attr:{name}",
-                    "message": f"«{name}»: невалидный JSON — Ozon отклонит карточку",
-                    "severity": "error",
-                })
+                issues.append(
+                    {
+                        "field": f"attr:{name}",
+                        "message": f"«{name}»: невалидный JSON — Ozon отклонит карточку",
+                        "severity": "error",
+                    }
+                )
 
         # ---------- Хештеги ----------
         if name.lower() == "#хештеги":
             tags = value.split()
             bad = [t for t in tags if not HASHTAG_RE.match(t)]
             if bad:
-                issues.append({
-                    "field": f"attr:{name}",
-                    "message": f"Хештеги с нарушением формата: {', '.join(bad[:3])} "
-                               "(нужно: #буквы_цифры, ≤30 символов)",
-                    "severity": "warning",
-                })
+                issues.append(
+                    {
+                        "field": f"attr:{name}",
+                        "message": f"Хештеги с нарушением формата: {', '.join(bad[:3])} "
+                        "(нужно: #буквы_цифры, ≤30 символов)",
+                        "severity": "warning",
+                    }
+                )
             if len(tags) > 30:
-                issues.append({
-                    "field": f"attr:{name}",
-                    "message": f"Слишком много хештегов: {len(tags)} (максимум 30)",
-                    "severity": "warning",
-                })
+                issues.append(
+                    {
+                        "field": f"attr:{name}",
+                        "message": f"Слишком много хештегов: {len(tags)} (максимум 30)",
+                        "severity": "warning",
+                    }
+                )
 
     # ✅ Финальная проверка: все 4 канона из шаблона должны быть заполнены.
     # Это ОДИНСТВЕННОЕ место, где канон даёт error — защита от двойных ошибок.
     for canon, label in CANON_LABELS.items():
         if canon not in filled_canons:
-            issues.append({
-                "field": f"attr:{canon}",
-                "message": f"Обязательный атрибут «{label}»* не заполнен (требуется XLS-шаблоном Ozon)",
-                "severity": "error",
-            })
+            issues.append(
+                {
+                    "field": f"attr:{canon}",
+                    "message": f"Обязательный атрибут «{label}»* не заполнен (требуется XLS-шаблоном Ozon)",
+                    "severity": "error",
+                }
+            )
 
 
 # ==================== Точка входа: один товар ====================
 
-def validate_product_by_spec(product: dict, spec: Optional[dict], platform: str = "ozon") -> list[dict]:
+
+def validate_product_by_spec(
+    product: dict, spec: dict | None, platform: str = "ozon"
+) -> list[dict]:
     """
     Валидирует товар по спеку категории.
     Возвращает список проблем: [{"field": str, "message": str, "severity": "error"|"warning"}]
@@ -438,19 +504,23 @@ def validate_product_by_spec(product: dict, spec: Optional[dict], platform: str 
     # Подакцизные товары
     category = (product.get("mapped_category") or product.get("category") or "").lower()
     if any(exc_cat in category for exc_cat in EXCISABLE_CATEGORIES):
-        issues.append({
-            "field": "excisable",
-            "message": "Подакцизный товар — проверьте требования площадки по маркировке",
-            "severity": "warning",
-        })
+        issues.append(
+            {
+                "field": "excisable",
+                "message": "Подакцизный товар — проверьте требования площадки по маркировке",
+                "severity": "warning",
+            }
+        )
 
     # Атрибуты категории из спека
     if not spec:
-        issues.append({
-            "field": "spec",
-            "message": "Спека категории нет — загрузите через «Спецификации»",
-            "severity": "warning",
-        })
+        issues.append(
+            {
+                "field": "spec",
+                "message": "Спека категории нет — загрузите через «Спецификации»",
+                "severity": "warning",
+            }
+        )
         return issues
 
     _validate_attributes(product, spec, issues)
@@ -459,7 +529,10 @@ def validate_product_by_spec(product: dict, spec: Optional[dict], platform: str 
 
 # ==================== Точка входа: список товаров ====================
 
-def validate_products_by_specs(products: list, specs_by_category: dict, platform: str = "ozon") -> dict:
+
+def validate_products_by_specs(
+    products: list, specs_by_category: dict, platform: str = "ozon"
+) -> dict:
     """
     Валидирует список товаров по спекам.
     Возвращает:
@@ -493,41 +566,40 @@ def validate_products_by_specs(products: list, specs_by_category: dict, platform
         # Предупредить о дубле артикула
         art = product.get("sku") or product.get("external_id") or f"ID{product.get('id')}"
         if art in duplicate_articles:
-            issues.append({
-                "field": "article",
-                "message": f"Артикул «{art}» дублируется — при генерации дубли получат "
-                           f"суффиксы _2, _3 (правило Ozon: уникальный артикул на строку)",
-                "severity": "warning",
-            })
+            issues.append(
+                {
+                    "field": "article",
+                    "message": f"Артикул «{art}» дублируется — при генерации дубли получат "
+                    f"суффиксы _2, _3 (правило Ozon: уникальный артикул на строку)",
+                    "severity": "warning",
+                }
+            )
 
         if issues:
-            all_issues.append({
-                "product_id": product.get("id"),
-                "product_name": product.get("name"),
-                "category": category,
-                "issues": issues,
-            })
+            all_issues.append(
+                {
+                    "product_id": product.get("id"),
+                    "product_name": product.get("name"),
+                    "category": category,
+                    "issues": issues,
+                }
+            )
 
-    errors = sum(
-        sum(1 for i in item["issues"] if i["severity"] == "error")
-        for item in all_issues
-    )
+    errors = sum(sum(1 for i in item["issues"] if i["severity"] == "error") for item in all_issues)
     warnings = sum(
-        sum(1 for i in item["issues"] if i["severity"] == "warning")
-        for item in all_issues
+        sum(1 for i in item["issues"] if i["severity"] == "warning") for item in all_issues
     )
     products_with_errors = sum(
-        1 for item in all_issues
-        if any(i["severity"] == "error" for i in item["issues"])
+        1 for item in all_issues if any(i["severity"] == "error" for i in item["issues"])
     )
     products_with_warnings = sum(
-        1 for item in all_issues
-        if any(i["severity"] == "warning" for i in item["issues"])
+        1 for item in all_issues if any(i["severity"] == "warning" for i in item["issues"])
     )
 
     # ready_with_warnings: без error, но есть хотя бы 1 warning
     products_only_warnings = sum(
-        1 for item in all_issues
+        1
+        for item in all_issues
         if not any(i["severity"] == "error" for i in item["issues"])
         and any(i["severity"] == "warning" for i in item["issues"])
     )

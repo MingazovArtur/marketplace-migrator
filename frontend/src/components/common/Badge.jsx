@@ -5,21 +5,17 @@ const Badge = ({ status, label }) => {
     pending: 'badge-pending',
     success: 'badge-success',
     error: 'badge-error',
-    processing: 'badge-processing'
+    processing: 'badge-processing',
   };
 
   const labels = {
     pending: 'Ожидает',
     success: 'Успешно',
     error: 'Ошибка',
-    processing: 'В процессе'
+    processing: 'В процессе',
   };
 
-  return (
-    <span className={`badge ${styles[status]}`}>
-      {label || labels[status]}
-    </span>
-  );
+  return <span className={`badge ${styles[status]}`}>{label || labels[status]}</span>;
 };
 
 export default Badge;

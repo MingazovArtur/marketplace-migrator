@@ -9,13 +9,13 @@
 - normalizations: список фактов нормализации (для UI-уведомлений)
 - warnings: значения, которых нет в словаре площадки
 """
+
 import re
-from typing import Optional
 
 
 def normalize_attributes(
     attributes: list,
-    spec: Optional[dict],
+    spec: dict | None,
 ) -> dict:
     """
     Нормализует список атрибутов товара по спеку категории.
@@ -38,10 +38,7 @@ def normalize_attributes(
             "warnings": [],
         }
 
-    spec_attrs = {
-        (a.get("name") or "").strip().lower(): a
-        for a in (spec.get("attributes") or [])
-    }
+    spec_attrs = {(a.get("name") or "").strip().lower(): a for a in (spec.get("attributes") or [])}
 
     normalized = []
     normalizations = []
@@ -72,18 +69,22 @@ def normalize_attributes(
                             continue
                         matched = _match_case(part.strip(), allowed_values)
                         if matched and matched != part:
-                            normalizations.append({
-                                "field": attr_name,
-                                "original": part,
-                                "normalized": matched,
-                            })
+                            normalizations.append(
+                                {
+                                    "field": attr_name,
+                                    "original": part,
+                                    "normalized": matched,
+                                }
+                            )
                             normalized_flag = True
                         if matched is None:
-                            warnings.append({
-                                "field": attr_name,
-                                "value": part,
-                                "message": f"Значение «{part}» отсутствует в словаре площадки",
-                            })
+                            warnings.append(
+                                {
+                                    "field": attr_name,
+                                    "value": part,
+                                    "message": f"Значение «{part}» отсутствует в словаре площадки",
+                                }
+                            )
                         new_parts.append(matched or part)
                     new_value = separator.join(new_parts)
 
@@ -91,19 +92,23 @@ def normalize_attributes(
                     # Одиночный выбор
                     matched = _match_case(attr_value, allowed_values)
                     if matched and matched != attr_value:
-                        normalizations.append({
-                            "field": attr_name,
-                            "original": attr_value,
-                            "normalized": matched,
-                        })
+                        normalizations.append(
+                            {
+                                "field": attr_name,
+                                "original": attr_value,
+                                "normalized": matched,
+                            }
+                        )
                         new_value = matched
                         normalized_flag = True
                     elif matched is None:
-                        warnings.append({
-                            "field": attr_name,
-                            "value": attr_value,
-                            "message": f"Значение «{attr_value}» отсутствует в словаре площадки",
-                        })
+                        warnings.append(
+                            {
+                                "field": attr_name,
+                                "value": attr_value,
+                                "message": f"Значение «{attr_value}» отсутствует в словаре площадки",
+                            }
+                        )
 
         new_attr = {**attr, "value": new_value}
         normalized.append(new_attr)
@@ -115,7 +120,7 @@ def normalize_attributes(
     }
 
 
-def _match_case(value: str, allowed_values: list) -> Optional[str]:
+def _match_case(value: str, allowed_values: list) -> str | None:
     """Подбирает значение из словаря с точным совпадением (case-insensitive)."""
     low = value.strip().lower()
     for v in allowed_values:

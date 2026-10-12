@@ -34,15 +34,12 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
     setLoading(true);
     setError('');
 
-    console.log('🔐 Вход:', { username, password: '***' });
-
     try {
       const data = await api.login({ username: username.trim(), password });
-      console.log('✅ Вход выполнен:', data);
+
       onLogin(data.access_token);
       onClose();
     } catch (err) {
-      console.error('❌ Ошибка входа:', err);
       setError(err.message || 'Неверный логин или пароль');
     } finally {
       setLoading(false);
@@ -77,7 +74,7 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
     }
 
     try {
-      const result = await api.register({
+      await api.register({
         email: regEmail.trim(),
         username: regUsername.trim(),
         password: regPassword,
@@ -111,15 +108,25 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
         </div>
 
         <div className="import-method-toggle" style={{ marginBottom: '1rem' }}>
-          <button className={`toggle-btn ${tab === 'login' ? 'active' : ''}`} onClick={() => setTab('login')}>
+          <button
+            className={`toggle-btn ${tab === 'login' ? 'active' : ''}`}
+            onClick={() => setTab('login')}
+          >
             Вход
           </button>
-          <button className={`toggle-btn ${tab === 'register' ? 'active' : ''}`} onClick={() => setTab('register')}>
+          <button
+            className={`toggle-btn ${tab === 'register' ? 'active' : ''}`}
+            onClick={() => setTab('register')}
+          >
             Регистрация
           </button>
         </div>
 
-        {error && <div className="alert alert-error" style={{ marginBottom: '1rem' }}><div>{error}</div></div>}
+        {error && (
+          <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+            <div>{error}</div>
+          </div>
+        )}
 
         {tab === 'login' ? (
           <form onSubmit={submitLogin}>
@@ -146,13 +153,19 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
               <a
                 href="#/forgot-password"
                 onClick={onClose}
-                style={{ color: 'var(--accent-primary)', fontSize: '0.85rem', textDecoration: 'none' }}
+                style={{
+                  color: 'var(--accent-primary)',
+                  fontSize: '0.85rem',
+                  textDecoration: 'none',
+                }}
               >
                 Забыли пароль?
               </a>
             </div>
             <div className="modal-actions">
-              <Button type="submit" disabled={loading} loading={loading}>Войти</Button>
+              <Button type="submit" disabled={loading} loading={loading}>
+                Войти
+              </Button>
             </div>
           </form>
         ) : (
@@ -188,27 +201,48 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
             />
 
             {/* Checkbox согласия */}
-            <label className="bulk-check" style={{ margin: '0.75rem 0', fontWeight: 400, display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+            <label
+              className="bulk-check"
+              style={{
+                margin: '0.75rem 0',
+                fontWeight: 400,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '0.5rem',
+              }}
+            >
               <input
                 type="checkbox"
                 checked={agree}
                 onChange={(e) => setAgree(e.target.checked)}
                 style={{ marginTop: '3px' }}
               />
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+              <span
+                style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}
+              >
                 Я принимаю{' '}
-                <a href="#/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-primary)' }}>условия оферты</a>
-                {' '}и{' '}
-                <a href="#/privacy" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-primary)' }}>политику конфиденциальности</a>
+                <a
+                  href="#/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--accent-primary)' }}
+                >
+                  условия оферты
+                </a>{' '}
+                и{' '}
+                <a
+                  href="#/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--accent-primary)' }}
+                >
+                  политику конфиденциальности
+                </a>
               </span>
             </label>
 
             <div className="modal-actions">
-              <Button
-                type="submit"
-                disabled={loading || !agree}
-                loading={loading}
-              >
+              <Button type="submit" disabled={loading || !agree} loading={loading}>
                 Создать аккаунт
               </Button>
             </div>

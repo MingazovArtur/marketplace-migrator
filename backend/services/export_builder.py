@@ -2,10 +2,13 @@
 Построитель файлов выгрузки в формате личных кабинетов площадок.
 Форматы настраиваются ОДНИМ словарём EXPORT_FORMATS.
 """
+
 import io
-import re
 import logging
+import re
+
 import pandas as pd
+
 from services.export_validator import VALIDATION_RULES
 
 logger = logging.getLogger(__name__)

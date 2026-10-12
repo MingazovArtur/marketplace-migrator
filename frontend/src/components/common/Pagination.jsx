@@ -21,7 +21,7 @@ const Pagination = ({ total, skip, limit, onPageChange, onLimitChange }) => {
         ← Назад
       </button>
 
-      {pages.map(page => (
+      {pages.map((page) => (
         <button
           key={page}
           onClick={() => onPageChange(page)}
@@ -42,7 +42,7 @@ const Pagination = ({ total, skip, limit, onPageChange, onLimitChange }) => {
       <span className="pagination-info">
         Страница {currentPage} из {totalPages} (всего {total} товаров)
       </span>
-            {onLimitChange && (
+      {onLimitChange && (
         <label className="pagination-limit">
           Показывать:
           <select
@@ -51,7 +51,9 @@ const Pagination = ({ total, skip, limit, onPageChange, onLimitChange }) => {
             onChange={(e) => onLimitChange(Number(e.target.value))}
           >
             {[10, 30, 50, 100].map((n) => (
-              <option key={n} value={n}>{n}</option>
+              <option key={n} value={n}>
+                {n}
+              </option>
             ))}
           </select>
         </label>

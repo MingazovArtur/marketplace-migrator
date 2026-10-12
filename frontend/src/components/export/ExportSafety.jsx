@@ -32,14 +32,24 @@ export const ExportRequirementsChecklist = ({ platform = 'ozon' }) => {
       {open && (
         <>
           <ul className="export-safety-list">
-            {rules.map((r, i) => <li key={i}>{r}</li>)}
+            {rules.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
           </ul>
           <p className="export-safety-links">
-            <a href="https://seller-edu.ozon.ru/libra/work-with-goods/zagruzka-tovarov/creating-goods/cherez-xls-shablon" target="_blank" rel="noopener noreferrer">
+            <a
+              href="https://seller-edu.ozon.ru/libra/work-with-goods/zagruzka-tovarov/creating-goods/cherez-xls-shablon"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               Документация Ozon
             </a>
             {' · '}
-            <a href="https://seller.ozon.ru/app/products/create" target="_blank" rel="noopener noreferrer">
+            <a
+              href="https://seller.ozon.ru/app/products/create"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               Скачать шаблон в ЛК
             </a>
           </p>
@@ -56,10 +66,17 @@ export const ExportValidationSummary = ({ platform }) => {
 
   useEffect(() => {
     let cancelled = false;
-    api.validateExport(platform)
-      .then((d) => { if (!cancelled) setData(d); })
-      .catch(() => { if (!cancelled) setData(null); });
-    return () => { cancelled = true; };
+    api
+      .validateExport(platform)
+      .then((d) => {
+        if (!cancelled) setData(d);
+      })
+      .catch(() => {
+        if (!cancelled) setData(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [platform]);
 
   if (!data) return null;
@@ -82,7 +99,15 @@ export const ExportValidationSummary = ({ platform }) => {
 
   return (
     <div className="export-safety-warn" style={{ borderColor, background: bgColor }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, color: textColor }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          fontWeight: 600,
+          color: textColor,
+        }}
+      >
         <Icon name="warning" size={16} />
         {hasErrors
           ? `${data.errors} ошибок, ${data.warnings} предупреждений`
@@ -130,7 +155,15 @@ export const ExportValidationSummary = ({ platform }) => {
               </div>
               <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
                 {item.issues.map((issue, idx) => (
-                  <li key={idx} style={{ color: issue.severity === 'error' ? 'var(--accent-danger)' : 'var(--accent-warning)' }}>
+                  <li
+                    key={idx}
+                    style={{
+                      color:
+                        issue.severity === 'error'
+                          ? 'var(--accent-danger)'
+                          : 'var(--accent-warning)',
+                    }}
+                  >
                     {issue.severity === 'error' ? '❌' : '⚠️'} {issue.message}
                   </li>
                 ))}
@@ -143,7 +176,8 @@ export const ExportValidationSummary = ({ platform }) => {
             </p>
           )}
           <p style={{ margin: '0.5rem 0 0', fontSize: '0.8rem' }}>
-            💡 Исправьте проблемы через кнопку «Логистика» (📦) в таблице товаров или в модалках редактирования атрибутов.
+            💡 Исправьте проблемы через кнопку «Логистика» (📦) в таблице товаров или в модалках
+            редактирования атрибутов.
           </p>
         </div>
       )}

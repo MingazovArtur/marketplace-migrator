@@ -1,5 +1,5 @@
-const API_URL = import.meta.env.VITE_API_URL ||
-  (import.meta.env.PROD ? '/api' : 'http://localhost:8000/api');
+const API_URL =
+  import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'http://localhost:8000/api');
 
 /* ---------- Вспомогательные функции ---------- */
 
@@ -46,7 +46,11 @@ const parseContentDisposition = (header, fallback = 'export.xlsx') => {
   if (!header) return fallback;
   const utf8Match = header.match(/filename\*\s*=\s*UTF-8''([^;\s]+)/i);
   if (utf8Match) {
-    try { return decodeURIComponent(utf8Match[1]); } catch { /* fallthrough */ }
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      /* fallthrough */
+    }
   }
   const quotedMatch = header.match(/filename\s*=\s*"([^"]+)"/i);
   if (quotedMatch) return quotedMatch[1];
@@ -216,7 +220,9 @@ export const api = {
   },
 
   getVariants: async (productId) => {
-    const res = await fetch(`${API_URL}/products/${enc(productId)}/variants`, { headers: getHeaders() });
+    const res = await fetch(`${API_URL}/products/${enc(productId)}/variants`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка загрузки вариаций'));
     return res.json();
   },
@@ -287,7 +293,9 @@ export const api = {
       source_platform: sourcePlatform || '',
       target_platform: targetPlatform || '',
     });
-    const res = await fetch(`${API_URL}/category-mapping?${q.toString()}`, { headers: getHeaders() });
+    const res = await fetch(`${API_URL}/category-mapping?${q.toString()}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить маппинг категорий'));
     return res.json();
   },
@@ -358,7 +366,9 @@ export const api = {
   startBatchMigration: (ids, platform) => api.migrateBatch(ids, platform),
 
   getTaskProgress: async (taskId) => {
-    const res = await fetch(`${API_URL}/migrate/batch/${enc(taskId)}/progress`, { headers: getAuthHeaders() });
+    const res = await fetch(`${API_URL}/migrate/batch/${enc(taskId)}/progress`, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось получить прогресс'));
     return res.json();
   },
@@ -368,10 +378,9 @@ export const api = {
   /* ==================== Export ==================== */
 
   exportForPlatform: async (platform, status = 'success') => {
-    const res = await fetch(
-      `${API_URL}/export/platform/${enc(platform)}?status=${enc(status)}`,
-      { headers: getHeaders() }
-    );
+    const res = await fetch(`${API_URL}/export/platform/${enc(platform)}?status=${enc(status)}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось сформировать файл'));
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
@@ -385,16 +394,17 @@ export const api = {
   },
 
   exportPreview: async (platform, status = 'success') => {
-    const res = await fetch(
-      `${API_URL}/export/preview/${enc(platform)}?status=${enc(status)}`,
-      { headers: getHeaders() }
-    );
+    const res = await fetch(`${API_URL}/export/preview/${enc(platform)}?status=${enc(status)}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка предпросмотра выгрузки'));
     return res.json();
   },
 
   exportTemplate: async (platform) => {
-    const res = await fetch(`${API_URL}/export/template/${enc(platform)}`, { headers: getHeaders() });
+    const res = await fetch(`${API_URL}/export/template/${enc(platform)}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка скачивания шаблона'));
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -425,7 +435,9 @@ export const api = {
     const q = new URLSearchParams();
     if (status) q.append('status', status);
     if (productId) q.append('product_id', productId);
-    const res = await fetch(`${API_URL}/export/validate/${enc(platform)}?${q.toString()}`, { headers: getHeaders() });
+    const res = await fetch(`${API_URL}/export/validate/${enc(platform)}?${q.toString()}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка проверки готовности к экспорту'));
     return res.json();
   },
@@ -447,15 +459,21 @@ export const api = {
       const data = await res.json().catch(() => ({}));
       if (res.status === 409 && data.detail && typeof data.detail === 'object') {
         const sum = Object.entries(data.detail.summary || {})
-          .map(([k, v]) => `${k}: ${v.count} шт.`).join(', ');
-        throw new Error(`${data.detail.message}\nПроблемы: ${sum}${data.detail.fix_hint ? `\n\n${data.detail.fix_hint}` : ''}`);
+          .map(([k, v]) => `${k}: ${v.count} шт.`)
+          .join(', ');
+        throw new Error(
+          `${data.detail.message}\nПроблемы: ${sum}${data.detail.fix_hint ? `\n\n${data.detail.fix_hint}` : ''}`
+        );
       }
-      const detail = typeof data.detail === 'string'
-        ? data.detail
-        : (data.detail?.message || JSON.stringify(data.detail || {}));
-      throw new Error(productId
-        ? `Товар #${productId} не прошёл валидацию:\n\n${detail}`
-        : `${detail}\n\nОткройте «Выгрузка» — блок валидации покажет, каких полей не хватает.`);
+      const detail =
+        typeof data.detail === 'string'
+          ? data.detail
+          : data.detail?.message || JSON.stringify(data.detail || {});
+      throw new Error(
+        productId
+          ? `Товар #${productId} не прошёл валидацию:\n\n${detail}`
+          : `${detail}\n\nОткройте «Выгрузка» — блок валидации покажет, каких полей не хватает.`
+      );
     }
 
     const blob = await res.blob();
@@ -493,7 +511,9 @@ export const api = {
 
   saveDefaults: async (payload) => {
     const res = await fetch(`${API_URL}/defaults`, {
-      method: 'PUT', headers: getHeaders(), body: JSON.stringify(payload),
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось сохранить дефолты'));
     return res.json();
@@ -501,14 +521,17 @@ export const api = {
 
   deleteCategoryDefaults: async (categoryName) => {
     const res = await fetch(`${API_URL}/defaults/category?category_name=${enc(categoryName)}`, {
-      method: 'DELETE', headers: getHeaders(),
+      method: 'DELETE',
+      headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось удалить дефолты категории'));
     return res.json();
   },
 
   getGaps: async (status = 'all') => {
-    const res = await fetch(`${API_URL}/defaults/gaps?status=${enc(status)}`, { headers: getHeaders() });
+    const res = await fetch(`${API_URL}/defaults/gaps?status=${enc(status)}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) return { total: 0, gaps: {} };
     return res.json();
   },
@@ -519,8 +542,8 @@ export const api = {
    * { product_ids: [...] } — только по выделенным.
    */
   applyDefaults: async (modeOrPayload = 'all') => {
-    const body = (modeOrPayload && typeof modeOrPayload === 'object') ? modeOrPayload : null;
-    const q = (!body && modeOrPayload) ? `?status=${enc(modeOrPayload)}` : '';
+    const body = modeOrPayload && typeof modeOrPayload === 'object' ? modeOrPayload : null;
+    const q = !body && modeOrPayload ? `?status=${enc(modeOrPayload)}` : '';
     const res = await fetch(`${API_URL}/products/apply-defaults${q}`, {
       method: 'POST',
       headers: body ? getHeaders() : getAuthHeaders(),
@@ -575,7 +598,10 @@ export const api = {
     );
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось скачать эталон'));
     const blob = await res.blob();
-    const filename = parseContentDisposition(res.headers.get('content-disposition'), 'ozon_template.xlsx');
+    const filename = parseContentDisposition(
+      res.headers.get('content-disposition'),
+      'ozon_template.xlsx'
+    );
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -588,10 +614,10 @@ export const api = {
   },
 
   deleteOzonTemplate: async (categoryName) => {
-    const res = await fetch(
-      `${API_URL}/export/ozon-template?category_name=${enc(categoryName)}`,
-      { method: 'DELETE', headers: getHeaders() }
-    );
+    const res = await fetch(`${API_URL}/export/ozon-template?category_name=${enc(categoryName)}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка удаления эталона'));
     return res.json();
   },
@@ -633,10 +659,9 @@ export const api = {
   },
 
   getSpec: async (platform, categoryId) => {
-    const res = await fetch(
-      `${API_URL}/specs/${enc(platform)}/${enc(categoryId)}`,
-      { headers: getHeaders() }
-    );
+    const res = await fetch(`${API_URL}/specs/${enc(platform)}/${enc(categoryId)}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка получения спека'));
     return res.json();
   },
@@ -657,7 +682,9 @@ export const api = {
 
   getSpecKeySource: async (platform) => {
     try {
-      const res = await fetch(`${API_URL}/specs/${enc(platform)}/key-source`, { headers: getHeaders() });
+      const res = await fetch(`${API_URL}/specs/${enc(platform)}/key-source`, {
+        headers: getHeaders(),
+      });
       if (!res.ok) return { has_server_key: false };
       return await res.json();
     } catch {
@@ -666,10 +693,9 @@ export const api = {
   },
 
   getSpecsRefreshProgress: async (platform, taskId) => {
-    const res = await fetch(
-      `${API_URL}/specs/${enc(platform)}/refresh/${enc(taskId)}/progress`,
-      { headers: getHeaders() }
-    );
+    const res = await fetch(`${API_URL}/specs/${enc(platform)}/refresh/${enc(taskId)}/progress`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) return { status: 'unknown' };
     return res.json();
   },

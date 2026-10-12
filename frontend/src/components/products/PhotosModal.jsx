@@ -133,11 +133,7 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
                   >
                     <Icon name="star" size={13} />
                   </button>
-                  <button
-                    type="button"
-                    title="Удалить"
-                    onClick={() => handleRemove(idx)}
-                  >
+                  <button type="button" title="Удалить" onClick={() => handleRemove(idx)}>
                     <Icon name="trash" size={13} />
                   </button>
                 </div>
@@ -172,7 +168,9 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
             <Icon name="import" size={16} /> Скачать копии
           </Button>
           <div style={{ flex: 1 }} />
-          <Button variant="outline" onClick={onClose}>Отмена</Button>
+          <Button variant="outline" onClick={onClose}>
+            Отмена
+          </Button>
           <Button onClick={handleSave} disabled={loading} loading={loading}>
             <Icon name="check" size={16} /> Сохранить ({photos.length})
           </Button>

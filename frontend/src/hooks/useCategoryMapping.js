@@ -40,21 +40,20 @@ export function useCategoryMappingCheck(sourcePlatform, targetPlatform, category
         const mappings = maps.mappings || [];
 
         // Ищем категорию в справочнике источника
-        const cat = categories.find(
-          (c) => String(c.name).trim().toLowerCase() === name
-        );
+        const cat = categories.find((c) => String(c.name).trim().toLowerCase() === name);
 
         let isMapped = false;
 
         if (cat) {
           // Вариант 1: справочник есть, проверяем по ID
-          isMapped = mappings.some(
-            (m) => String(m.source_category_id) === String(cat.id)
-          );
+          isMapped = mappings.some((m) => String(m.source_category_id) === String(cat.id));
         } else {
           // Вариант 2: справочника нет (файловый импорт / 404) — ищем по имени
           isMapped = mappings.some(
-            (m) => String(m.source_category_name || '').trim().toLowerCase() === name
+            (m) =>
+              String(m.source_category_name || '')
+                .trim()
+                .toLowerCase() === name
           );
         }
 

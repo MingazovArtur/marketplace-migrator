@@ -6,10 +6,10 @@ import { api } from '../../api';
 // ✅ Значения НДС точно как в XLS-шаблоне Ozon
 const VAT_OPTIONS = [
   { value: 'none', label: 'Не облагается' },
-  { value: '22',   label: '22' },
-  { value: '10',   label: '10' },
-  { value: '7',    label: '7' },
-  { value: '5',    label: '5' },
+  { value: '22', label: '22' },
+  { value: '10', label: '10' },
+  { value: '7', label: '7' },
+  { value: '5', label: '5' },
 ];
 
 // ✅ Дефолты формы — защищают от undefined при первом рендере
@@ -50,16 +50,19 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
       units_per_item: product.units_per_item ?? 1,
     });
     setError('');
-  }, [isOpen, product?.id]);
+  }, [isOpen, product?.id, product]);
 
   // Сброс флага ошибки при закрытии
   useEffect(() => {
     if (!isOpen) setError('');
   }, [isOpen]);
 
-  const set = useCallback((key) => (e) => {
-    setForm((f) => ({ ...f, [key]: e.target.value }));
-  }, []);
+  const set = useCallback(
+    (key) => (e) => {
+      setForm((f) => ({ ...f, [key]: e.target.value }));
+    },
+    []
+  );
 
   if (!isOpen || !product) return null;
 
@@ -94,8 +97,11 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
       // ✅ Ждём, пока родительский список обновится — тогда при следующем
       // открытии модалки `product` уже будет со свежими значениями
       if (onSaved) {
-        try { await onSaved(); }
-        catch (e) { console.warn('onSaved failed:', e); }
+        try {
+          await onSaved();
+        } catch (e) {
+          console.warn('onSaved failed:', e);
+        }
       }
 
       // Закрываем только после успешного обновления списка
@@ -129,9 +135,9 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
         </div>
 
         <p className="form-hint" style={{ marginBottom: '0.75rem' }}>
-          Поля со звёздочкой <span style={{ color: 'var(--accent-danger)' }}>*</span> обязательны
-          в XLS-шаблоне Ozon. Сохранение обновляет логистику товара. Статус «Ожидает» при этом не меняется:
-          в «Успешно» товар перейдёт после миграции (кнопка 🚀 в таблице).
+          Поля со звёздочкой <span style={{ color: 'var(--accent-danger)' }}>*</span> обязательны в
+          XLS-шаблоне Ozon. Сохранение обновляет логистику товара. Статус «Ожидает» при этом не
+          меняется: в «Успешно» товар перейдёт после миграции (кнопка 🚀 в таблице).
         </p>
 
         {/* ================= Налоги ================= */}
@@ -143,11 +149,15 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           disabled={saving}
         >
           <option value="">— не указано —</option>
-          {VAT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {VAT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
         </select>
         <p className="form-hint">
-          Значения как в XLS-шаблоне Ozon: «Не облагается» (УСН), 22, 10, 7, 5.
-          Ставки 7 и 5 — для отдельных категорий товаров (например, реализация через маркетплейсы по спецрежимам).
+          Значения как в XLS-шаблоне Ozon: «Не облагается» (УСН), 22, 10, 7, 5. Ставки 7 и 5 — для
+          отдельных категорий товаров (например, реализация через маркетплейсы по спецрежимам).
         </p>
 
         <label className="form-label">ТН ВЭД коды ЕАЭС{req}</label>
@@ -160,12 +170,19 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           disabled={saving}
         />
         <p className="form-hint">
-          Обязателен для категорий одежда, обувь, парфюмерия, лекарства и др.
-          Не знаете код — уточните у таможенного представителя.
+          Обязателен для категорий одежда, обувь, парфюмерия, лекарства и др. Не знаете код —
+          уточните у таможенного представителя.
         </p>
 
         {/* ================= Габариты упаковки (ОВХ) ================= */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.5rem' }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '0.5rem',
+            marginTop: '0.5rem',
+          }}
+        >
           <div>
             <label className="form-label">Вес в упаковке, г{req}</label>
             <input
@@ -248,8 +265,8 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           disabled={saving}
         />
         <p className="form-hint">
-          ✅ Поле НЕ обязательное в шаблоне Ozon. Свои коды (несколько — через «;») полезны для FBO-приёмки
-          и компенсий при утере, но экспорт пройдёт и без них.
+          ✅ Поле НЕ обязательное в шаблоне Ozon. Свои коды (несколько — через «;») полезны для
+          FBO-приёмки и компенсий при утере, но экспорт пройдёт и без них.
         </p>
 
         {/* ================= Индикатор главного фото ================= */}
@@ -258,9 +275,14 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           style={{ marginTop: '0.75rem' }}
         >
           <div>
-            {mainPhoto
-              ? <>✅ Ссылка на главное фото* установлена: {String(mainPhoto).slice(0, 60)}…</>
-              : <>❌ Ссылка на главное фото* не установлена — поле обязательное в шаблоне Ozon. Добавьте фото в окне «Фото».</>}
+            {mainPhoto ? (
+              <>✅ Ссылка на главное фото* установлена: {String(mainPhoto).slice(0, 60)}…</>
+            ) : (
+              <>
+                ❌ Ссылка на главное фото* не установлена — поле обязательное в шаблоне Ozon.
+                Добавьте фото в окне «Фото».
+              </>
+            )}
           </div>
         </div>
 
@@ -268,8 +290,9 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
         {missingRequired.length > 0 && (
           <div className="alert alert-error" style={{ marginTop: '0.5rem' }}>
             <div>
-              Не заполнены обязательные поля шаблона Ozon: <strong>{missingRequired.join(', ')}</strong>.
-              Сохранить можно, но товар не попадёт в выгрузку до заполнения.
+              Не заполнены обязательные поля шаблона Ozon:{' '}
+              <strong>{missingRequired.join(', ')}</strong>. Сохранить можно, но товар не попадёт в
+              выгрузку до заполнения.
             </div>
           </div>
         )}
@@ -281,7 +304,9 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
         )}
 
         <div className="modal-actions">
-          <Button variant="outline" onClick={onClose} disabled={saving}>Отмена</Button>
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Отмена
+          </Button>
           <Button onClick={handleSave} loading={saving} disabled={saving}>
             <Icon name="save" size={16} /> Сохранить
           </Button>

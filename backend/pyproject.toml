@@ -1,0 +1,22 @@
+[tool.black]
+line-length = 100
+target-version = ['py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  \.git
+  | \.venv
+  | __pycache__
+  | alembic/versions
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# E: pycodestyle errors, F: pyflakes, I: isort, UP: pyupgrade, B: flake8-bugbear
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501"] # Длину строки контролирует Black
+
+[tool.ruff.isort]
+known-first-party = ["core", "database", "routers", "services", "parsers", "models", "tasks"]

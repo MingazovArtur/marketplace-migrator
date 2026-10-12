@@ -1,10 +1,12 @@
 """
 Роутер статистики операций для дашборда.
 """
+
 from fastapi import APIRouter, Depends, Query
-from database.repository import stats_repo
-from database.models import User
+
 from core.auth import get_current_user
+from database.models import User
+from database.repository import stats_repo
 
 router = APIRouter(prefix="/api/stats", tags=["Stats"])
 

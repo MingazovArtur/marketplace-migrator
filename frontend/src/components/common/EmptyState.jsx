@@ -5,7 +5,15 @@ import Button from './Button';
  * Универсальное пустое состояние.
  * icon принимает JSX (<Icon ... />) или строку.
  */
-const EmptyState = ({ icon, title, description, actionLabel, onAction, secondaryLabel, onSecondary }) => (
+const EmptyState = ({
+  icon,
+  title,
+  description,
+  actionLabel,
+  onAction,
+  secondaryLabel,
+  onSecondary,
+}) => (
   <div className="empty-state">
     <div
       className="empty-state-icon"

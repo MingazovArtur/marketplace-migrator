@@ -46,7 +46,8 @@ const BulkEditModal = ({ isOpen, onClose, selectedIds, onSubmit, loading }) => {
         </div>
 
         <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-          Будет обновлено товаров: <b>{selectedIds.length}</b>. Отметьте поля, которые нужно изменить.
+          Будет обновлено товаров: <b>{selectedIds.length}</b>. Отметьте поля, которые нужно
+          изменить.
         </p>
 
         {/* Цена */}
@@ -137,7 +138,9 @@ const BulkEditModal = ({ isOpen, onClose, selectedIds, onSubmit, loading }) => {
         </div>
 
         <div className="modal-actions">
-          <Button variant="outline" onClick={onClose}>Отмена</Button>
+          <Button variant="outline" onClick={onClose}>
+            Отмена
+          </Button>
           <Button onClick={submit} disabled={loading} loading={loading}>
             Применить
           </Button>

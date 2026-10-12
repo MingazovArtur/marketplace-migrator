@@ -1,8 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 const Alert = ({ message, onClose, autoClose = false }) => {
   const [closing, setClosing] = useState(false);
 
+  // ✅ 1. Объявляем функцию ДО использования в useEffect
+  const handleClose = useCallback(() => {
+    setClosing(true);
+    setTimeout(() => {
+      onClose?.();
+    }, 300);
+  }, [onClose]);
+
+  // ✅ 2. Теперь handleClose можно безопасно вызывать здесь
   useEffect(() => {
     if (autoClose && message) {
       const timer = setTimeout(() => {
@@ -10,14 +19,7 @@ const Alert = ({ message, onClose, autoClose = false }) => {
       }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [message, autoClose]);
-
-  const handleClose = () => {
-    setClosing(true);
-    setTimeout(() => {
-      onClose?.();
-    }, 300);
-  };
+  }, [message, autoClose, handleClose]);
 
   if (!message) return null;
 
@@ -26,9 +28,20 @@ const Alert = ({ message, onClose, autoClose = false }) => {
 
   return (
     <div className={className}>
-      <div>{message.split('\n').map((line, i) => <div key={i}>{line}</div>)}</div>
+      <div>
+        {message.split('\n').map((line, i) => (
+          <div key={i}>{line}</div>
+        ))}
+      </div>
       {onClose && (
-        <button onClick={handleClose} className="alert-close"></button>
+        <button 
+          type="button" 
+          onClick={handleClose} 
+          className="alert-close" 
+          title="Закрыть"
+        >
+          ✕
+        </button>
       )}
     </div>
   );

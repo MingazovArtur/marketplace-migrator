@@ -27,7 +27,11 @@ const fetchDashboardStats = async (days) => {
   const basic = await api.getStats();
   return {
     period_days: days,
-    totals: { operations: basic.total_operations || 0, success: basic.success || 0, error: basic.errors || 0 },
+    totals: {
+      operations: basic.total_operations || 0,
+      success: basic.success || 0,
+      error: basic.errors || 0,
+    },
     success_rate: basic.success_rate || 0,
     avg_duration_ms: basic.avg_duration_ms || 0,
     by_day: basic.by_day || [],
@@ -56,11 +60,16 @@ const StatsDashboard = () => {
     }
   }, [days]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   if (loading && !data) {
     return (
-      <div className="progress-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+      <div
+        className="progress-status"
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+      >
         <div className="spinner spinner-dark" />
         Загрузка статистики...
       </div>
@@ -97,13 +106,15 @@ const StatsDashboard = () => {
           title={`За последние ${days} дней операций не было`}
           description="Импортируйте товары и выполните первую миграцию — здесь появится сводка по активности, успешности и времени операций."
           actionLabel="Перейти к импорту"
-          onAction={() => { window.location.hash = '#/'; }}
+          onAction={() => {
+            window.location.hash = '#/';
+          }}
         />
       </div>
     );
   }
 
-  const maxDay = Math.max(1, ...data.by_day.map(d => d.import + d.export + d.migrate + d.other));
+  const maxDay = Math.max(1, ...data.by_day.map((d) => d.import + d.export + d.migrate + d.other));
 
   return (
     <div className="stats-dash">
@@ -113,7 +124,7 @@ const StatsDashboard = () => {
           Статистика операций
         </h3>
         <div className="import-method-toggle">
-          {[7, 30].map(d => (
+          {[7, 30].map((d) => (
             <button
               key={d}
               className={`toggle-btn ${days === d ? 'active' : ''}`}
@@ -148,7 +159,7 @@ const StatsDashboard = () => {
         <div className="chart-card">
           <h4>Активность по дням</h4>
           <div className="bar-chart">
-            {data.by_day.map(d => {
+            {data.by_day.map((d) => {
               const total = d.import + d.export + d.migrate + d.other;
               const h = Math.round((total / maxDay) * 100);
               return (
@@ -160,7 +171,9 @@ const StatsDashboard = () => {
                   <div className="bar-stack" style={{ height: `${Math.max(h, 3)}%` }}>
                     {d.import > 0 && <div className="bar-seg imp" style={{ flexGrow: d.import }} />}
                     {d.export > 0 && <div className="bar-seg exp" style={{ flexGrow: d.export }} />}
-                    {d.migrate > 0 && <div className="bar-seg mig" style={{ flexGrow: d.migrate }} />}
+                    {d.migrate > 0 && (
+                      <div className="bar-seg mig" style={{ flexGrow: d.migrate }} />
+                    )}
                     {d.other > 0 && <div className="bar-seg oth" style={{ flexGrow: d.other }} />}
                   </div>
                   <div className="bar-label">{d.date.slice(5)}</div>
@@ -169,10 +182,18 @@ const StatsDashboard = () => {
             })}
           </div>
           <div className="chart-legend">
-            <span><i className="dot imp" /> Импорт</span>
-            <span><i className="dot exp" /> Экспорт</span>
-            <span><i className="dot mig" /> Миграции</span>
-            <span><i className="dot oth" /> Прочее</span>
+            <span>
+              <i className="dot imp" /> Импорт
+            </span>
+            <span>
+              <i className="dot exp" /> Экспорт
+            </span>
+            <span>
+              <i className="dot mig" /> Миграции
+            </span>
+            <span>
+              <i className="dot oth" /> Прочее
+            </span>
           </div>
         </div>
       )}
@@ -182,10 +203,16 @@ const StatsDashboard = () => {
           <h4>По типам операций</h4>
           <table className="stats-table">
             <thead>
-              <tr><th>Операция</th><th>Кол-во</th><th>Успешно</th><th>Ошибки</th><th>Обработано элементов</th></tr>
+              <tr>
+                <th>Операция</th>
+                <th>Кол-во</th>
+                <th>Успешно</th>
+                <th>Ошибки</th>
+                <th>Обработано элементов</th>
+              </tr>
             </thead>
             <tbody>
-              {data.by_operation.map(r => (
+              {data.by_operation.map((r) => (
                 <tr key={r.operation}>
                   <td>{OP_LABELS[r.operation] || r.operation}</td>
                   <td>{r.count}</td>
@@ -204,10 +231,14 @@ const StatsDashboard = () => {
           <h4>По площадкам</h4>
           <table className="stats-table">
             <thead>
-              <tr><th>Площадка</th><th>Операций</th><th>Элементов</th></tr>
+              <tr>
+                <th>Площадка</th>
+                <th>Операций</th>
+                <th>Элементов</th>
+              </tr>
             </thead>
             <tbody>
-              {data.by_platform.map(r => (
+              {data.by_platform.map((r) => (
                 <tr key={r.platform}>
                   <td>{r.platform}</td>
                   <td>{r.count}</td>

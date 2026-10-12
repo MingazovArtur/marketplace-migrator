@@ -2,11 +2,11 @@
 Медиа-сервис: скачивание фото товаров в локальное хранилище.
 Копии хранятся в /app/media/products/{product_id}/ и доступны по /media/...
 """
-import os
+
 import hashlib
 import logging
+import os
 from pathlib import Path
-from typing import List
 
 import requests
 
@@ -27,7 +27,7 @@ def _safe_name(url: str) -> str:
     return f"{digest}{ext}"
 
 
-def download_photos(product_id: int, urls: List[str]) -> List[str]:
+def download_photos(product_id: int, urls: list[str]) -> list[str]:
     """
     Скачивает фото в MEDIA_ROOT/products/{product_id}/.
     Возвращает список сохранённых относительных путей.

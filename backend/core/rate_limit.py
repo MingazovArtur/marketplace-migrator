@@ -5,13 +5,14 @@ Rate limiting на уровне приложения.
 - Авто-блокировка нарушителей (ban list в Redis)
 - X-RateLimit заголовки в ответах
 """
+
 import logging
+
 import redis
-from fastapi import Request, HTTPException, status
+from fastapi import HTTPException, Request, status
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
+
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ def get_user_identifier(request: Request) -> str:
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
             from core.auth import decode_token
+
             payload = decode_token(token)
             if payload and "sub" in payload:
                 return f"user:{payload['sub']}"

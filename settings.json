@@ -1,0 +1,12 @@
+{
+"extensions": {
+    ".js": true,
+    ".ts": true,
+    ".py": true,
+    ".jsx": true,
+    ".txt": true   
+},
+"ignorePatterns": ["node_modules","deploy","tools"],
+"ignoreFiles": ["package-lock.json", ".DS_Store"],
+"ignoreExtensions": [".png", ".jpg", ".mp3",".xlsx"]
+}

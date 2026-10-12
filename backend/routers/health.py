@@ -1,6 +1,8 @@
 """Healthcheck для Docker и мониторинга."""
+
 from fastapi import APIRouter
 from sqlalchemy import create_engine, text
+
 from core.config import DATABASE_URL
 
 router = APIRouter(tags=["Health"])

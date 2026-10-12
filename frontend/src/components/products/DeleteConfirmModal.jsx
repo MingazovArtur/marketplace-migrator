@@ -9,22 +9,31 @@ import Icon from '../icons';
  * isAdmin меняет формулировки: «все товары в системе» vs «все мои товары».
  * Безопасность гарантирует backend: не-админ удаляет только свои товары.
  */
-const DeleteConfirmModal = ({ mode = 'single', count = 1, isAdmin = false, loading, onConfirm, onClose }) => {
+const DeleteConfirmModal = ({
+  mode = 'single',
+  count = 1,
+  isAdmin = false,
+  loading,
+  onConfirm,
+  onClose,
+}) => {
   const [text, setText] = useState('');
 
   const isAll = mode === 'all';
   const needText = isAll && text.trim().toUpperCase() !== 'УДАЛИТЬ';
 
   const title = isAll
-    ? (isAdmin ? 'Удалить ВСЕ товары в системе?' : 'Удалить ВСЕ ваши товары?')
+    ? isAdmin
+      ? 'Удалить ВСЕ товары в системе?'
+      : 'Удалить ВСЕ ваши товары?'
     : mode === 'bulk'
       ? `Удалить выбранные товары (${count})?`
       : 'Удалить товар?';
 
   const description = isAll
-    ? (isAdmin
+    ? isAdmin
       ? '⚠️ Будут удалены ВСЕ товары ВСЕХ пользователей вместе с характеристиками и вариантами. Журналы операций сохранятся. Действие необратимо.'
-      : 'Будут удалены все ВАШИ товары (все страницы, не только текущая) вместе с характеристиками и вариантами. Журналы операций сохранятся. Действие необратимо.')
+      : 'Будут удалены все ВАШИ товары (все страницы, не только текущая) вместе с характеристиками и вариантами. Журналы операций сохранятся. Действие необратимо.'
     : mode === 'bulk'
       ? 'Выбранные товары будут удалены вместе с характеристиками и вариантами. Действие необратимо.'
       : 'Товар будет удалён вместе с характеристиками и вариантами. Действие необратимо.';
@@ -36,7 +45,13 @@ const DeleteConfirmModal = ({ mode = 'single', count = 1, isAdmin = false, loadi
           <h2 className="modal-title" style={{ color: 'var(--accent-danger)' }}>
             <Icon name="trash" size={22} /> {title}
           </h2>
-          <button type="button" className="close-btn" onClick={onClose} disabled={loading} title="Закрыть">
+          <button
+            type="button"
+            className="close-btn"
+            onClick={onClose}
+            disabled={loading}
+            title="Закрыть"
+          >
             <Icon name="close" size={16} />
           </button>
         </div>
@@ -68,7 +83,9 @@ const DeleteConfirmModal = ({ mode = 'single', count = 1, isAdmin = false, loadi
         )}
 
         <div className="modal-actions">
-          <Button variant="outline" onClick={onClose} disabled={loading}>Отмена</Button>
+          <Button variant="outline" onClick={onClose} disabled={loading}>
+            Отмена
+          </Button>
           <Button
             onClick={onConfirm}
             disabled={loading || needText}

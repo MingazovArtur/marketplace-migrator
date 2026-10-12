@@ -1,5 +1,5 @@
 """Дефолты экспорта + массовое дозаполнение пропусков."""
-from typing import Optional
+
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -16,26 +16,32 @@ logger = __import__("logging").getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Defaults"])
 
 SAVE_FIELDS = (
-    "vat_rate", "okpd_code",
-    "package_weight_grams", "package_width_mm", "package_height_mm", "package_length_mm",
-    "brand", "marking", "price_default",
+    "vat_rate",
+    "okpd_code",
+    "package_weight_grams",
+    "package_width_mm",
+    "package_height_mm",
+    "package_length_mm",
+    "brand",
+    "marking",
+    "price_default",
 )
 
 
 class DefaultsPayload(BaseModel):
-    category_name: Optional[str] = None        # None = глобальные
-    vat_rate: Optional[str] = None
-    okpd_code: Optional[str] = None
-    package_weight_grams: Optional[int] = None
-    package_width_mm: Optional[int] = None
-    package_height_mm: Optional[int] = None
-    package_length_mm: Optional[int] = None
-    brand: Optional[str] = None
-    marking: Optional[str] = None
-    price_default: Optional[float] = None      # ✅ цена по умолчанию (только для нулевых)
+    category_name: str | None = None  # None = глобальные
+    vat_rate: str | None = None
+    okpd_code: str | None = None
+    package_weight_grams: int | None = None
+    package_width_mm: int | None = None
+    package_height_mm: int | None = None
+    package_length_mm: int | None = None
+    brand: str | None = None
+    marking: str | None = None
+    price_default: float | None = None  # ✅ цена по умолчанию (только для нулевых)
 
 
-def _row_to_dict(row: Optional[ExportDefault]) -> Optional[dict]:
+def _row_to_dict(row: ExportDefault | None) -> dict | None:
     if not row:
         return None
     return {
@@ -72,9 +78,11 @@ def save_defaults(payload: DefaultsPayload, current_user: User = Depends(get_cur
             db.query(ExportDefault)
             .filter(
                 ExportDefault.user_id == current_user.id,
-                ExportDefault.category_name.is_(None)
-                if payload.category_name is None
-                else ExportDefault.category_name == payload.category_name.strip(),
+                (
+                    ExportDefault.category_name.is_(None)
+                    if payload.category_name is None
+                    else ExportDefault.category_name == payload.category_name.strip()
+                ),
             )
             .first()
         )
@@ -94,15 +102,15 @@ def save_defaults(payload: DefaultsPayload, current_user: User = Depends(get_cur
 
 
 @router.delete("/defaults/category")
-def delete_category_defaults(
-    category_name: str, current_user: User = Depends(get_current_user)
-):
+def delete_category_defaults(category_name: str, current_user: User = Depends(get_current_user)):
     db = SessionLocal()
     try:
         row = (
             db.query(ExportDefault)
-            .filter(ExportDefault.user_id == current_user.id,
-                    ExportDefault.category_name == category_name.strip())
+            .filter(
+                ExportDefault.user_id == current_user.id,
+                ExportDefault.category_name == category_name.strip(),
+            )
             .first()
         )
         if not row:
@@ -164,7 +172,9 @@ def apply_defaults(
             for k in updates:
                 field_counter[k] = field_counter.get(k, 0) + 1
 
-        logger.info(f"🩹 apply-defaults: обновлено {updated} из {len(products)}; поля: {field_counter}")
+        logger.info(
+            f"🩹 apply-defaults: обновлено {updated} из {len(products)}; поля: {field_counter}"
+        )
         return {"updated": updated, "total": len(products), "fields": field_counter}
     finally:
         db.close()

@@ -26,10 +26,30 @@ const FEATURES = [
 ];
 
 const HOW_IT_WORKS = [
-  { step: 1, icon: 'import', title: 'Импортируйте', text: 'Загрузите выгрузку из кабинета маркетплейса или введите API-ключ.' },
-  { step: 2, icon: 'edit', title: 'Отредактируйте', text: 'Проверьте цены, описания, характеристики. Массовое редактирование для больших каталогов.' },
-  { step: 3, icon: 'migrate', title: 'Перенесите', text: 'Выберите товары и целевую площадку — сервис адаптирует формат и категории.' },
-  { step: 4, icon: 'export', title: 'Выгрузите', text: 'Скачайте готовый XLSX и загрузите в личный кабинет новой площадки.' },
+  {
+    step: 1,
+    icon: 'import',
+    title: 'Импортируйте',
+    text: 'Загрузите выгрузку из кабинета маркетплейса или введите API-ключ.',
+  },
+  {
+    step: 2,
+    icon: 'edit',
+    title: 'Отредактируйте',
+    text: 'Проверьте цены, описания, характеристики. Массовое редактирование для больших каталогов.',
+  },
+  {
+    step: 3,
+    icon: 'migrate',
+    title: 'Перенесите',
+    text: 'Выберите товары и целевую площадку — сервис адаптирует формат и категории.',
+  },
+  {
+    step: 4,
+    icon: 'export',
+    title: 'Выгрузите',
+    text: 'Скачайте готовый XLSX и загрузите в личный кабинет новой площадки.',
+  },
 ];
 
 const Landing = ({ onOpenAuth }) => (
@@ -41,7 +61,9 @@ const Landing = ({ onOpenAuth }) => (
       </p>
       <div className="landing-cta">
         <Button onClick={() => onOpenAuth('register')}>Создать аккаунт</Button>
-        <Button variant="secondary" onClick={() => onOpenAuth('login')}>Войти</Button>
+        <Button variant="secondary" onClick={() => onOpenAuth('login')}>
+          Войти
+        </Button>
       </div>
     </section>
 
@@ -67,7 +89,9 @@ const Landing = ({ onOpenAuth }) => (
     >
       <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
         <h2 style={{ fontSize: '1.8rem', marginBottom: '0.5rem' }}>Как это работает</h2>
-        <p style={{ color: 'var(--text-secondary)' }}>4 шага от выгрузки до запуска продаж на новой площадке</p>
+        <p style={{ color: 'var(--text-secondary)' }}>
+          4 шага от выгрузки до запуска продаж на новой площадке
+        </p>
       </div>
       <div
         style={{
@@ -102,7 +126,15 @@ const Landing = ({ onOpenAuth }) => (
             >
               {item.step}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'center', color: 'var(--accent-primary)', marginBottom: '0.75rem', marginTop: '0.5rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'center',
+                color: 'var(--accent-primary)',
+                marginBottom: '0.75rem',
+                marginTop: '0.5rem',
+              }}
+            >
               <Icon name={item.icon} size={40} />
             </div>
             <h3 style={{ marginBottom: '0.5rem' }}>{item.title}</h3>
@@ -127,17 +159,27 @@ const Landing = ({ onOpenAuth }) => (
     </section>
 
     {/* ✅ Юридический футер + ссылка на помощь */}
-    <footer style={{
-      marginTop: '3rem',
-      paddingTop: '1.5rem',
-      borderTop: '1px solid var(--border)',
-      display: 'flex',
-      justifyContent: 'center',
-      gap: '1.5rem',
-      fontSize: '0.85rem',
-      flexWrap: 'wrap',
-    }}>
-      <a href="#/help" style={{ color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+    <footer
+      style={{
+        marginTop: '3rem',
+        paddingTop: '1.5rem',
+        borderTop: '1px solid var(--border)',
+        display: 'flex',
+        justifyContent: 'center',
+        gap: '1.5rem',
+        fontSize: '0.85rem',
+        flexWrap: 'wrap',
+      }}
+    >
+      <a
+        href="#/help"
+        style={{
+          color: 'var(--text-muted)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.3rem',
+        }}
+      >
         <Icon name="book" size={16} />
         Как это работает
       </a>

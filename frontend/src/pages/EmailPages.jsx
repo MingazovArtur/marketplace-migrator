@@ -11,7 +11,12 @@ const CARD = {
   textAlign: 'center',
 };
 const TITLE = { marginBottom: '0.75rem', fontSize: '1.4rem' };
-const TEXT = { color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: 1.6, marginBottom: '1.25rem' };
+const TEXT = {
+  color: 'var(--text-secondary)',
+  fontSize: '0.92rem',
+  lineHeight: 1.6,
+  marginBottom: '1.25rem',
+};
 const LINK = { color: 'var(--accent-primary)', textDecoration: 'none' };
 
 const Shell = ({ children }) => (
@@ -19,7 +24,9 @@ const Shell = ({ children }) => (
     <div style={WRAP}>
       <div style={CARD}>{children}</div>
       <p style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '0.85rem' }}>
-        <a href="#/" style={LINK}>← На главную</a>
+        <a href="#/" style={LINK}>
+          ← На главную
+        </a>
       </p>
     </div>
   </div>
@@ -30,9 +37,7 @@ const Shell = ({ children }) => (
    ============================================================ */
 export const VerifyEmailPage = ({ token }) => {
   const [state, setState] = useState(token ? 'loading' : 'error');
-  const [message, setMessage] = useState(
-    token ? '' : 'Ссылка не содержит токен подтверждения.'
-  );
+  const [message, setMessage] = useState(token ? '' : 'Ссылка не содержит токен подтверждения.');
 
   useEffect(() => {
     if (!token) return;
@@ -49,14 +54,24 @@ export const VerifyEmailPage = ({ token }) => {
         setState('error');
         setMessage(err.message || 'Не удалось подтвердить email.');
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   return (
     <Shell>
       {state === 'loading' && (
         <>
-          <h1 style={{ ...TITLE, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+          <h1
+            style={{
+              ...TITLE,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+            }}
+          >
             <span style={{ color: 'var(--accent-primary)', display: 'inline-flex' }}>
               <Icon name="refresh" size={26} />
             </span>
@@ -67,7 +82,15 @@ export const VerifyEmailPage = ({ token }) => {
       )}
       {state === 'success' && (
         <>
-          <h1 style={{ ...TITLE, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+          <h1
+            style={{
+              ...TITLE,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+            }}
+          >
             <span style={{ color: 'var(--accent-success)', display: 'inline-flex' }}>
               <Icon name="export" size={26} />
             </span>
@@ -83,8 +106,8 @@ export const VerifyEmailPage = ({ token }) => {
         <>
           <h1 style={TITLE}>❌ Не удалось подтвердить</h1>
           <p style={TEXT}>
-            {message} Возможно, ссылка просрочена (действует 24 часа).
-            Войдите в аккаунт — в шапке будет кнопка «Отправить письмо снова».
+            {message} Возможно, ссылка просрочена (действует 24 часа). Войдите в аккаунт — в шапке
+            будет кнопка «Отправить письмо снова».
           </p>
           <a href="#/" className="btn btn-primary" style={{ display: 'inline-block' }}>
             Войти
@@ -120,7 +143,15 @@ export const ForgotPasswordPage = () => {
 
   return (
     <Shell>
-      <h1 style={{ ...TITLE, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+      <h1
+        style={{
+          ...TITLE,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '0.5rem',
+        }}
+      >
         <span style={{ color: 'var(--accent-primary)', display: 'inline-flex' }}>
           <Icon name="key" size={26} />
         </span>
@@ -128,9 +159,9 @@ export const ForgotPasswordPage = () => {
       </h1>
       {sent ? (
         <p style={TEXT}>
-          Если адрес <strong>{email}</strong> зарегистрирован, мы отправили на него
-          ссылку для сброса пароля. Письмо действует 1 час. Проверьте папку «Спам»,
-          если письма нет во «Входящих».
+          Если адрес <strong>{email}</strong> зарегистрирован, мы отправили на него ссылку для
+          сброса пароля. Письмо действует 1 час. Проверьте папку «Спам», если письма нет во
+          «Входящих».
         </p>
       ) : (
         <form onSubmit={submit} style={{ textAlign: 'left' }}>
@@ -144,7 +175,9 @@ export const ForgotPasswordPage = () => {
             required
           />
           {error && (
-            <div className="alert alert-error" style={{ marginTop: '0.75rem' }}>{error}</div>
+            <div className="alert alert-error" style={{ marginTop: '0.75rem' }}>
+              {error}
+            </div>
           )}
           <div style={{ marginTop: '1.25rem', textAlign: 'center' }}>
             <button className="btn btn-primary" type="submit" disabled={loading}>
@@ -154,7 +187,10 @@ export const ForgotPasswordPage = () => {
         </form>
       )}
       <p style={{ ...TEXT, marginTop: '1.25rem', marginBottom: 0 }}>
-        Вспомнили пароль? <a href="#/" style={LINK}>Войти</a>
+        Вспомнили пароль?{' '}
+        <a href="#/" style={LINK}>
+          Войти
+        </a>
       </p>
     </Shell>
   );
@@ -206,7 +242,15 @@ export const ResetPasswordPage = ({ token }) => {
 
   return (
     <Shell>
-      <h1 style={{ ...TITLE, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+      <h1
+        style={{
+          ...TITLE,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '0.5rem',
+        }}
+      >
         <span style={{ color: 'var(--accent-primary)', display: 'inline-flex' }}>
           <Icon name="lock" size={26} />
         </span>
@@ -240,7 +284,9 @@ export const ResetPasswordPage = ({ token }) => {
             required
           />
           {error && (
-            <div className="alert alert-error" style={{ marginTop: '0.75rem' }}>{error}</div>
+            <div className="alert alert-error" style={{ marginTop: '0.75rem' }}>
+              {error}
+            </div>
           )}
           <div style={{ marginTop: '1.25rem', textAlign: 'center' }}>
             <button className="btn btn-primary" type="submit" disabled={loading}>

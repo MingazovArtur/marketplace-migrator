@@ -3,13 +3,15 @@ import Button from '../common/Button';
 import { api } from '../../api';
 import Icon from '../icons';
 
-const AttributesModal = ({ isOpen, onClose, product, onSave }) => {
+const AttributesModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
   const [attributes, setAttributes] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (isOpen && product) {
       setAttributes(product.attributes || []);
+      setError(''); // Сбрасываем ошибку при каждом открытии
     }
   }, [isOpen, product]);
 
@@ -28,6 +30,8 @@ const AttributesModal = ({ isOpen, onClose, product, onSave }) => {
   };
 
   const handleSave = async () => {
+    setLoading(true);
+    setError('');
     try {
       const result = await api.setAttributes(product.id, attributes);
       onSave();
@@ -43,9 +47,7 @@ const AttributesModal = ({ isOpen, onClose, product, onSave }) => {
       }
 
       if (result?.warnings?.length > 0) {
-        const warningList = result.warnings
-          .map((w) => `${w.field}: ${w.value}`)
-          .join(', ');
+        const warningList = result.warnings.map((w) => `${w.field}: ${w.value}`).join(', ');
         onNotify?.(
           `⚠️ ${result.warnings.length} значений не найдены в словаре площадки: ${warningList}`
         );
@@ -53,7 +55,9 @@ const AttributesModal = ({ isOpen, onClose, product, onSave }) => {
 
       onClose();
     } catch (e) {
-      setError(e.message);
+      setError(e.message || 'Ошибка сохранения характеристик');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -68,6 +72,12 @@ const AttributesModal = ({ isOpen, onClose, product, onSave }) => {
             <Icon name="close" size={16} />
           </button>
         </div>
+
+        {error && (
+          <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+            <div>{error}</div>
+          </div>
+        )}
 
         <div className="attributes-list">
           {attributes.map((attr, idx) => (
@@ -86,19 +96,26 @@ const AttributesModal = ({ isOpen, onClose, product, onSave }) => {
                 onChange={(e) => handleChange(idx, 'value', e.target.value)}
                 style={{ flex: 2 }}
               />
-              <button className="btn btn-danger" onClick={() => handleRemove(idx)}>
+              <button type="button" className="btn btn-danger" onClick={() => handleRemove(idx)}>
                 🗑
               </button>
             </div>
           ))}
         </div>
 
-        <Button variant="secondary" onClick={handleAdd} style={{ marginTop: '0.5rem' }}>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleAdd}
+          style={{ marginTop: '0.5rem' }}
+        >
           + Добавить характеристику
         </Button>
 
         <div className="modal-actions">
-          <Button variant="outline" onClick={onClose}>Отмена</Button>
+          <Button variant="outline" onClick={onClose} disabled={loading}>
+            Отмена
+          </Button>
           <Button onClick={handleSave} disabled={loading} loading={loading}>
             Сохранить
           </Button>

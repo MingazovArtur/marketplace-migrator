@@ -31,7 +31,8 @@ const ProfileMenu = ({ user, onLogout, onOpenHistory }) => {
   // Подгрузка последних операций при открытии
   useEffect(() => {
     if (open) {
-      api.getHistory({ limit: 5 })
+      api
+        .getHistory({ limit: 5 })
         .then((d) => setHistory(d.history || []))
         .catch(() => setHistory([]));
     }
@@ -87,15 +88,14 @@ const ProfileMenu = ({ user, onLogout, onOpenHistory }) => {
             <button
               type="button"
               className="profile-dd-link"
-              onClick={() => { setOpen(false); onOpenHistory(); }}
+              onClick={() => {
+                setOpen(false);
+                onOpenHistory();
+              }}
             >
               <Icon name="history" size={16} /> Вся история
             </button>
-            <button
-              type="button"
-              className="profile-dd-link danger"
-              onClick={onLogout}
-            >
+            <button type="button" className="profile-dd-link danger" onClick={onLogout}>
               <Icon name="logout" size={16} /> Выйти
             </button>
           </div>

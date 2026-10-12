@@ -12,18 +12,18 @@
   - ✅ bulk_update валидирует категорию по спекам площадки
   - ✅ детальное логирование массовых операций
 """
+
 import logging
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from core.auth import get_current_user
-from database.models import User
 from database.models import Product as ProductORM
-from database.session import SessionLocal
+from database.models import User
 from database.repository import repo, stats_repo
-from models.schemas import Stats, ProductBulkUpdate, ProductLogisticsUpdate
+from database.session import SessionLocal
+from models.schemas import ProductBulkUpdate, ProductLogisticsUpdate, Stats
 
 logger = logging.getLogger(__name__)
 
@@ -31,19 +31,20 @@ router = APIRouter(prefix="/api", tags=["Products"])
 
 # Карта сортировок фронтенда -> (поле, направление) для репозитория
 SORT_MAP = {
-    "newest":     ("created_at", "desc"),
-    "oldest":     ("created_at", "asc"),
-    "name_asc":   ("name",       "asc"),
-    "name_desc":  ("name",       "desc"),
-    "price_asc":  ("price",      "asc"),
-    "price_desc": ("price",      "desc"),
+    "newest": ("created_at", "desc"),
+    "oldest": ("created_at", "asc"),
+    "name_asc": ("name", "asc"),
+    "name_desc": ("name", "desc"),
+    "price_asc": ("price", "asc"),
+    "price_desc": ("price", "desc"),
 }
 
 
 # ==================== Схемы запросов удаления ====================
 
+
 class BulkDeleteRequest(BaseModel):
-    product_ids: List[int]
+    product_ids: list[int]
 
 
 class DeleteAllRequest(BaseModel):
@@ -51,6 +52,7 @@ class DeleteAllRequest(BaseModel):
 
 
 # ==================== Хелпер: валидация категории по спекам ====================
+
 
 def _validate_category_against_specs(category_name: str) -> dict:
     """
@@ -65,11 +67,15 @@ def _validate_category_against_specs(category_name: str) -> dict:
         return {"exists": False, "platforms": []}
 
     from database.models import PlatformCategorySpec
+
     db = SessionLocal()
     try:
-        rows = db.query(PlatformCategorySpec.platform).filter(
-            PlatformCategorySpec.category_name == category_name.strip()
-        ).distinct().all()
+        rows = (
+            db.query(PlatformCategorySpec.platform)
+            .filter(PlatformCategorySpec.category_name == category_name.strip())
+            .distinct()
+            .all()
+        )
         platforms = [r[0] for r in rows]
         return {"exists": len(platforms) > 0, "platforms": platforms}
     except Exception as e:
@@ -80,6 +86,7 @@ def _validate_category_against_specs(category_name: str) -> dict:
 
 
 # ==================== МАССОВЫЕ ОПЕРАЦИИ ====================
+
 
 @router.put("/products/bulk-update")
 def bulk_update_products(
@@ -95,7 +102,9 @@ def bulk_update_products(
     if not request.product_ids or len(request.product_ids) == 0:
         raise HTTPException(status_code=400, detail="Не указаны товары для обновления")
 
-    if all(v is None for v in (request.price, request.price_percent, request.brand, request.category)):
+    if all(
+        v is None for v in (request.price, request.price_percent, request.brand, request.category)
+    ):
         raise HTTPException(status_code=400, detail="Не указаны поля для обновления")
 
     # ✅ Валидация категории назначения по спекам (не блокирующая)
@@ -115,7 +124,7 @@ def bulk_update_products(
             )
 
     updated = 0
-    updated_ids: List[int] = []
+    updated_ids: list[int] = []
     user_id = current_user.id
 
     for pid in request.product_ids:
@@ -149,7 +158,8 @@ def bulk_update_products(
         # ✅ Список изменённых полей считаем отдельно — выражения f-string
     #    не могут продолжаться в соседнем строковом литерале
     changed_fields = [
-        name for name in ("price", "price_percent", "brand", "category")
+        name
+        for name in ("price", "price_percent", "brand", "category")
         if getattr(request, name, None) is not None
     ]
     logger.warning(
@@ -212,9 +222,14 @@ def bulk_delete_products(
         )
         try:
             stats_repo.record(
-                user_id=current_user.id, operation="delete", platform=None,
-                status="success", total_items=len(payload.product_ids),
-                success_items=deleted, failed_items=skipped, duration_ms=0,
+                user_id=current_user.id,
+                operation="delete",
+                platform=None,
+                status="success",
+                total_items=len(payload.product_ids),
+                success_items=deleted,
+                failed_items=skipped,
+                duration_ms=0,
             )
         except Exception:
             pass
@@ -262,9 +277,14 @@ def delete_all_products(
         )
         try:
             stats_repo.record(
-                user_id=current_user.id, operation="delete_all", platform=None,
-                status="success", total_items=len(products),
-                success_items=len(products), failed_items=0, duration_ms=0,
+                user_id=current_user.id,
+                operation="delete_all",
+                platform=None,
+                status="success",
+                total_items=len(products),
+                success_items=len(products),
+                failed_items=0,
+                duration_ms=0,
             )
         except Exception:
             pass
@@ -282,14 +302,20 @@ def delete_all_products(
 
 # ==================== ЧТЕНИЕ ====================
 
+
 @router.get("/products")
 def get_products(
-    search: Optional[str] = Query(None, description="Поиск по названию, SKU, артикулу"),
-    status: Optional[str] = Query(None, description="Статус: pending | processing | success | error | all"),
-    source: Optional[str] = Query(None, description="Источник импорта | all"),
-    sort: str = Query("newest", description="Сортировка: newest | oldest | name_asc | name_desc | price_asc | price_desc"),
+    search: str | None = Query(None, description="Поиск по названию, SKU, артикулу"),
+    status: str | None = Query(
+        None, description="Статус: pending | processing | success | error | all"
+    ),
+    source: str | None = Query(None, description="Источник импорта | all"),
+    sort: str = Query(
+        "newest",
+        description="Сортировка: newest | oldest | name_asc | name_desc | price_asc | price_desc",
+    ),
     skip: int = Query(0, ge=0, description="Смещение для пагинации"),
-    limit: int = Query(50, ge=1, le=500, description="Количество товаров на странице"),
+    limit: int = Query(50, ge=1, le=10000, description="Количество товаров на странице"),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -329,6 +355,7 @@ def get_stats(current_user: User = Depends(get_current_user)):
 
 # ==================== ОДИНОЧНЫЕ ОПЕРАЦИИ ====================
 
+
 @router.put("/products/{product_id}/logistics")
 def update_product_logistics(
     product_id: int,
@@ -350,7 +377,9 @@ def update_product_logistics(
         logger.warning(f"📦 logistics PUT id={product_id} user={current_user.id} updates={updates}")
 
         if not updates:
-            logger.warning(f"📦 logistics PUT id={product_id}: payload пустой — ничего не сохраняем")
+            logger.warning(
+                f"📦 logistics PUT id={product_id}: payload пустой — ничего не сохраняем"
+            )
             return {"success": True, "product_id": product.id, "updated_fields": 0}
 
         for field, value in updates.items():
@@ -396,9 +425,14 @@ def delete_product(
         logger.warning(f"🗑 Delete product {product_id} by user={current_user.id}")
         try:
             stats_repo.record(
-                user_id=current_user.id, operation="delete", platform=None,
-                status="success", total_items=1, success_items=1,
-                failed_items=0, duration_ms=0,
+                user_id=current_user.id,
+                operation="delete",
+                platform=None,
+                status="success",
+                total_items=1,
+                success_items=1,
+                failed_items=0,
+                duration_ms=0,
             )
         except Exception:
             pass

@@ -13,17 +13,18 @@ Rate-limits (на идентификатор: user_id или IP):
   - /import (key/yml): 10/min, 100/day
   - /import/file    : 10/min, 100/day
 """
+
 import logging
 import time
 
 from fastapi import (
     APIRouter,
     Depends,
-    HTTPException,
-    UploadFile,
     File,
     Form,
+    HTTPException,
     Request,
+    UploadFile,
 )
 from pydantic import BaseModel
 
@@ -31,9 +32,9 @@ from core.auth import get_current_user
 from core.platforms import PLATFORM_CONFIG
 from core.rate_limit import limiter
 from database.models import User
-from database.repository import repo, op_log, stats_repo, variant_repo
+from database.repository import op_log, repo, stats_repo, variant_repo
 from models.schemas import ProductCreate
-from parsers.file_parser import parse_file, preview_file
+from parsers import parse_file, preview_file
 from parsers.yml_parser import YmlParser
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ def _source_label(platform: str) -> str:
 @limiter.limit("30/minute")
 @router.post("/import/preview")
 async def preview_import(
-    request: Request,                                       # ← добавлен для slowapi
+    request: Request,  # ← добавлен для slowapi
     platform: str = Form(...),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -89,21 +90,23 @@ async def preview_import(
 @limiter.limit("10/minute;100/day")
 @router.post("/import")
 async def import_products(
-    request: Request,                                       # ← добавлен для slowapi
-    payload: ImportRequest,                                 # ← переименован (был request)
+    request: Request,  # ← добавлен для slowapi
+    payload: ImportRequest,  # ← переименован (был request)
     current_user: User = Depends(get_current_user),
 ):
     """Импорт по API-ключу, мок-ключу или YML-ссылке."""
     t0 = time.perf_counter()
-    auth_key = payload.get_key()                            # ← использование нового имени
+    auth_key = payload.get_key()  # ← использование нового имени
 
     if not auth_key:
         raise HTTPException(status_code=400, detail="Не указан API-ключ или YML-ссылка")
 
-    is_mock = (
-        auth_key.lower() in ("test:test", "mock_wb_key", "mock_ozon_key", "mock_yandex_key")
-        or auth_key.lower().endswith(":test:test")
-    )
+    is_mock = auth_key.lower() in (
+        "test:test",
+        "mock_wb_key",
+        "mock_ozon_key",
+        "mock_yandex_key",
+    ) or auth_key.lower().endswith(":test:test")
 
     # ---------- Мок-импорт (для демо и тестов) ----------
     if is_mock:
@@ -118,25 +121,31 @@ async def import_products(
             ProductCreate(
                 name="Швабра с отжимом и ведром, самоочищающаяся, 2 насадки, 10 л",
                 source=f"{PLATFORM_CONFIG[platform]['name']} (тест)",
-                price=899.0, status="pending",
+                price=899.0,
+                status="pending",
                 description="<p>Удобная швабра с ведром для быстрой уборки.</p>",
-                photos_count=3, category="Дом и сад > Уборка > Швабры",
+                photos_count=3,
+                category="Дом и сад > Уборка > Швабры",
                 user_id=current_user.id,
             ),
             ProductCreate(
                 name="Смартфон Xiaomi Redmi Note 12 4/128GB",
                 source=f"{PLATFORM_CONFIG[platform]['name']} (тест)",
-                price=12990.0, status="pending",
+                price=12990.0,
+                status="pending",
                 description="Отличный смартфон с хорошей камерой.",
-                photos_count=5, category="Электроника > Смартфоны",
+                photos_count=5,
+                category="Электроника > Смартфоны",
                 user_id=current_user.id,
             ),
             ProductCreate(
                 name="Чай черный байкальский, 100 пакетиков",
                 source=f"{PLATFORM_CONFIG[platform]['name']} (тест)",
-                price=250.0, status="pending",
+                price=250.0,
+                status="pending",
                 description="Натуральный черный чай.",
-                photos_count=1, category="Продукты питания > Чай и кофе > Чай",
+                photos_count=1,
+                category="Продукты питания > Чай и кофе > Чай",
                 user_id=current_user.id,
             ),
         ]
@@ -193,7 +202,10 @@ async def import_products(
                 filename=auth_key[:100],
                 mode=None,
                 status="error",
-                total_rows=0, imported=0, updated=0, failed=0,
+                total_rows=0,
+                imported=0,
+                updated=0,
+                failed=0,
                 errors=[{"error": f"Ошибка парсинга YML: {str(e)}"}],
             )
             stats_repo.record(
@@ -201,7 +213,9 @@ async def import_products(
                 operation="import_yml",
                 platform="yandex",
                 status="error",
-                total_items=0, success_items=0, failed_items=0,
+                total_items=0,
+                success_items=0,
+                failed_items=0,
                 duration_ms=duration_ms,
             )
             raise HTTPException(status_code=400, detail=f"Ошибка парсинга YML: {e}")
@@ -272,9 +286,9 @@ async def import_products(
 @limiter.limit("10/minute;100/day")
 @router.post("/import/file")
 async def import_from_file(
-    request: Request,                                       # ← добавлен для slowapi
+    request: Request,  # ← добавлен для slowapi
     platform: str = Form(...),
-    mode: str = Form("create"),   # create | upsert
+    mode: str = Form("create"),  # create | upsert
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
@@ -302,15 +316,21 @@ async def import_from_file(
         result = parse_file(contents, platform, file_type)
     except ValueError as e:
         stats_repo.record(
-            user_id=current_user.id, operation="import_file", platform=platform,
-            status="error", duration_ms=int((time.perf_counter() - t0) * 1000),
+            user_id=current_user.id,
+            operation="import_file",
+            platform=platform,
+            status="error",
+            duration_ms=int((time.perf_counter() - t0) * 1000),
         )
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Ошибка парсинга файла: {e}")
         stats_repo.record(
-            user_id=current_user.id, operation="import_file", platform=platform,
-            status="error", duration_ms=int((time.perf_counter() - t0) * 1000),
+            user_id=current_user.id,
+            operation="import_file",
+            platform=platform,
+            status="error",
+            duration_ms=int((time.perf_counter() - t0) * 1000),
         )
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера при обработке файла")
 
@@ -326,16 +346,24 @@ async def import_from_file(
             mode=mode,
             status="error",
             total_rows=result["total_rows"],
-            imported=0, updated=0, failed=len(errors),
+            imported=0,
+            updated=0,
+            failed=len(errors),
             errors=errors[:10],
         )
         stats_repo.record(
-            user_id=current_user.id, operation="import_file", platform=platform,
-            status="error", total_items=result["total_rows"],
-            success_items=0, failed_items=len(errors),
+            user_id=current_user.id,
+            operation="import_file",
+            platform=platform,
+            status="error",
+            total_items=result["total_rows"],
+            success_items=0,
+            failed_items=len(errors),
             duration_ms=int((time.perf_counter() - t0) * 1000),
         )
-        raise HTTPException(status_code=400, detail="Не найдено валидных товаров в файле. Проверьте ошибки.")
+        raise HTTPException(
+            status_code=400, detail="Не найдено валидных товаров в файле. Проверьте ошибки."
+        )
 
     # ---------- Запись в БД ----------
     source_label = _source_label(platform)

@@ -7,23 +7,29 @@ import DefaultsModal from '../components/products/DefaultsModal';
 import { api } from '../api';
 
 const STATUS_META = {
-  pending:    { label: 'Ожидает',  cls: 'badge-pending' },
+  pending: { label: 'Ожидает', cls: 'badge-pending' },
   processing: { label: 'В работе', cls: 'badge-processing' },
-  success:    { label: 'Успешно',  cls: 'badge-success' },
-  error:      { label: 'Ошибка',   cls: 'badge-error' },
+  success: { label: 'Успешно', cls: 'badge-success' },
+  error: { label: 'Ошибка', cls: 'badge-error' },
 };
 
 const SORT_OPTIONS = [
-  { value: 'newest',     label: 'Сначала новые' },
-  { value: 'oldest',     label: 'Сначала старые' },
-  { value: 'name_asc',   label: 'Название А→Я' },
-  { value: 'name_desc',  label: 'Название Я→А' },
-  { value: 'price_asc',  label: 'Цена ↑' },
+  { value: 'newest', label: 'Сначала новые' },
+  { value: 'oldest', label: 'Сначала старые' },
+  { value: 'name_asc', label: 'Название А→Я' },
+  { value: 'name_desc', label: 'Название Я→А' },
+  { value: 'price_asc', label: 'Цена ↑' },
   { value: 'price_desc', label: 'Цена ↓' },
 ];
 
 const DEFAULT_WIDTHS = {
-  check: 40, id: 60, name: 320, category: 220, price: 110, status: 110, actions: 160,
+  check: 40,
+  id: 60,
+  name: 320,
+  category: 220,
+  price: 110,
+  status: 110,
+  actions: 160,
 };
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
@@ -45,7 +51,13 @@ const BLOCKING_GAP_FIELDS = ['price', 'main_photo'];
 const ProductsPage = ({
   isAdmin = false,
   refreshKey = 0,
-  onMigrate, onLogistics, onAttributes, onVariants, onPhotos, onExport, onImport,
+  onMigrate,
+  onLogistics,
+  onAttributes,
+  onVariants,
+  onPhotos,
+  onExport,
+  onImport,
 }) => {
   const [products, setProducts] = useState([]);
   const [total, setTotal] = useState(0);
@@ -84,7 +96,9 @@ const ProductsPage = ({
         search: search || undefined,
         status: status === 'all' ? undefined : status,
         source: 'all',
-        sort, skip, limit,
+        sort,
+        skip,
+        limit,
       });
       setProducts(d.products || []);
       setTotal(d.total ?? (d.products || []).length);
@@ -98,8 +112,12 @@ const ProductsPage = ({
   }, [search, status, sort, skip, limit]);
 
   const loadRef = useRef(load);
-  useEffect(() => { loadRef.current = load; }, [load]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useEffect(() => {
     if (refreshKey > 0) {
@@ -139,7 +157,7 @@ const ProductsPage = ({
   useEffect(() => {
     loadGaps();
     loadSpecNames();
-  }, [refreshKey, loadGaps, loadSpecNames]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [refreshKey, loadGaps, loadSpecNames]);
 
   // ==================== Ресайз колонок ====================
   const resetCol = (key) => {
@@ -150,24 +168,27 @@ const ProductsPage = ({
     });
   };
 
-  const startResize = useCallback((key, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.pageX;
-    const th = e.target.closest('th');
-    const startW = colWidths[key] || th?.offsetWidth || DEFAULT_WIDTHS[key] || 120;
+  const startResize = useCallback(
+    (key, e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.pageX;
+      const th = e.target.closest('th');
+      const startW = colWidths[key] || th?.offsetWidth || DEFAULT_WIDTHS[key] || 120;
 
-    const onMove = (ev) => {
-      const w = Math.max(60, startW + (ev.pageX - startX));
-      setColWidths((prev) => ({ ...prev, [key]: w }));
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [colWidths]);
+      const onMove = (ev) => {
+        const w = Math.max(60, startW + (ev.pageX - startX));
+        setColWidths((prev) => ({ ...prev, [key]: w }));
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    },
+    [colWidths]
+  );
 
   const colStyle = (key) => ({ width: colWidths[key] || DEFAULT_WIDTHS[key] });
 
@@ -175,7 +196,10 @@ const ProductsPage = ({
     <span
       className="col-resizer"
       onMouseDown={(e) => startResize(colKey, e)}
-      onDoubleClick={(e) => { e.stopPropagation(); resetCol(colKey); }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        resetCol(colKey);
+      }}
       onClick={(e) => e.stopPropagation()}
       title="Тянуть — ширина, двойной клик — сброс"
     />
@@ -200,7 +224,9 @@ const ProductsPage = ({
         setSelected([]);
       } else if (deleteMode === 'bulk') {
         const r = await api.bulkDeleteProducts(selected);
-        setMessage(`🗑 Удалено: ${r.deleted}${r.skipped ? `, пропущено (чужие): ${r.skipped}` : ''}`);
+        setMessage(
+          `🗑 Удалено: ${r.deleted}${r.skipped ? `, пропущено (чужие): ${r.skipped}` : ''}`
+        );
         setSelected([]);
       } else {
         await api.deleteProduct(deleteTargetId);
@@ -244,8 +270,7 @@ const ProductsPage = ({
         .map(([k, v]) => `${GAP_LABELS[k] || k}: ${v}`)
         .join(', ');
       setMessage(
-        `🩹 Дозаполнено товаров: ${r.updated} из ${r.total}` +
-        (summary ? ` (${summary})` : '')
+        `🩹 Дозаполнено товаров: ${r.updated} из ${r.total}` + (summary ? ` (${summary})` : '')
       );
       if (mode === 'selected') setSelected([]);
       await loadGaps();
@@ -275,12 +300,11 @@ const ProductsPage = ({
       const lines = [];
       if (localGaps.price) lines.push(`— Цена 0/пустая: ${localGaps.price} шт.`);
       if (localGaps.main_photo) lines.push(`— Нет главного фото: ${localGaps.main_photo} шт.`);
-      const msg = (
+      const msg =
         `⚠️ В ${blockingCount} из ${selected.length} выделенных товаров есть блокирующие пропуски:\n\n` +
         lines.join('\n') +
-        `\n\nПродолжить миграцию? Товары с пропусками будут отклонены валидатором.`
-      );
-      // eslint-disable-next-line no-alert
+        `\n\nПродолжить миграцию? Товары с пропусками будут отклонены валидатором.`;
+
       if (!window.confirm(msg)) return;
     }
     onMigrate(selected);
@@ -288,7 +312,10 @@ const ProductsPage = ({
 
   // ==================== Категории текущих товаров ====================
   const productCategories = useMemo(
-    () => Array.from(new Set(products.map((p) => p.mapped_category || p.category).filter(Boolean))).sort(),
+    () =>
+      Array.from(
+        new Set(products.map((p) => p.mapped_category || p.category).filter(Boolean))
+      ).sort(),
     [products]
   );
 
@@ -303,9 +330,16 @@ const ProductsPage = ({
     selectedProducts.forEach((p) => {
       const price = Number(p.price);
       if (!price || price <= 0 || isNaN(price)) gapsLocal.price = (gapsLocal.price || 0) + 1;
-      if (!p.photos || p.photos.length === 0) gapsLocal.main_photo = (gapsLocal.main_photo || 0) + 1;
-      ['vat_rate', 'okpd_code', 'package_weight_grams', 'package_width_mm',
-       'package_height_mm', 'package_length_mm'].forEach((f) => {
+      if (!p.photos || p.photos.length === 0)
+        gapsLocal.main_photo = (gapsLocal.main_photo || 0) + 1;
+      [
+        'vat_rate',
+        'okpd_code',
+        'package_weight_grams',
+        'package_width_mm',
+        'package_height_mm',
+        'package_length_mm',
+      ].forEach((f) => {
         if (p[f] === null || p[f] === undefined || p[f] === '' || p[f] === 0) {
           gapsLocal[f] = (gapsLocal[f] || 0) + 1;
         }
@@ -349,7 +383,8 @@ const ProductsPage = ({
             onClick={() => setDeleteMode('all')}
             title={isAdmin ? 'Удалить все товары в системе' : 'Удалить все мои товары'}
           >
-            <Icon name="trash" size={16} /> {isAdmin ? 'Удалить все в системе' : 'Удалить все товары'}
+            <Icon name="trash" size={16} />{' '}
+            {isAdmin ? 'Удалить все в системе' : 'Удалить все товары'}
           </Button>
           <Button variant="secondary" onClick={load} disabled={loading}>
             <Icon name="refresh" size={16} /> Обновить
@@ -360,14 +395,29 @@ const ProductsPage = ({
       {/* ==================== Баннер пропусков ==================== */}
       {gaps && gaps.total > 0 && gapEntries.length > 0 && (
         <div className="alert alert-error" style={{ marginBottom: '0.75rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '0.5rem',
+            }}
+          >
             <div>
               ❌ Пропуски обязательных полей у {gaps.total} товаров:{' '}
               <strong>
                 {gapEntries.map(([k, n]) => `${GAP_LABELS[k] || k} — ${n}`).join('; ')}
               </strong>
               {selected.length > 0 && selectedBlockingTotal + selectedFillableTotal > 0 && (
-                <span style={{ display: 'block', marginTop: '0.25rem', fontSize: '0.85rem', opacity: 0.9 }}>
+                <span
+                  style={{
+                    display: 'block',
+                    marginTop: '0.25rem',
+                    fontSize: '0.85rem',
+                    opacity: 0.9,
+                  }}
+                >
                   ↳ в выделенных ({selected.length}):{' '}
                   {Object.entries(selectedGaps || {})
                     .filter(([, n]) => n > 0)
@@ -381,30 +431,56 @@ const ProductsPage = ({
             </Button>
           </div>
           <p style={{ margin: '0.4rem 0 0', fontSize: '0.85rem', opacity: 0.9 }}>
-            Значения берутся из <strong>Дефолтов экспорта</strong>: глобальных и по категориям.
-            Один клик — и все товары получат НДС, ТН ВЭД, ОВХ и вес.
+            Значения берутся из <strong>Дефолтов экспорта</strong>: глобальных и по категориям. Один
+            клик — и все товары получат НДС, ТН ВЭД, ОВХ и вес.
           </p>
         </div>
       )}
 
       {/* ==================== Фильтры + сброс ширины колонок ==================== */}
-      <div className="products-toolbar" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+      <div
+        className="products-toolbar"
+        style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}
+      >
         <input
           className="form-input"
           placeholder="Поиск: название, SKU, артикул…"
           value={search}
-          onChange={(e) => { setSearch(e.target.value); setSkip(0); }}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setSkip(0);
+          }}
           style={{ flex: 1, minWidth: 200 }}
         />
-        <select className="form-input" value={status} onChange={(e) => { setStatus(e.target.value); setSkip(0); }} style={{ width: 'auto' }}>
+        <select
+          className="form-input"
+          value={status}
+          onChange={(e) => {
+            setStatus(e.target.value);
+            setSkip(0);
+          }}
+          style={{ width: 'auto' }}
+        >
           <option value="all">Все статусы</option>
           <option value="pending">Ожидает</option>
           <option value="processing">В работе</option>
           <option value="success">Успешно</option>
           <option value="error">Ошибка</option>
         </select>
-        <select className="form-input" value={sort} onChange={(e) => { setSort(e.target.value); setSkip(0); }} style={{ width: 'auto' }}>
-          {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        <select
+          className="form-input"
+          value={sort}
+          onChange={(e) => {
+            setSort(e.target.value);
+            setSkip(0);
+          }}
+          style={{ width: 'auto' }}
+        >
+          {SORT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
         </select>
         {Object.keys(colWidths).length > 0 && (
           <Button
@@ -432,12 +508,29 @@ const ProductsPage = ({
         )}
       </div>
 
-      {error && <div className="alert alert-error"><div>{error}</div></div>}
-      {message && <div className="alert alert-success"><div>{message}</div></div>}
+      {error && (
+        <div className="alert alert-error">
+          <div>{error}</div>
+        </div>
+      )}
+      {message && (
+        <div className="alert alert-success">
+          <div>{message}</div>
+        </div>
+      )}
 
       {/* ==================== Панель массовых действий ==================== */}
       {selected.length > 0 && (
-        <div className="products-toolbar" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+        <div
+          className="products-toolbar"
+          style={{
+            display: 'flex',
+            gap: '0.5rem',
+            alignItems: 'center',
+            marginBottom: '0.75rem',
+            flexWrap: 'wrap',
+          }}
+        >
           <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
             Выбрано: <strong>{selected.length}</strong>
           </span>
@@ -488,7 +581,9 @@ const ProductsPage = ({
           <Button variant="secondary" size="small" onClick={() => setDeleteMode('bulk')}>
             <Icon name="trash" size={15} /> Удалить выбранные
           </Button>
-          <Button variant="outline" size="small" onClick={() => setSelected([])}>Сбросить</Button>
+          <Button variant="outline" size="small" onClick={() => setSelected([])}>
+            Сбросить
+          </Button>
         </div>
       )}
 
@@ -510,7 +605,14 @@ const ProductsPage = ({
         />
       ) : (
         <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', tableLayout: 'fixed' }}>
+          <table
+            style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              fontSize: '0.85rem',
+              tableLayout: 'fixed',
+            }}
+          >
             <thead style={{ background: 'var(--bg-secondary)' }}>
               <tr>
                 <th className="th-resizable" style={{ padding: '0.6rem', ...colStyle('check') }}>
@@ -521,22 +623,40 @@ const ProductsPage = ({
                   />
                   <Resizer colKey="check" />
                 </th>
-                <th className="th-resizable" style={{ textAlign: 'left', padding: '0.6rem', ...colStyle('id') }}>
+                <th
+                  className="th-resizable"
+                  style={{ textAlign: 'left', padding: '0.6rem', ...colStyle('id') }}
+                >
                   ID <Resizer colKey="id" />
                 </th>
-                <th className="th-resizable" style={{ textAlign: 'left', padding: '0.6rem', ...colStyle('name') }}>
+                <th
+                  className="th-resizable"
+                  style={{ textAlign: 'left', padding: '0.6rem', ...colStyle('name') }}
+                >
                   Товар <Resizer colKey="name" />
                 </th>
-                <th className="th-resizable" style={{ textAlign: 'left', padding: '0.6rem', ...colStyle('category') }}>
+                <th
+                  className="th-resizable"
+                  style={{ textAlign: 'left', padding: '0.6rem', ...colStyle('category') }}
+                >
                   Категория → Ozon <Resizer colKey="category" />
                 </th>
-                <th className="th-resizable" style={{ textAlign: 'right', padding: '0.6rem', ...colStyle('price') }}>
+                <th
+                  className="th-resizable"
+                  style={{ textAlign: 'right', padding: '0.6rem', ...colStyle('price') }}
+                >
                   Цена <Resizer colKey="price" />
                 </th>
-                <th className="th-resizable" style={{ textAlign: 'center', padding: '0.6rem', ...colStyle('status') }}>
+                <th
+                  className="th-resizable"
+                  style={{ textAlign: 'center', padding: '0.6rem', ...colStyle('status') }}
+                >
                   Статус <Resizer colKey="status" />
                 </th>
-                <th className="th-resizable" style={{ textAlign: 'center', padding: '0.6rem', ...colStyle('actions') }}>
+                <th
+                  className="th-resizable"
+                  style={{ textAlign: 'center', padding: '0.6rem', ...colStyle('actions') }}
+                >
                   Действия <Resizer colKey="actions" />
                 </th>
               </tr>
@@ -551,31 +671,88 @@ const ProductsPage = ({
                 return (
                   <tr key={p.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
                     <td style={{ padding: '0.6rem', overflow: 'hidden' }}>
-                      <input type="checkbox" checked={selected.includes(p.id)} onChange={() => toggleOne(p.id)} />
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(p.id)}
+                        onChange={() => toggleOne(p.id)}
+                      />
                     </td>
-                    <td style={{ padding: '0.6rem', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden' }}>
+                    <td
+                      style={{
+                        padding: '0.6rem',
+                        color: 'var(--text-muted)',
+                        fontFamily: 'monospace',
+                        overflow: 'hidden',
+                      }}
+                    >
                       {p.id}
                     </td>
                     <td style={{ padding: '0.6rem', overflow: 'hidden' }}>
-                      <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={p.name}>
+                      <div
+                        style={{
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                        title={p.name}
+                      >
                         {p.name}
                       </div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <div
+                        style={{
+                          color: 'var(--text-muted)',
+                          fontSize: '0.75rem',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
                         {p.sku || p.external_id || 'без артикула'} · {p.source}
                       </div>
                     </td>
-                    <td style={{ padding: '0.6rem', color: 'var(--text-secondary)', overflow: 'hidden' }}>
-                      <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.category || 'Не указана'}</div>
+                    <td
+                      style={{
+                        padding: '0.6rem',
+                        color: 'var(--text-secondary)',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        style={{
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {p.category || 'Не указана'}
+                      </div>
                       {p.mapped_category && (
-                        <div style={{ fontSize: '0.75rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>→ {p.mapped_category}</div>
+                        <div
+                          style={{
+                            fontSize: '0.75rem',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          → {p.mapped_category}
+                        </div>
                       )}
                     </td>
                     <td
                       style={{
-                        padding: '0.6rem', textAlign: 'right', fontWeight: 600, overflow: 'hidden',
+                        padding: '0.6rem',
+                        textAlign: 'right',
+                        fontWeight: 600,
+                        overflow: 'hidden',
                         color: priceBad ? 'var(--danger, #ef4444)' : undefined,
                       }}
-                      title={priceBad ? '❌ Цена не указана или = 0 — миграция будет отклонена' : undefined}
+                      title={
+                        priceBad
+                          ? '❌ Цена не указана или = 0 — миграция будет отклонена'
+                          : undefined
+                      }
                     >
                       {priceBad ? '❌ —' : `${p.price} ₽`}
                     </td>
@@ -583,14 +760,25 @@ const ProductsPage = ({
                       <span className={`badge ${st.cls}`}>{st.label}</span>
                     </td>
                     <td style={{ padding: '0.6rem', overflow: 'hidden' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.25rem' }}>
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                          gap: '0.25rem',
+                        }}
+                      >
                         {onLogistics && (
                           <Button
                             variant="secondary"
                             size="small"
                             title="Логистика"
                             onClick={() => {
-                              console.log('📦 Открываем логистику для товара', p.id, 'package_weight_grams:', p.package_weight_grams);
+                              console.log(
+                                '📦 Открываем логистику для товара',
+                                p.id,
+                                'package_weight_grams:',
+                                p.package_weight_grams
+                              );
                               onLogistics(p);
                             }}
                           >
@@ -598,12 +786,22 @@ const ProductsPage = ({
                           </Button>
                         )}
                         {onAttributes && (
-                          <Button variant="secondary" size="small" title="Характеристики" onClick={() => onAttributes(p)}>
+                          <Button
+                            variant="secondary"
+                            size="small"
+                            title="Характеристики"
+                            onClick={() => onAttributes(p)}
+                          >
                             <Icon name="tag" size={15} />
                           </Button>
                         )}
                         {onVariants && (
-                          <Button variant="secondary" size="small" title="Варианты" onClick={() => onVariants(p)}>
+                          <Button
+                            variant="secondary"
+                            size="small"
+                            title="Варианты"
+                            onClick={() => onVariants(p)}
+                          >
                             <Icon name="variants" size={15} />
                           </Button>
                         )}
@@ -611,9 +809,15 @@ const ProductsPage = ({
                           <Button
                             variant="secondary"
                             size="small"
-                            title={photoBad ? '❌ Фото отсутствует — миграция будет отклонена' : 'Фото'}
+                            title={
+                              photoBad ? '❌ Фото отсутствует — миграция будет отклонена' : 'Фото'
+                            }
                             onClick={() => onPhotos(p)}
-                            style={photoBad ? { boxShadow: '0 0 0 2px var(--danger, #ef4444)' } : undefined}
+                            style={
+                              photoBad
+                                ? { boxShadow: '0 0 0 2px var(--danger, #ef4444)' }
+                                : undefined
+                            }
                           >
                             <Icon name="photo" size={15} />
                           </Button>
@@ -622,9 +826,15 @@ const ProductsPage = ({
                           <Button
                             variant="secondary"
                             size="small"
-                            title={hasBlocking ? '⚠️ Товар имеет блокирующие пропуски' : 'Мигрировать'}
+                            title={
+                              hasBlocking ? '⚠️ Товар имеет блокирующие пропуски' : 'Мигрировать'
+                            }
                             onClick={() => onMigrate(p)}
-                            style={hasBlocking ? { boxShadow: '0 0 0 2px var(--warning, #f59e0b)' } : undefined}
+                            style={
+                              hasBlocking
+                                ? { boxShadow: '0 0 0 2px var(--warning, #f59e0b)' }
+                                : undefined
+                            }
                           >
                             <Icon name="migrate" size={15} />
                           </Button>
@@ -633,7 +843,10 @@ const ProductsPage = ({
                           variant="secondary"
                           size="small"
                           title="Удалить товар"
-                          onClick={() => { setDeleteTargetId(p.id); setDeleteMode('single'); }}
+                          onClick={() => {
+                            setDeleteTargetId(p.id);
+                            setDeleteMode('single');
+                          }}
                         >
                           <Icon name="trash" size={15} />
                         </Button>
@@ -649,20 +862,53 @@ const ProductsPage = ({
 
       {/* ==================== Пагинация ==================== */}
       {total > 0 && (
-        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-          <Button variant="secondary" size="small" disabled={skip === 0} onClick={() => setSkip(0)} title="Первая страница">
+        <div
+          style={{
+            display: 'flex',
+            gap: '0.5rem',
+            justifyContent: 'center',
+            alignItems: 'center',
+            marginTop: '0.75rem',
+            flexWrap: 'wrap',
+          }}
+        >
+          <Button
+            variant="secondary"
+            size="small"
+            disabled={skip === 0}
+            onClick={() => setSkip(0)}
+            title="Первая страница"
+          >
             « В начало
           </Button>
-          <Button variant="secondary" size="small" disabled={skip === 0} onClick={() => setSkip(Math.max(0, skip - limit))}>
+          <Button
+            variant="secondary"
+            size="small"
+            disabled={skip === 0}
+            onClick={() => setSkip(Math.max(0, skip - limit))}
+          >
             ← Назад
           </Button>
-          <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', padding: '0 0.25rem' }}>
+          <span
+            style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', padding: '0 0.25rem' }}
+          >
             Стр. {page} из {pages} · всего {total}
           </span>
-          <Button variant="secondary" size="small" disabled={skip + limit >= total} onClick={() => setSkip(skip + limit)}>
+          <Button
+            variant="secondary"
+            size="small"
+            disabled={skip + limit >= total}
+            onClick={() => setSkip(skip + limit)}
+          >
             Вперёд →
           </Button>
-          <Button variant="secondary" size="small" disabled={skip + limit >= total} onClick={() => setSkip((pages - 1) * limit)} title="Последняя страница">
+          <Button
+            variant="secondary"
+            size="small"
+            disabled={skip + limit >= total}
+            onClick={() => setSkip((pages - 1) * limit)}
+            title="Последняя страница"
+          >
             В конец »
           </Button>
           <select
@@ -675,11 +921,16 @@ const ProductsPage = ({
               fontSize: '0.85rem',
             }}
             value={limit}
-            onChange={(e) => { setLimit(Number(e.target.value)); setSkip(0); }}
+            onChange={(e) => {
+              setLimit(Number(e.target.value));
+              setSkip(0);
+            }}
             title="Товаров на странице"
           >
             {PAGE_SIZE_OPTIONS.map((n) => (
-              <option key={n} value={n}>{n}</option>
+              <option key={n} value={n}>
+                {n}
+              </option>
             ))}
           </select>
         </div>
@@ -693,7 +944,10 @@ const ProductsPage = ({
           isAdmin={isAdmin}
           loading={deleteLoading}
           onConfirm={handleDeleteConfirm}
-          onClose={() => { setDeleteMode(null); setDeleteTargetId(null); }}
+          onClose={() => {
+            setDeleteMode(null);
+            setDeleteTargetId(null);
+          }}
         />
       )}
 
@@ -709,7 +963,10 @@ const ProductsPage = ({
       {showDefaults && (
         <DefaultsModal
           isOpen
-          onClose={() => { setShowDefaults(false); loadGaps(); }}
+          onClose={() => {
+            setShowDefaults(false);
+            loadGaps();
+          }}
           onNotify={setMessage}
           productCategories={productCategories}
           specNames={specNames}
@@ -769,13 +1026,17 @@ const BulkUpdateModal = ({ count, loading, onSubmit, onClose }) => {
         />
 
         <div className="modal-actions">
-          <Button variant="outline" onClick={onClose} disabled={loading}>Отмена</Button>
+          <Button variant="outline" onClick={onClose} disabled={loading}>
+            Отмена
+          </Button>
           <Button
-            onClick={() => onSubmit({
-              price_percent: pricePercent === '' ? undefined : Number(pricePercent),
-              brand: brand.trim() || undefined,
-              category: category.trim() || undefined,
-            })}
+            onClick={() =>
+              onSubmit({
+                price_percent: pricePercent === '' ? undefined : Number(pricePercent),
+                brand: brand.trim() || undefined,
+                category: category.trim() || undefined,
+              })
+            }
             disabled={loading || !canSubmit}
             loading={loading}
           >

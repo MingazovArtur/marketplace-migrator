@@ -23,13 +23,13 @@ data validation, скрытые листы-словари и доп. листы 
 }
 Обратная совместимость v1 ({"категория": "file.xlsx"}) поддерживается при чтении.
 """
+
 import io
 import json
 import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from openpyxl import load_workbook
 
@@ -43,13 +43,16 @@ VAT_LABELS = {"none": "Не облагается", "22": "22", "10": "10", "7": 
 
 BRAND_SYNONYMS = ["бренд", "брендводеждеиобуви", "брендодеждыиобуви"]
 MODEL_SYNONYMS = [
-    "объединитьнаоднойкарточке", "названиемодели",
-    "названиемоделидляобъединенияводнукарточку", "модель",
+    "объединитьнаоднойкарточке",
+    "названиемодели",
+    "названиемоделидляобъединенияводнукарточку",
+    "модель",
 ]
 MARKING_SYNONYMS = ["нуженкодмаркировки", "кодмаркировки", "маркировка"]
 
 
 # ==================== Служебные ====================
+
 
 def _norm(s: str) -> str:
     """Нормализация имени колонки/атрибута: только буквы+цифры, нижний регистр."""
@@ -66,7 +69,7 @@ def _normalize_multi(value: str) -> str:
     return ";".join(p.strip() for p in parts if p.strip())
 
 
-def _load_index() -> Dict[str, dict]:
+def _load_index() -> dict[str, dict]:
     """Читает index.json с миграцией старого формата v1 → v2."""
     if not INDEX_PATH.exists():
         return {}
@@ -74,9 +77,9 @@ def _load_index() -> Dict[str, dict]:
         raw = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
     except Exception:
         return {}
-    out: Dict[str, dict] = {}
+    out: dict[str, dict] = {}
     for cat, val in (raw or {}).items():
-        if isinstance(val, str):                      # v1: просто имя файла
+        if isinstance(val, str):  # v1: просто имя файла
             out[cat] = {"file": val, "uploaded_at": None, "uploaded_by": None, "columns": None}
         elif isinstance(val, dict) and val.get("file"):
             out[cat] = {
@@ -88,12 +91,12 @@ def _load_index() -> Dict[str, dict]:
     return out
 
 
-def _save_index(index: Dict[str, dict]) -> None:
+def _save_index(index: dict[str, dict]) -> None:
     TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
     INDEX_PATH.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _find_header_row(ws) -> Optional[int]:
+def _find_header_row(ws) -> int | None:
     """Строка заголовков: обычно 2-я; ищем «Артикул» на случай сдвига."""
     for row in range(1, 6):
         for cell in ws[row]:
@@ -102,7 +105,7 @@ def _find_header_row(ws) -> Optional[int]:
     return None
 
 
-def _count_columns(data: bytes) -> Optional[int]:
+def _count_columns(data: bytes) -> int | None:
     """Число колонок шаблона (непустые заголовки строки 2) — для метаданных."""
     try:
         wb = load_workbook(io.BytesIO(data), read_only=True)
@@ -118,12 +121,13 @@ def _count_columns(data: bytes) -> Optional[int]:
 
 # ==================== Публичный API хранилища ====================
 
+
 def has_official_template(category_name: str) -> bool:
     meta = _load_index().get(category_name)
     return bool(meta) and (TEMPLATES_DIR / meta["file"]).exists()
 
 
-def template_path(category_name: str) -> Optional[Path]:
+def template_path(category_name: str) -> Path | None:
     meta = _load_index().get(category_name)
     if not meta:
         return None
@@ -131,14 +135,14 @@ def template_path(category_name: str) -> Optional[Path]:
     return p if p.exists() else None
 
 
-def get_template_meta(category_name: str) -> Optional[dict]:
+def get_template_meta(category_name: str) -> dict | None:
     meta = _load_index().get(category_name)
     if not meta or not (TEMPLATES_DIR / meta["file"]).exists():
         return None
     return {"category_name": category_name, **meta}
 
 
-def list_official_templates() -> List[dict]:
+def list_official_templates() -> list[dict]:
     """✅ Метаданные всех эталонов (для страницы «Шаблоны площадок»)."""
     idx = _load_index()
     res = []
@@ -148,17 +152,19 @@ def list_official_templates() -> List[dict]:
     return sorted(res, key=lambda x: x["category_name"])
 
 
-def list_template_names() -> List[str]:
+def list_template_names() -> list[str]:
     """Имена категорий с эталонами (обратная совместимость со старым UI)."""
     return [t["category_name"] for t in list_official_templates()]
 
 
-def read_template_bytes(category_name: str) -> Optional[bytes]:
+def read_template_bytes(category_name: str) -> bytes | None:
     p = template_path(category_name)
     return p.read_bytes() if p else None
 
 
-def save_official_template(category_name: str, data: bytes, uploaded_by: Optional[str] = None) -> dict:
+def save_official_template(
+    category_name: str, data: bytes, uploaded_by: str | None = None
+) -> dict:
     TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
     idx = _load_index()
     fname = f"{_slug(category_name)}.xlsx"
@@ -175,8 +181,10 @@ def save_official_template(category_name: str, data: bytes, uploaded_by: Optiona
     }
     idx[category_name] = meta
     _save_index(idx)
-    logger.info(f"💾 Эталон Ozon сохранён: '{category_name}' → {fname} "
-                f"(колонок: {meta['columns']}, загрузил: {uploaded_by})")
+    logger.info(
+        f"💾 Эталон Ozon сохранён: '{category_name}' → {fname} "
+        f"(колонок: {meta['columns']}, загрузил: {uploaded_by})"
+    )
     return meta
 
 
@@ -190,7 +198,7 @@ def delete_official_template(category_name: str) -> bool:
     return False
 
 
-def validate_template_bytes(data: bytes) -> Optional[str]:
+def validate_template_bytes(data: bytes) -> str | None:
     """Быстрая проверка, что файл похож на шаблон Ozon. Возвращает ошибку или None."""
     try:
         wb = load_workbook(io.BytesIO(data), read_only=True)
@@ -211,16 +219,24 @@ def validate_template_bytes(data: bytes) -> Optional[str]:
 
 # ==================== Значения строки товара ====================
 
-def _row_values(product: dict, row_num: int, enum_fix: Dict[str, Dict[str, str]]) -> Dict[str, object]:
+
+def _row_values(
+    product: dict, row_num: int, enum_fix: dict[str, dict[str, str]]
+) -> dict[str, object]:
     """Значения строки товара. Ключи — нормализованные имена колонок эталона."""
     photos = product.get("photos") or []
-    attr_map = {_norm(a.get("name")): a.get("value")
-                for a in (product.get("attributes") or []) if a.get("name")}
+    attr_map = {
+        _norm(a.get("name")): a.get("value")
+        for a in (product.get("attributes") or [])
+        if a.get("name")
+    }
 
-    values: Dict[str, object] = {
+    values: dict[str, object] = {
         "№": row_num,
-        "артикул": product.get("_article") or product.get("sku")
-                   or product.get("external_id") or f"ID{product.get('id')}",
+        "артикул": product.get("_article")
+        or product.get("sku")
+        or product.get("external_id")
+        or f"ID{product.get('id')}",
         "названиетовара": product.get("name"),
         "предельнаяценабезакцийруб": product.get("price"),
         "зачёркнутаяценаруб": product.get("strike_price"),
@@ -247,7 +263,7 @@ def _row_values(product: dict, row_num: int, enum_fix: Dict[str, Dict[str, str]]
                 values[b] = attr_map[b]
                 break
     if not any(values.get(m) for m in MODEL_SYNONYMS):
-        values[MODEL_SYNONYMS[0]] = product.get("name")     # модель = название товара
+        values[MODEL_SYNONYMS[0]] = product.get("name")  # модель = название товара
     if not any(values.get(m) for m in MARKING_SYNONYMS):
         values[MARKING_SYNONYMS[0]] = "Нет"
     if not values.get("количествовупаковке") and not values.get("количествовупаковкешт"):
@@ -268,9 +284,9 @@ def _row_values(product: dict, row_num: int, enum_fix: Dict[str, Dict[str, str]]
     return values
 
 
-def _build_enum_fix(spec: Optional[dict]) -> Dict[str, Dict[str, str]]:
+def _build_enum_fix(spec: dict | None) -> dict[str, dict[str, str]]:
     """Индекс нормализованных словарных значений для исправления регистра."""
-    fix: Dict[str, Dict[str, str]] = {}
+    fix: dict[str, dict[str, str]] = {}
     for a in (spec or {}).get("attributes") or []:
         vals = a.get("values") or []
         if vals:
@@ -280,7 +296,10 @@ def _build_enum_fix(spec: Optional[dict]) -> Dict[str, Dict[str, str]]:
 
 # ==================== Заполнение эталона ====================
 
-def fill_official_template(category_name: str, products: list, spec: Optional[dict] = None) -> bytes:
+
+def fill_official_template(
+    category_name: str, products: list, spec: dict | None = None
+) -> bytes:
     """
     Открывает эталонный файл Ozon категории и дописывает товары с 5-й строки.
     Формат (строки 1–4, стили, списки, листы) остаётся нетронутым.
@@ -293,7 +312,7 @@ def fill_official_template(category_name: str, products: list, spec: Optional[di
     ws = wb["Шаблон"] if "Шаблон" in wb.sheetnames else wb.active
 
     header_row = _find_header_row(ws) or 2
-    headers: Dict[str, int] = {}
+    headers: dict[str, int] = {}
     for col in range(1, ws.max_column + 1):
         h = ws.cell(row=header_row, column=col).value
         if h:
@@ -304,7 +323,7 @@ def fill_official_template(category_name: str, products: list, spec: Optional[di
         ws.delete_rows(DATA_START_ROW, ws.max_row - DATA_START_ROW + 1)
 
     # Уникализация артикулов (правило Ozon: дубли → _2, _3)
-    seen: Dict[str, int] = {}
+    seen: dict[str, int] = {}
     for p in products:
         base = p.get("sku") or p.get("external_id") or f"ID{p.get('id')}"
         seen[base] = seen.get(base, 0) + 1
@@ -320,8 +339,14 @@ def fill_official_template(category_name: str, products: list, spec: Optional[di
             if val in (None, ""):
                 continue
             # Числовые колонки отдаём числами, а не строками
-            if key in ("весвупаковкег", "ширинаупаковкимм", "высотаупаковкимм",
-                       "длинаупаковкимм", "предельнаяценабезакцийруб", "зачёркнутаяценаруб"):
+            if key in (
+                "весвупаковкег",
+                "ширинаупаковкимм",
+                "высотаупаковкимм",
+                "длинаупаковкимм",
+                "предельнаяценабезакцийруб",
+                "зачёркнутаяценаруб",
+            ):
                 try:
                     num = float(val)
                     val = int(num) if num == int(num) else num

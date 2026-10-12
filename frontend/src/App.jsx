@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import CategoryMapping from './CategoryMapping';
 import { useAuth } from './hooks/useAuth';
 import { useProducts } from './hooks/useProducts';
@@ -96,16 +96,16 @@ function App() {
 
   // ==================== Хуки данных ====================
   const {
-    products, stats, loading: productsLoading, loadData,
+    products,
+    stats,
+    loading: productsLoading,
+    loadData,
     getProductById,
   } = useProducts(token, handleLogout);
 
-  const { isMigratingProductId, migrateProduct, migrateBatch, pollBatchProgress } =
-    useMigration(loadData, setMessage);
-
-  const sources = useMemo(
-    () => Array.from(new Set(products.map((p) => p.source).filter(Boolean))).sort(),
-    [products]
+  const { isMigratingProductId, migrateProduct, migrateBatch, pollBatchProgress } = useMigration(
+    loadData,
+    setMessage
   );
 
   // ✅ ОБЪЕДИНЁННАЯ функция перезагрузки:
@@ -120,67 +120,81 @@ function App() {
   }, [loadData]);
 
   // ==================== Обработчики импорта ====================
-  const handleImport = useCallback(async (fullKey) => {
-    try {
-      const data = await api.importProducts(fullKey);
-      if (data.success) {
-        setMessage(`✅ Импортировано ${data.imported} товаров${data.is_mock ? ' (тест)' : ''}`);
-        setShowImportModal(false);
-        await refreshAll();
-      } else {
-        setMessage('❌ Ошибка импорта: ' + (data.detail || 'неизвестно'));
+  const handleImport = useCallback(
+    async (fullKey) => {
+      try {
+        const data = await api.importProducts(fullKey);
+        if (data.success) {
+          setMessage(`✅ Импортировано ${data.imported} товаров${data.is_mock ? ' (тест)' : ''}`);
+          setShowImportModal(false);
+          await refreshAll();
+        } else {
+          setMessage('❌ Ошибка импорта: ' + (data.detail || 'неизвестно'));
+        }
+      } catch (e) {
+        setMessage('❌ ' + e.message);
       }
-    } catch (e) {
-      setMessage('❌ ' + e.message);
-    }
-  }, [refreshAll]);
+    },
+    [refreshAll]
+  );
 
-  const handleFileImport = useCallback(async (platform, file, mode = 'create') => {
-    try {
-      const data = await api.importFromFile(platform, file, mode);
-      if (data.success) {
-        let msg = `✅ ${data.message || `Импортировано ${data.imported} товаров`}`;
-        if (data.updated) msg += ` · обновлено: ${data.updated}`;
-        setMessage(msg);
-        setShowImportModal(false);
-        await refreshAll();
-      } else {
-        setMessage('❌ ' + (data.detail || 'Ошибка импорта'));
+  const handleFileImport = useCallback(
+    async (platform, file, mode = 'create') => {
+      try {
+        const data = await api.importFromFile(platform, file, mode);
+        if (data.success) {
+          let msg = `✅ ${data.message || `Импортировано ${data.imported} товаров`}`;
+          if (data.updated) msg += ` · обновлено: ${data.updated}`;
+          setMessage(msg);
+          setShowImportModal(false);
+          await refreshAll();
+        } else {
+          setMessage('❌ ' + (data.detail || 'Ошибка импорта'));
+        }
+      } catch (e) {
+        setMessage('❌ ' + e.message);
       }
-    } catch (e) {
-      setMessage('❌ ' + e.message);
-    }
-  }, [refreshAll]);
+    },
+    [refreshAll]
+  );
 
   // ==================== Обработчики миграции ====================
-  const handleConfirmMigrate = useCallback(async (id, platform, edited, autoExport = true) => {
-    setMigrateProductId(null);
-    try {
-      await migrateProduct(id, platform, edited);
-      setMessage('✅ Карточка мигрирована');
+  const handleConfirmMigrate = useCallback(
+    async (id, platform, edited, autoExport = true) => {
+      setMigrateProductId(null);
+      try {
+        await migrateProduct(id, platform, edited);
+        setMessage('✅ Карточка мигрирована');
 
-      if (autoExport) {
-        try {
-          await api.exportXlsxV2(platform);
-          setMessage(`✅ Карточка перенесена. Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
-        } catch (e) {
-          setMessage(`✅ Карточка перенесена, но файл не скачался: ${e.message}`);
+        if (autoExport) {
+          try {
+            await api.exportXlsxV2(platform);
+            setMessage(
+              `✅ Карточка перенесена. Файл для ${platform} скачан — загрузите его в кабинете площадки.`
+            );
+          } catch (e) {
+            setMessage(`✅ Карточка перенесена, но файл не скачался: ${e.message}`);
+          }
         }
+      } catch (e) {
+        setMessage(`❌ Ошибка миграции: ${e.message}`);
       }
-    } catch (e) {
-      setMessage(`❌ Ошибка миграции: ${e.message}`);
-    }
-  }, [migrateProduct]);
+    },
+    [migrateProduct]
+  );
 
-  const handleAutoExport = useCallback(async (platform) => {
-    try {
-      await api.exportXlsxV2(platform);
-      setMessage(`Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
-      await refreshAll();
-    } catch (e) {
-      setMessage('❌ Не удалось скачать файл: ' + e.message);
-    }
-  }, [refreshAll]);
+  const handleAutoExport = useCallback(
+    async (platform) => {
+      try {
+        await api.exportXlsxV2(platform);
+        setMessage(`Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
+        await refreshAll();
+      } catch (e) {
+        setMessage('❌ Не удалось скачать файл: ' + e.message);
+      }
+    },
+    [refreshAll]
+  );
 
   const handleCloseBatchModal = useCallback(() => {
     setShowBatchModal(false);
@@ -188,9 +202,12 @@ function App() {
     refreshAll();
   }, [refreshAll]);
 
-  const handleStartBatchMigration = useCallback(async (ids, platform) => {
-    return await migrateBatch(ids, platform);
-  }, [migrateBatch]);
+  const handleStartBatchMigration = useCallback(
+    async (ids, platform) => {
+      return await migrateBatch(ids, platform);
+    },
+    [migrateBatch]
+  );
 
   const handleProductsPageMigrate = useCallback((target) => {
     if (Array.isArray(target)) {
@@ -202,31 +219,20 @@ function App() {
   }, []);
 
   // ==================== Обработчики массового обновления ====================
-  const handleBulkEdit = useCallback(async (payload) => {
-    try {
-      const data = await api.bulkUpdateProducts(payload);
-      setMessage(`✅ Обновлено товаров: ${data.updated}`);
-      setShowBulkModal(false);
-      setSelectedProductIds([]);
-      await refreshAll();
-    } catch (e) {
-      setMessage('❌ ' + e.message);
-    }
-  }, [refreshAll]);
-
-  // ==================== Обработчики экспорта ====================
-  const handleExportReport = useCallback(async () => {
-    if (!stats || stats.total === 0) {
-      setMessage('Нет товаров для экспорта.');
-      return;
-    }
-    try {
-      await api.exportReport();
-      setMessage('✅ Отчет успешно скачан!');
-    } catch (e) {
-      setMessage('❌ Ошибка при скачивании отчета: ' + e.message);
-    }
-  }, [stats]);
+  const handleBulkEdit = useCallback(
+    async (payload) => {
+      try {
+        const data = await api.bulkUpdateProducts(payload);
+        setMessage(`✅ Обновлено товаров: ${data.updated}`);
+        setShowBulkModal(false);
+        setSelectedProductIds([]);
+        await refreshAll();
+      } catch (e) {
+        setMessage('❌ ' + e.message);
+      }
+    },
+    [refreshAll]
+  );
 
   const handleExportForPlatform = useCallback(async (platform, status) => {
     try {
@@ -326,7 +332,9 @@ function App() {
             <Icon name="import" size={44} />
           </div>
           <h3>Из Excel / CSV</h3>
-          <p>Рекомендуемый способ: выгрузка из кабинета Ozon, WB, Яндекс Маркет или Магнит Маркет</p>
+          <p>
+            Рекомендуемый способ: выгрузка из кабинета Ozon, WB, Яндекс Маркет или Магнит Маркет
+          </p>
           <Button>Выбрать файл</Button>
         </div>
         <div
@@ -349,17 +357,23 @@ function App() {
 
   const renderView = () => {
     switch (currentView) {
-      case 'dashboard': return renderDashboard();
-      case 'import':    return renderImport();
-      case 'mapping':   return <CategoryMapping onBack={() => setCurrentView('products')} />;
-      case 'history':   return <HistoryView />;
-      case 'specs':     return <SpecsPage />;
-      case 'templates': return <TemplatesPage onNotify={setMessage} />;
+      case 'dashboard':
+        return renderDashboard();
+      case 'import':
+        return renderImport();
+      case 'mapping':
+        return <CategoryMapping onBack={() => setCurrentView('products')} />;
+      case 'history':
+        return <HistoryView />;
+      case 'specs':
+        return <SpecsPage />;
+      case 'templates':
+        return <TemplatesPage onNotify={setMessage} />;
       case 'products':
         return (
           <ProductsPage
             isAdmin={user?.role === 'admin'}
-            refreshKey={refreshKey}             
+            refreshKey={refreshKey}
             onMigrate={handleProductsPageMigrate}
             onLogistics={handleEditLogistics}
             onAttributes={handleEditAttributes}
@@ -369,7 +383,8 @@ function App() {
             onImport={() => setShowImportModal(true)}
           />
         );
-      default: return renderDashboard();
+      default:
+        return renderDashboard();
     }
   };
 

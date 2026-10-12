@@ -14,15 +14,27 @@ const PLATFORMS = [
 const getStaleness = (fetchedAt) => {
   if (!fetchedAt) return { level: 'none', label: 'Не загружено', color: 'var(--text-muted)' };
   const days = Math.floor((Date.now() - new Date(fetchedAt).getTime()) / 86400000);
-  if (days <= 7) return { level: 'fresh', label: `Обновлено ${days} дн. назад`, color: 'var(--accent-success)' };
-  if (days <= 30) return { level: 'normal', label: `Обновлено ${days} дн. назад`, color: 'var(--accent-warning)' };
+  if (days <= 7)
+    return { level: 'fresh', label: `Обновлено ${days} дн. назад`, color: 'var(--accent-success)' };
+  if (days <= 30)
+    return {
+      level: 'normal',
+      label: `Обновлено ${days} дн. назад`,
+      color: 'var(--accent-warning)',
+    };
   return { level: 'stale', label: `Устарело (${days} дн.)`, color: 'var(--accent-danger)' };
 };
 
 const formatDate = (iso) =>
-  iso ? new Date(iso).toLocaleString('ru-RU', {
-    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  }) : '—';
+  iso
+    ? new Date(iso).toLocaleString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '—';
 
 const SpecsPage = () => {
   const [platform, setPlatform] = useState('ozon');
@@ -72,25 +84,30 @@ const SpecsPage = () => {
     }
   }, [platform]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   // =====================================================================
   // ✅ Ленивая загрузка полной спеки по клику «Атрибуты»
   // =====================================================================
-  const openSpecDetail = useCallback(async (categoryName) => {
-    setSpecLoading(true);
-    setSpecError('');
-    setSelectedSpec(null);
-    try {
-      // category_id у нас равен category_name (так сохранено в БД)
-      const spec = await api.getSpec(platform, categoryName);
-      setSelectedSpec(spec);
-    } catch (e) {
-      setSpecError(e.message);
-    } finally {
-      setSpecLoading(false);
-    }
-  }, [platform]);
+  const openSpecDetail = useCallback(
+    async (categoryName) => {
+      setSpecLoading(true);
+      setSpecError('');
+      setSelectedSpec(null);
+      try {
+        // category_id у нас равен category_name (так сохранено в БД)
+        const spec = await api.getSpec(platform, categoryName);
+        setSelectedSpec(spec);
+      } catch (e) {
+        setSpecError(e.message);
+      } finally {
+        setSpecLoading(false);
+      }
+    },
+    [platform]
+  );
 
   // ✅ Остановка polling при размонтировании
   useEffect(() => {
@@ -105,32 +122,35 @@ const SpecsPage = () => {
   // =====================================================================
   // Polling прогресса для фоновой загрузки Ozon
   // =====================================================================
-  const startPolling = useCallback((taskId) => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
+  const startPolling = useCallback(
+    (taskId) => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
 
-    pollingRef.current = setInterval(async () => {
-      try {
-        const p = await api.getSpecsRefreshProgress(platform, taskId);
-        setProgress(p);
+      pollingRef.current = setInterval(async () => {
+        try {
+          const p = await api.getSpecsRefreshProgress(platform, taskId);
+          setProgress(p);
 
-        if (p.status === 'completed' || p.status === 'failed') {
-          clearInterval(pollingRef.current);
-          pollingRef.current = null;
+          if (p.status === 'completed' || p.status === 'failed') {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
 
-          if (p.status === 'completed') {
-            setRefreshMessage(
-              `✅ Готово: ${p.success || p.done || 0} категорий загружено. Ошибок: ${p.errors || 0}.`
-            );
-            await load();
-          } else if (p.status === 'failed') {
-            setRefreshMessage(`❌ Ошибка загрузки: ${p.error || 'неизвестная ошибка'}`);
+            if (p.status === 'completed') {
+              setRefreshMessage(
+                `✅ Готово: ${p.success || p.done || 0} категорий загружено. Ошибок: ${p.errors || 0}.`
+              );
+              await load();
+            } else if (p.status === 'failed') {
+              setRefreshMessage(`❌ Ошибка загрузки: ${p.error || 'неизвестная ошибка'}`);
+            }
           }
+        } catch (err) {
+          console.warn('Polling failed:', err);
         }
-      } catch (err) {
-        console.warn('Polling failed:', err);
-      }
-    }, 2000);
-  }, [platform, load]);
+      }, 2000);
+    },
+    [platform, load]
+  );
 
   const handleCloseModal = () => {
     if (pollingRef.current) {
@@ -162,9 +182,7 @@ const SpecsPage = () => {
       }
 
       // ==================== YANDEX / WB: синхронно ====================
-      setRefreshMessage(
-        `✅ Загружено категорий: ${result.fetched}. Ошибок: ${result.errors}`
-      );
+      setRefreshMessage(`✅ Загружено категорий: ${result.fetched}. Ошибок: ${result.errors}`);
       setShowRefreshModal(false);
       setRefreshLoading(false);
       await load();
@@ -215,7 +233,11 @@ const SpecsPage = () => {
         ))}
       </div>
 
-      {error && <div className="alert alert-error"><div>{error}</div></div>}
+      {error && (
+        <div className="alert alert-error">
+          <div>{error}</div>
+        </div>
+      )}
 
       {loading && categoryNames.length === 0 && (
         <div className="card">
@@ -230,7 +252,7 @@ const SpecsPage = () => {
         <EmptyState
           icon={<Icon name="layers" size={56} />}
           title="Спеки ещё не загружены"
-          description={`Загрузите спецификации ${PLATFORMS.find(p => p.id === platform)?.name} через официальный API площадки. Потребуется API-ключ продавца.`}
+          description={`Загрузите спецификации ${PLATFORMS.find((p) => p.id === platform)?.name} через официальный API площадки. Потребуется API-ключ продавца.`}
           actionLabel="Загрузить спеки"
           onAction={() => setShowRefreshModal(true)}
         />
@@ -242,7 +264,8 @@ const SpecsPage = () => {
           <div className="card" style={{ padding: '1rem 1.25rem', marginBottom: '1rem' }}>
             <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
               <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                Всего категорий: <strong style={{ color: 'var(--text-primary)' }}>{categoryNames.length}</strong>
+                Всего категорий:{' '}
+                <strong style={{ color: 'var(--text-primary)' }}>{categoryNames.length}</strong>
               </div>
               <input
                 className="form-input"
@@ -264,20 +287,31 @@ const SpecsPage = () => {
                   className="card spec-card"
                   style={{ padding: '0.75rem 1.25rem' }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                  <div
+                    style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}
+                  >
                     <div style={{ flex: 1, minWidth: 200 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <span
                           style={{
-                            width: 8, height: 8, borderRadius: '50%',
-                            background: st.color, display: 'inline-block',
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            background: st.color,
+                            display: 'inline-block',
                           }}
                           title={st.label}
                         />
                         <strong style={{ fontSize: '1rem' }}>{cat.category_name}</strong>
                       </div>
                       {cat.category_id && cat.category_id !== cat.category_name && (
-                        <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.15rem' }}>
+                        <div
+                          style={{
+                            color: 'var(--text-muted)',
+                            fontSize: '0.8rem',
+                            marginTop: '0.15rem',
+                          }}
+                        >
                           ID: {cat.category_id}
                         </div>
                       )}
@@ -307,7 +341,8 @@ const SpecsPage = () => {
                   fontSize: '0.9rem',
                 }}
               >
-                ...и ещё <strong>{hiddenCount}</strong> категорий. Уточните поиск, чтобы увидеть больше.
+                ...и ещё <strong>{hiddenCount}</strong> категорий. Уточните поиск, чтобы увидеть
+                больше.
               </div>
             )}
 
@@ -363,7 +398,7 @@ const RefreshSpecsModal = ({ platform, loading, message, progress, onClose, onSu
   const [businessId, setBusinessId] = useState('');
   const [hasServerKey, setHasServerKey] = useState(false);
 
-  const platformInfo = PLATFORMS.find(p => p.id === platform);
+  const platformInfo = PLATFORMS.find((p) => p.id === platform);
   const isOzon = platform === 'ozon';
   const isYandex = platform === 'yandex';
   const isWb = platform === 'wildberries';
@@ -376,41 +411,43 @@ const RefreshSpecsModal = ({ platform, loading, message, progress, onClose, onSu
       return;
     }
     let cancelled = false;
-    api.getSpecKeySource(platform)
+    api
+      .getSpecKeySource(platform)
       .then((data) => {
         if (!cancelled) setHasServerKey(!!(data && data.has_server_key));
       })
       .catch(() => {
         if (!cancelled) setHasServerKey(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [platform, isOzon]);
 
-  const ozonKeyError = isOzon && apiKey.trim() && !/^\d+\s*:\s*\S+$/.test(apiKey.trim())
-    ? 'Неверный формат. Нужно: ЧИСЛО:UUID, например 1234567:e30b97e3-997e-4574-8ddf-56466bcd20b8. Числовой Client ID — в кабинете Ozon → Настройки → API-ключи.'
-    : '';
+  const ozonKeyError =
+    isOzon && apiKey.trim() && !/^\d+\s*:\s*\S+$/.test(apiKey.trim())
+      ? 'Неверный формат. Нужно: ЧИСЛО:UUID, например 1234567:e30b97e3-997e-4574-8ddf-56466bcd20b8. Числовой Client ID — в кабинете Ozon → Настройки → API-ключи.'
+      : '';
 
-  const canSubmit = !isRunning && (
-    isOzon
-      ? ((!!apiKey.trim() && !ozonKeyError) || hasServerKey)
+  const canSubmit =
+    !isRunning &&
+    (isOzon
+      ? (!!apiKey.trim() && !ozonKeyError) || hasServerKey
       : isYandex
         ? !!apiKey.trim() && !!businessId.trim()
         : isWb
           ? !!apiKey.trim()
-          : false
-  );
+          : false);
 
   const placeholder = isOzon
-    ? (hasServerKey
+    ? hasServerKey
       ? 'Оставьте пустым для использования серверного ключа'
-      : '1234567:e30b97e3-997e-4574-8ddf-56466bcd20b8')
+      : '1234567:e30b97e3-997e-4574-8ddf-56466bcd20b8'
     : isYandex
       ? 'OAuth-токен Яндекс Маркета'
       : 'API-ключ WB (категория «Контент»)';
 
-  const percent = progress?.total
-    ? Math.round(((progress.done || 0) * 100) / progress.total)
-    : 0;
+  const percent = progress?.total ? Math.round(((progress.done || 0) * 100) / progress.total) : 0;
 
   return (
     <div className="modal-overlay" onClick={isRunning ? undefined : onClose}>
@@ -431,8 +468,8 @@ const RefreshSpecsModal = ({ platform, loading, message, progress, onClose, onSu
         </div>
 
         <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.9rem' }}>
-          Мы подтянем структуру категорий и атрибуты через официальный API площадки.
-          Ключ используется только для этого запроса и не сохраняется в БД.
+          Мы подтянем структуру категорий и атрибуты через официальный API площадки. Ключ
+          используется только для этого запроса и не сохраняется в БД.
         </p>
 
         {!isOzon && !isYandex && !isWb && (
@@ -462,13 +499,24 @@ const RefreshSpecsModal = ({ platform, loading, message, progress, onClose, onSu
           disabled={(!isOzon && !isYandex && !isWb) || loading || isRunning}
         />
         <p className="form-hint">
-          {isOzon
-            ? <>Формат: <code>ЧИСЛО:UUID</code> — числовой Client ID и API-ключ из ЛК Ozon Seller → Настройки → API-ключи. Не пишите слово «client_id».</>
-            : isYandex
-              ? <>Токен выдаётся в кабинете продавца Яндекс Маркета (Настройки → Интеграция по API). Формат заголовка: <code>OAuth &lt;token&gt;</code>.</>
-              : isWb
-                ? <>Ключ категории «Контент»: кабинет WB Partners → Настройки → API-доступ → Контент. Передаётся в заголовке <code>Authorization</code> без схемы.</>
-                : '—'}
+          {isOzon ? (
+            <>
+              Формат: <code>ЧИСЛО:UUID</code> — числовой Client ID и API-ключ из ЛК Ozon Seller →
+              Настройки → API-ключи. Не пишите слово «client_id».
+            </>
+          ) : isYandex ? (
+            <>
+              Токен выдаётся в кабинете продавца Яндекс Маркета (Настройки → Интеграция по API).
+              Формат заголовка: <code>OAuth &lt;token&gt;</code>.
+            </>
+          ) : isWb ? (
+            <>
+              Ключ категории «Контент»: кабинет WB Partners → Настройки → API-доступ → Контент.
+              Передаётся в заголовке <code>Authorization</code> без схемы.
+            </>
+          ) : (
+            '—'
+          )}
         </p>
 
         {ozonKeyError && (
@@ -489,22 +537,33 @@ const RefreshSpecsModal = ({ platform, loading, message, progress, onClose, onSu
               disabled={loading || isRunning}
             />
             <p className="form-hint">
-              Номер кабинета виден в URL личного кабинета: <code>seller.market.yandex.ru/business/1234567/...</code>
+              Номер кабинета виден в URL личного кабинета:{' '}
+              <code>seller.market.yandex.ru/business/1234567/...</code>
             </p>
           </>
         )}
 
         {/* Прогресс-бар фоновой загрузки */}
         {isRunning && (
-          <div style={{
-            marginTop: '1rem', padding: '0.75rem',
-            background: 'var(--bg-secondary)', borderRadius: 6,
-            border: '1px solid var(--border-color)',
-          }}>
-            <div style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: 600,
-            }}>
+          <div
+            style={{
+              marginTop: '1rem',
+              padding: '0.75rem',
+              background: 'var(--bg-secondary)',
+              borderRadius: 6,
+              border: '1px solid var(--border-color)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '0.5rem',
+                fontSize: '0.9rem',
+                fontWeight: 600,
+              }}
+            >
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
                 Загрузка в фоне (параллельно, ~10-20 мин)
@@ -512,22 +571,36 @@ const RefreshSpecsModal = ({ platform, loading, message, progress, onClose, onSu
               <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{percent}%</span>
             </div>
 
-            <div style={{
-              height: 8, background: 'var(--border-light)',
-              borderRadius: 4, overflow: 'hidden', marginBottom: '0.5rem',
-            }}>
-              <div style={{
-                height: '100%', width: `${percent}%`,
-                background: 'var(--accent-primary)', borderRadius: 4,
-                transition: 'width 0.3s ease',
-              }} />
+            <div
+              style={{
+                height: 8,
+                background: 'var(--border-light)',
+                borderRadius: 4,
+                overflow: 'hidden',
+                marginBottom: '0.5rem',
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${percent}%`,
+                  background: 'var(--accent-primary)',
+                  borderRadius: 4,
+                  transition: 'width 0.3s ease',
+                }}
+              />
             </div>
 
             <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              Загружено: <strong style={{ color: 'var(--accent-success)' }}>{progress.done || 0}</strong>
-              {' '}из <strong>{progress.total || 0}</strong>
+              Загружено:{' '}
+              <strong style={{ color: 'var(--accent-success)' }}>{progress.done || 0}</strong> из{' '}
+              <strong>{progress.total || 0}</strong>
               {progress.errors > 0 && (
-                <> · Ошибок: <strong style={{ color: 'var(--accent-danger)' }}>{progress.errors}</strong></>
+                <>
+                  {' '}
+                  · Ошибок:{' '}
+                  <strong style={{ color: 'var(--accent-danger)' }}>{progress.errors}</strong>
+                </>
               )}
             </div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
@@ -539,8 +612,14 @@ const RefreshSpecsModal = ({ platform, loading, message, progress, onClose, onSu
         {progress?.status === 'completed' && (
           <div className="alert alert-success" style={{ marginTop: '0.75rem' }}>
             <div>
-              ✅ Готово! Загружено <strong>{progress.success || progress.done || 0}</strong> категорий.
-              {progress.errors > 0 && <> Ошибок: <strong>{progress.errors}</strong>.</>}
+              ✅ Готово! Загружено <strong>{progress.success || progress.done || 0}</strong>{' '}
+              категорий.
+              {progress.errors > 0 && (
+                <>
+                  {' '}
+                  Ошибок: <strong>{progress.errors}</strong>.
+                </>
+              )}
             </div>
           </div>
         )}
@@ -590,15 +669,20 @@ const SpecDetailModal = ({ spec, loading, error, onClose }) => {
 
   const filtered = attrs.filter((a) => {
     if (onlyRequired && !a.required) return false;
-    if (q && !a.name.toLowerCase().includes(q) && !String(a.id).toLowerCase().includes(q)) return false;
+    if (q && !a.name.toLowerCase().includes(q) && !String(a.id).toLowerCase().includes(q))
+      return false;
     return true;
   });
 
-  const requiredCount = attrs.filter(a => a.required).length;
+  const requiredCount = attrs.filter((a) => a.required).length;
 
-  const typeLabel = (t) => ({
-    number: 'Число', text: 'Текст', select: 'Выбор', multiselect: 'Множ. выбор',
-  }[t] || t);
+  const typeLabel = (t) =>
+    ({
+      number: 'Число',
+      text: 'Текст',
+      select: 'Выбор',
+      multiselect: 'Множ. выбор',
+    })[t] || t;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -631,7 +715,8 @@ const SpecDetailModal = ({ spec, loading, error, onClose }) => {
         {spec && !loading && (
           <>
             <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
-              ID: {spec.category_id} · Обновлён: {formatDate(spec.fetched_at)} · Версия: {spec.version || '—'}
+              ID: {spec.category_id} · Обновлён: {formatDate(spec.fetched_at)} · Версия:{' '}
+              {spec.version || '—'}
             </div>
 
             <div className="export-validation" style={{ marginBottom: '1rem' }}>
@@ -644,7 +729,9 @@ const SpecDetailModal = ({ spec, loading, error, onClose }) => {
                 <div>обязательных</div>
               </div>
               <div className="validation-card warn">
-                <div className="validation-num">{attrs.filter(a => a.values && a.values.length > 0).length}</div>
+                <div className="validation-num">
+                  {attrs.filter((a) => a.values && a.values.length > 0).length}
+                </div>
                 <div>со словарями</div>
               </div>
               <div className="validation-card">
@@ -653,7 +740,9 @@ const SpecDetailModal = ({ spec, loading, error, onClose }) => {
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+            <div
+              style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}
+            >
               <input
                 className="form-input"
                 placeholder="Поиск по названию или ID..."
@@ -661,10 +750,16 @@ const SpecDetailModal = ({ spec, loading, error, onClose }) => {
                 onChange={(e) => setSearch(e.target.value)}
                 style={{ flex: 1, minWidth: 200 }}
               />
-              <label style={{
-                display: 'flex', alignItems: 'center', gap: '0.4rem',
-                fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap',
-              }}>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  fontSize: '0.85rem',
+                  color: 'var(--text-secondary)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={onlyRequired}
@@ -674,41 +769,122 @@ const SpecDetailModal = ({ spec, loading, error, onClose }) => {
               </label>
             </div>
 
-            <div style={{ maxHeight: '50vh', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 8 }}>
+            <div
+              style={{
+                maxHeight: '50vh',
+                overflowY: 'auto',
+                border: '1px solid var(--border-color)',
+                borderRadius: 8,
+              }}
+            >
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-secondary)', zIndex: 1 }}>
+                <thead
+                  style={{
+                    position: 'sticky',
+                    top: 0,
+                    background: 'var(--bg-secondary)',
+                    zIndex: 1,
+                  }}
+                >
                   <tr>
-                    <th style={{ textAlign: 'left', padding: '0.6rem', borderBottom: '1px solid var(--border-color)' }}>ID</th>
-                    <th style={{ textAlign: 'left', padding: '0.6rem', borderBottom: '1px solid var(--border-color)' }}>Название</th>
-                    <th style={{ textAlign: 'left', padding: '0.6rem', borderBottom: '1px solid var(--border-color)' }}>Тип</th>
-                    <th style={{ textAlign: 'left', padding: '0.6rem', borderBottom: '1px solid var(--border-color)' }}>Группа</th>
-                    <th style={{ textAlign: 'left', padding: '0.6rem', borderBottom: '1px solid var(--border-color)' }}>Значения</th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '0.6rem',
+                        borderBottom: '1px solid var(--border-color)',
+                      }}
+                    >
+                      ID
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '0.6rem',
+                        borderBottom: '1px solid var(--border-color)',
+                      }}
+                    >
+                      Название
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '0.6rem',
+                        borderBottom: '1px solid var(--border-color)',
+                      }}
+                    >
+                      Тип
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '0.6rem',
+                        borderBottom: '1px solid var(--border-color)',
+                      }}
+                    >
+                      Группа
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '0.6rem',
+                        borderBottom: '1px solid var(--border-color)',
+                      }}
+                    >
+                      Значения
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((a) => (
                     <tr key={a.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                      <td style={{ padding: '0.6rem', color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                      <td
+                        style={{
+                          padding: '0.6rem',
+                          color: 'var(--text-muted)',
+                          fontFamily: 'monospace',
+                          fontSize: '0.8rem',
+                        }}
+                      >
                         {a.id}
                       </td>
                       <td style={{ padding: '0.6rem' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                          {a.required && <span style={{ color: 'var(--accent-danger)', fontWeight: 700 }} title="Обязательное">*</span>}
+                          {a.required && (
+                            <span
+                              style={{ color: 'var(--accent-danger)', fontWeight: 700 }}
+                              title="Обязательное"
+                            >
+                              *
+                            </span>
+                          )}
                           {a.name}
                         </div>
                       </td>
                       <td style={{ padding: '0.6rem' }}>
                         <span className="badge badge-pending">{typeLabel(a.type)}</span>
                       </td>
-                      <td style={{ padding: '0.6rem', color: 'var(--text-secondary)' }}>{a.group}</td>
+                      <td style={{ padding: '0.6rem', color: 'var(--text-secondary)' }}>
+                        {a.group}
+                      </td>
                       <td style={{ padding: '0.6rem' }}>
                         {a.values && a.values.length > 0 ? (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', maxWidth: 300 }}>
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '0.25rem',
+                              maxWidth: 300,
+                            }}
+                          >
                             {a.values.slice(0, 3).map((v, i) => (
-                              <span key={i} className="attr-chip" style={{ fontSize: '0.75rem' }}>{v}</span>
+                              <span key={i} className="attr-chip" style={{ fontSize: '0.75rem' }}>
+                                {v}
+                              </span>
                             ))}
                             {a.values.length > 3 && (
-                              <span className="attr-chip more" style={{ fontSize: '0.75rem' }}>+{a.values.length - 3}</span>
+                              <span className="attr-chip more" style={{ fontSize: '0.75rem' }}>
+                                +{a.values.length - 3}
+                              </span>
                             )}
                           </div>
                         ) : (
@@ -719,7 +895,10 @@ const SpecDetailModal = ({ spec, loading, error, onClose }) => {
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <td
+                        colSpan={5}
+                        style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}
+                      >
                         Ничего не найдено
                       </td>
                     </tr>

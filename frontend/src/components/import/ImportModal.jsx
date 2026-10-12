@@ -14,7 +14,8 @@ const HINTS = {
   ozon: 'Тест: test:test · Реальный API: CLIENT_ID:API_KEY',
   wildberries: 'Тест: mock_wb_key (демо-режим)',
   yandex: 'Тест: test:test · API: campaign_id:oauth_token · или ссылка на YML-фид',
-  magnit: 'Магнит Маркет: только XLSX из личного кабинета, лист «SKU». Цен в файле нет — задайте их после импорта через «Редактировать».',
+  magnit:
+    'Магнит Маркет: только XLSX из личного кабинета, лист «SKU». Цен в файле нет — задайте их после импорта через «Редактировать».',
 };
 
 const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
@@ -41,9 +42,14 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
 
   useEffect(() => {
     if (isOpen) {
-      setAuthKey(''); setKeyError(''); setSelectedFile(null);
-      setPreview(null); setPreviewError(''); setIsDragging(false);
-      setUpsert(false); setIsImported(false);
+      setAuthKey('');
+      setKeyError('');
+      setSelectedFile(null);
+      setPreview(null);
+      setPreviewError('');
+      setIsDragging(false);
+      setUpsert(false);
+      setIsImported(false);
     }
   }, [isOpen]);
 
@@ -51,8 +57,12 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
 
   const changePlatform = (id) => {
     setSelectedPlatform(id);
-    setSelectedFile(null); setPreview(null); setPreviewError('');
-    setAuthKey(''); setKeyError(''); setIsImported(false);
+    setSelectedFile(null);
+    setPreview(null);
+    setPreviewError('');
+    setAuthKey('');
+    setKeyError('');
+    setIsImported(false);
   };
 
   const validateKey = (v) => {
@@ -63,18 +73,24 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
 
   const handleKeyImport = () => {
     const err = validateKey(authKey);
-    if (err) { setKeyError(err); return; }
+    if (err) {
+      setKeyError(err);
+      return;
+    }
     const k = authKey.trim();
-    const full = k.includes(':') && k.split(':')[0].toLowerCase() === selectedPlatform
-      ? k
-      : `${selectedPlatform}:${k}`;
+    const full =
+      k.includes(':') && k.split(':')[0].toLowerCase() === selectedPlatform
+        ? k
+        : `${selectedPlatform}:${k}`;
     setIsImported(true);
     onImport(full);
   };
 
   const downloadTemplate = async () => {
     try {
-      const res = await fetch(`${API_URL}/templates/${selectedPlatform}`, { headers: authHeaders() });
+      const res = await fetch(`${API_URL}/templates/${selectedPlatform}`, {
+        headers: authHeaders(),
+      });
       if (!res.ok) throw new Error('шаблон не найден');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -91,8 +107,11 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
   };
 
   const loadPreview = async (file) => {
-    setSelectedFile(file); setPreview(null); setPreviewError('');
-    setPreviewLoading(true); setIsImported(false);
+    setSelectedFile(file);
+    setPreview(null);
+    setPreviewError('');
+    setPreviewLoading(true);
+    setIsImported(false);
     try {
       const fd = new FormData();
       fd.append('file', file);
@@ -196,7 +215,9 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
           </div>
         ) : (
           <div className="modal-hint-box">
-            <span className="hint-icon"><Icon name="file" size={18} /></span>
+            <span className="hint-icon">
+              <Icon name="file" size={18} />
+            </span>
             <p>Для «{platform.name}» доступен только импорт из файла XLSX.</p>
           </div>
         )}
@@ -204,7 +225,9 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
         {importMethod === 'key' ? (
           <>
             <div className="modal-hint-box">
-              <span className="hint-icon"><Icon name="info" size={18} /></span>
+              <span className="hint-icon">
+                <Icon name="info" size={18} />
+              </span>
               <p>{HINTS[selectedPlatform]}</p>
             </div>
             <label className="form-label">Ключ или ссылка</label>
@@ -212,13 +235,24 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
               className={`form-input ${keyError ? 'input-error' : ''}`}
               type="text"
               value={authKey}
-              onChange={(e) => { setAuthKey(e.target.value); setKeyError(''); }}
-              placeholder={selectedPlatform === 'yandex' ? 'test:test или https://.../yml.xml' : 'test:test'}
+              onChange={(e) => {
+                setAuthKey(e.target.value);
+                setKeyError('');
+              }}
+              placeholder={
+                selectedPlatform === 'yandex' ? 'test:test или https://.../yml.xml' : 'test:test'
+              }
             />
             {keyError && <div className="input-error-message">{keyError}</div>}
             <div className="modal-actions">
-              <Button variant="outline" onClick={onClose}>Отмена</Button>
-              <Button onClick={handleKeyImport} disabled={loading || isImported} loading={loading || isImported}>
+              <Button variant="outline" onClick={onClose}>
+                Отмена
+              </Button>
+              <Button
+                onClick={handleKeyImport}
+                disabled={loading || isImported}
+                loading={loading || isImported}
+              >
                 {isImported ? <Icon name="check" size={16} /> : <Icon name="import" size={16} />}
                 {isImported ? 'Импортировано' : 'Импортировать'}
               </Button>
@@ -229,18 +263,28 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
             {!preview && !previewLoading && (
               <>
                 <div className="modal-hint-box">
-                  <span className="hint-icon"><Icon name="info" size={18} /></span>
+                  <span className="hint-icon">
+                    <Icon name="info" size={18} />
+                  </span>
                   <p>{HINTS[selectedPlatform]}</p>
                 </div>
 
                 <div
                   className={`drop-zone ${isDragging ? 'dragging' : ''}`}
-                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                  onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                  }}
                   onDrop={onDrop}
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  <div className="drop-zone-icon"><Icon name="file" size={44} /></div>
+                  <div className="drop-zone-icon">
+                    <Icon name="file" size={44} />
+                  </div>
                   <div className="drop-zone-text">
                     {selectedFile ? (
                       <>
@@ -286,23 +330,39 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
             )}
 
             {previewLoading && (
-                <div className="progress-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                  <div className="spinner spinner-dark" />
-                    Читаем файл и строим предпросмотр...
-                  </div>
+              <div
+                className="progress-status"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                }}
+              >
+                <div className="spinner spinner-dark" />
+                Читаем файл и строим предпросмотр...
+              </div>
             )}
 
             {preview && (
               <div className="preview-section">
                 <div className="preview-summary">
-                  <span>Строк в файле: <b>{preview.total_estimated}</b></span>
-                  <span>Будет импортировано: <b>{preview.valid_estimated}</b></span>
-                  <span>Ошибок: <b>{preview.errors?.length || 0}</b></span>
+                  <span>
+                    Строк в файле: <b>{preview.total_estimated}</b>
+                  </span>
+                  <span>
+                    Будет импортировано: <b>{preview.valid_estimated}</b>
+                  </span>
+                  <span>
+                    Ошибок: <b>{preview.errors?.length || 0}</b>
+                  </span>
                 </div>
 
                 {preview.warnings?.length > 0 && (
                   <div className="modal-hint-box">
-                    <span className="hint-icon"><Icon name="alert" size={18} /></span>
+                    <span className="hint-icon">
+                      <Icon name="alert" size={18} />
+                    </span>
                     <p>{preview.warnings.map((w) => w.message).join(' ')}</p>
                   </div>
                 )}
@@ -310,7 +370,11 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
                 <div className="preview-table-wrap">
                   <table className="preview-table">
                     <thead>
-                      <tr>{(preview.columns || []).map((c) => (<th key={c}>{c}</th>))}</tr>
+                      <tr>
+                        {(preview.columns || []).map((c) => (
+                          <th key={c}>{c}</th>
+                        ))}
+                      </tr>
                     </thead>
                     <tbody>
                       {(preview.preview || []).map((row, i) => (
@@ -328,10 +392,14 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
 
                 {preview.errors?.length > 0 && (
                   <div className="preview-errors">
-                    <h4><Icon name="alert" size={16} /> Ошибки в файле:</h4>
+                    <h4>
+                      <Icon name="alert" size={16} /> Ошибки в файле:
+                    </h4>
                     <ul>
                       {preview.errors.slice(0, 5).map((er, i) => (
-                        <li key={i}>Строка {er.row}: {er.error}</li>
+                        <li key={i}>
+                          Строка {er.row}: {er.error}
+                        </li>
                       ))}
                       {preview.errors.length > 5 && <li>…и ещё {preview.errors.length - 5}</li>}
                     </ul>
@@ -339,14 +407,22 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
                 )}
 
                 <label className="bulk-check" style={{ margin: '0.75rem 0' }}>
-                  <input type="checkbox" checked={upsert} onChange={(e) => setUpsert(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={upsert}
+                    onChange={(e) => setUpsert(e.target.checked)}
+                  />
                   Обновлять существующие товары по артикулу (upsert)
                 </label>
 
                 <div className="modal-actions">
                   <Button
                     variant="outline"
-                    onClick={() => { setPreview(null); setSelectedFile(null); setIsImported(false); }}
+                    onClick={() => {
+                      setPreview(null);
+                      setSelectedFile(null);
+                      setIsImported(false);
+                    }}
                   >
                     <Icon name="chevron-left" size={16} /> Другой файл
                   </Button>
@@ -355,9 +431,15 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
                     disabled={loading || isImported || preview.valid_estimated === 0}
                     loading={loading || isImported}
                   >
-                    {isImported
-                      ? (<><Icon name="check" size={16} /> Импортировано</>)
-                      : (<><Icon name="import" size={16} /> Импортировать {preview.valid_estimated}</>)}
+                    {isImported ? (
+                      <>
+                        <Icon name="check" size={16} /> Импортировано
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="import" size={16} /> Импортировать {preview.valid_estimated}
+                      </>
+                    )}
                   </Button>
                 </div>
               </div>

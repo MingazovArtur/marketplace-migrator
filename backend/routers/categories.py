@@ -5,24 +5,27 @@
   - добавлен GET /specs/{platform}/names — лёгкий список имён (для datalist)
   - порядок маршрутов: /names объявлен ДО /{category_id} (иначе "names" ловится как id)
   - детализация: key-source теперь отдаёт also `hint` — что делать если ключа нет
+  - ✅ ИНТЕГРАЦИЯ КЭША: /specs/{platform}/names и /categories/{platform} теперь используют Redis
 """
+
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+
 import httpx
-from core.config import settings
-from services.yandex_specs import refresh_yandex_specs
-from services.wb_specs import refresh_wildberries_specs
-from services.category_service import category_service
+from fastapi import APIRouter, Depends, HTTPException
+
 from core.auth import get_current_user
-from database.models import CategoryMapping, User, PlatformCategorySpec
+from core.config import settings
+from database.models import CategoryMapping, PlatformCategorySpec, User
 from database.session import SessionLocal
-from services.ozon_specs import refresh_ozon_specs
 from models.schemas import (
-    RefreshSpecRequest,
-    CategorySpecListResponse,
     PlatformCategorySpecResponse,
+    RefreshSpecRequest,
 )
-from tasks import refresh_specs_task, get_progress
+from services import cache_service  # ✅ Новый импорт
+from services.category_service import category_service
+from services.wb_specs import refresh_wildberries_specs
+from services.yandex_specs import refresh_yandex_specs
+from tasks import get_progress, refresh_specs_task
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +40,10 @@ router = APIRouter(prefix="/api", tags=["Categories"])
 async def refresh_specs(
     platform: str,
     payload: RefreshSpecRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),  # ✅ ИСПРАВЛЕНО
 ):
     """
     Обновить спецификации категорий площадки через её API.
-
     ✅ Ozon — фоновая загрузка через Celery (8000+ категорий),
        возвращает task_id для polling через /specs/{platform}/refresh/{task_id}/progress.
     ✅ Yandex / WB — пока синхронно (они быстрее).
@@ -59,6 +61,9 @@ async def refresh_specs(
     try:
         # ==================== OZON — фоновая загрузка ====================
         if platform == "ozon":
+            # ✅ Сбрасываем кэш заранее, чтобы старые данные не показывались во время загрузки
+            cache_service.delete_pattern(f"specs:{platform}:*")
+
             task = refresh_specs_task.delay(
                 user_id=current_user.id,
                 platform=platform,
@@ -79,6 +84,8 @@ async def refresh_specs(
                 token=raw_key,
                 category_ids=payload.category_ids,
             )
+            # ✅ Инвалидация кэша после успешного обновления
+            cache_service.delete_pattern(f"specs:{platform}:*")
             return {"success": True, **result}
 
         # ==================== YANDEX — синхронно ====================
@@ -93,6 +100,8 @@ async def refresh_specs(
             business_id=payload.business_id,
             category_ids=payload.category_ids,
         )
+        # ✅ Инвалидация кэша после успешного обновления
+        cache_service.delete_pattern(f"specs:{platform}:*")
         return {"success": True, **result}
 
     except ValueError as e:
@@ -145,9 +154,17 @@ def list_spec_names(platform: str, current_user: User = Depends(get_current_user
     ✅ ЛЁГКИЙ список имён категорий спеков (для datalist/автокомплита).
     Возвращает ТОЛЬКО имена (category_name), без атрибутов и словарей.
     Размер ответа ~50-150 КБ (vs 10+ МБ у полного /specs/{platform}).
-
     Используется в MigrateModal для выпадающего списка точных имён.
+    ✅ КЭШИРУЕТСЯ на 1 час для снижения нагрузки на БД.
     """
+    cache_key = f"specs:{platform}:names"
+
+    # 1. Проверяем кэш
+    cached = cache_service.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # 2. Если нет в кэше — идём в БД
     db = SessionLocal()
     try:
         rows = (
@@ -157,12 +174,19 @@ def list_spec_names(platform: str, current_user: User = Depends(get_current_user
             .all()
         )
         names = [r[0] for r in rows if r[0]]
-        logger.info(f"📋 /specs/{platform}/names: {len(names)} категорий для user={current_user.id}")
-        return {
+        result = {
             "platform": platform,
             "count": len(names),
             "names": names,
         }
+
+        # 3. Сохраняем в кэш на 1 час (3600 сек)
+        cache_service.set(cache_key, result, ttl=3600)
+
+        logger.info(
+            f"📋 /specs/{platform}/names: {len(names)} категорий (загружено из БД и закэшировано)"
+        )
+        return result
     finally:
         db.close()
 
@@ -201,7 +225,9 @@ def get_spec(platform: str, category_id: str, current_user: User = Depends(get_c
             .first()
         )
         if not row:
-            raise HTTPException(status_code=404, detail="Спека не найдена. Сначала обновите через /refresh")
+            raise HTTPException(
+                status_code=404, detail="Спека не найдена. Сначала обновите через /refresh"
+            )
         return PlatformCategorySpecResponse.model_validate(row)
     finally:
         db.close()
@@ -214,9 +240,28 @@ def get_spec(platform: str, category_id: str, current_user: User = Depends(get_c
 
 @router.get("/categories/{platform}")
 def get_categories(platform: str, force_refresh: bool = False):
-    """Получить список категорий для платформы"""
+    """
+    Получить список категорий для платформы.
+    ✅ КЭШИРУЕТСЯ на 2 часа, если не запрошен force_refresh.
+    """
+    cache_key = f"categories:{platform}:list"
+
+    if not force_refresh:
+        cached = cache_service.get(cache_key)
+        if cached is not None:
+            return {"success": True, "categories": cached, "total": len(cached), "from_cache": True}
+
     categories = category_service.get_categories(platform, force_refresh)
-    return {"success": True, "categories": categories, "total": len(categories)}
+
+    # Сохраняем в кэш на 2 часа (7200 сек)
+    cache_service.set(cache_key, categories, ttl=7200)
+
+    return {
+        "success": True,
+        "categories": categories,
+        "total": len(categories),
+        "from_cache": False,
+    }
 
 
 @router.get("/categories/{platform}/tree")
@@ -244,6 +289,10 @@ def refresh_categories_with_api(
 ):
     """Обновить справочник категорий с использованием API ключа"""
     categories = category_service.get_categories_with_api_key(platform, api_key)
+
+    # ✅ Инвалидация кэша после ручного обновления
+    cache_service.delete_pattern(f"categories:{platform}:*")
+
     return {
         "success": True,
         "categories": categories,

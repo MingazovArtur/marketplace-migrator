@@ -8,10 +8,11 @@ Email-сервис: отправка писем с HTML-шаблонами.
   - verify: JWT с claim type=verify, TTL 24h
   - reset: случайный token_urlsafe(32), в БД только SHA-256 hash, TTL 1h
 """
+
 import hashlib
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -70,6 +71,7 @@ async def _send_email(to_email: str, subject: str, html_body: str) -> bool:
 # Генерация токенов
 # ============================================================
 
+
 def generate_verify_token(user: User) -> str:
     """JWT-токен для подтверждения email (24h)."""
     payload = {
@@ -94,12 +96,12 @@ def generate_reset_token(user: User) -> tuple[str, str]:
         db.query(PasswordResetToken).filter(
             PasswordResetToken.user_id == user.id,
             PasswordResetToken.used_at.is_(None),
-        ).update({PasswordResetToken.used_at: datetime.now(timezone.utc)})
+        ).update({PasswordResetToken.used_at: datetime.now(UTC)})
 
         token_obj = PasswordResetToken(
             user_id=user.id,
             token_hash=token_hash,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
         )
         db.add(token_obj)
         db.commit()
@@ -118,7 +120,7 @@ def validate_reset_token(raw_token: str):
             .filter(
                 PasswordResetToken.token_hash == token_hash,
                 PasswordResetToken.used_at.is_(None),
-                PasswordResetToken.expires_at > datetime.now(timezone.utc),
+                PasswordResetToken.expires_at > datetime.now(UTC),
             )
             .first()
         )
@@ -126,7 +128,7 @@ def validate_reset_token(raw_token: str):
             return None
 
         # Помечаем как использованный
-        token_obj.used_at = datetime.now(timezone.utc)
+        token_obj.used_at = datetime.now(UTC)
         db.commit()
 
         return db.query(User).filter(User.id == token_obj.user_id).first()
@@ -138,16 +140,20 @@ def validate_reset_token(raw_token: str):
 # Отправка конкретных типов писем
 # ============================================================
 
+
 async def send_verification_email(user: User) -> bool:
     """Письмо подтверждения email (ссылка с JWT-токеном)."""
     token = generate_verify_token(user)
     verify_url = f"{settings.PUBLIC_URL}/#/verify-email?token={token}"
 
-    html = _render("verify_email.html", {
-        "username": user.username,
-        "verify_url": verify_url,
-        "service_name": settings.SMTP_FROM_NAME,
-    })
+    html = _render(
+        "verify_email.html",
+        {
+            "username": user.username,
+            "verify_url": verify_url,
+            "service_name": settings.SMTP_FROM_NAME,
+        },
+    )
     return await _send_email(
         to_email=user.email,
         subject=f"Подтвердите email — {settings.SMTP_FROM_NAME}",
@@ -160,12 +166,15 @@ async def send_password_reset_email(user: User) -> bool:
     raw_token, _ = generate_reset_token(user)
     reset_url = f"{settings.PUBLIC_URL}/#/reset-password?token={raw_token}"
 
-    html = _render("reset_password.html", {
-        "username": user.username,
-        "reset_url": reset_url,
-        "service_name": settings.SMTP_FROM_NAME,
-        "expires_hours": 1,
-    })
+    html = _render(
+        "reset_password.html",
+        {
+            "username": user.username,
+            "reset_url": reset_url,
+            "service_name": settings.SMTP_FROM_NAME,
+            "expires_hours": 1,
+        },
+    )
     return await _send_email(
         to_email=user.email,
         subject=f"Сброс пароля — {settings.SMTP_FROM_NAME}",
@@ -175,11 +184,14 @@ async def send_password_reset_email(user: User) -> bool:
 
 async def send_welcome_email(user: User) -> bool:
     """Приветственное письмо после верификации."""
-    html = _render("welcome.html", {
-        "username": user.username,
-        "login_url": f"{settings.PUBLIC_URL}/#/login",
-        "service_name": settings.SMTP_FROM_NAME,
-    })
+    html = _render(
+        "welcome.html",
+        {
+            "username": user.username,
+            "login_url": f"{settings.PUBLIC_URL}/#/login",
+            "service_name": settings.SMTP_FROM_NAME,
+        },
+    )
     return await _send_email(
         to_email=user.email,
         subject=f"Добро пожаловать в {settings.SMTP_FROM_NAME}!",

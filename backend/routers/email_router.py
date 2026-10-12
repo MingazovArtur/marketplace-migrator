@@ -7,11 +7,11 @@
 
 Rate-limits строгие: эти эндпоинты — любимая цель брутфорса и спам-бомбёжки.
 """
-import logging
-from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import ValidationError
+import logging
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from core.auth import decode_token, get_current_user, get_password_hash
 from core.rate_limit import limiter
@@ -53,12 +53,14 @@ async def verify_email(request: Request, payload: VerifyEmailRequest):
         if user.email_verified_at is not None:
             return {"message": "Email уже подтверждён", "already_verified": True}
 
-        user.email_verified_at = datetime.now(timezone.utc)
+        user.email_verified_at = datetime.now(UTC)
         db.commit()
 
         ip = get_client_ip(request)
         ua = request.headers.get("user-agent")
-        log_access(user_id=user.id, username=user.username, action="email_verified", ip=ip, user_agent=ua)
+        log_access(
+            user_id=user.id, username=user.username, action="email_verified", ip=ip, user_agent=ua
+        )
         logger.info(f"✅ Email подтверждён: {user.username}")
 
         # Приветственное письмо (не блокируем ответ, если упадёт)
@@ -87,8 +89,13 @@ async def resend_verification(request: Request, current_user: User = Depends(get
         raise HTTPException(status_code=503, detail="Почтовый сервис временно недоступен")
 
     ip = get_client_ip(request)
-    log_access(user_id=current_user.id, username=current_user.username,
-               action="verification_resent", ip=ip, user_agent=request.headers.get("user-agent"))
+    log_access(
+        user_id=current_user.id,
+        username=current_user.username,
+        action="verification_resent",
+        ip=ip,
+        user_agent=request.headers.get("user-agent"),
+    )
     return {"message": "Письмо отправлено. Проверьте почту."}
 
 
@@ -110,9 +117,13 @@ async def forgot_password(request: Request, payload: ForgotPasswordRequest):
             try:
                 await send_password_reset_email(user)
                 ip = get_client_ip(request)
-                log_access(user_id=user.id, username=user.username,
-                           action="password_reset_requested", ip=ip,
-                           user_agent=request.headers.get("user-agent"))
+                log_access(
+                    user_id=user.id,
+                    username=user.username,
+                    action="password_reset_requested",
+                    ip=ip,
+                    user_agent=request.headers.get("user-agent"),
+                )
             except Exception as e:
                 logger.error(f"reset email failed for {user.email}: {e}")
     finally:
@@ -129,9 +140,11 @@ async def forgot_password(request: Request, payload: ForgotPasswordRequest):
 @router.post("/reset-password")
 async def reset_password(request: Request, payload: ResetPasswordRequest):
     """Сброс пароля по одноразовому токену из письма (TTL 1 час)."""
-    user = validate_reset_token(payload.token)   # помечает токен как использованный
+    user = validate_reset_token(payload.token)  # помечает токен как использованный
     if not user:
-        raise HTTPException(status_code=400, detail="Ссылка недействительна, просрочена или уже использована")
+        raise HTTPException(
+            status_code=400, detail="Ссылка недействительна, просрочена или уже использована"
+        )
 
     db = SessionLocal()
     try:
@@ -140,8 +153,13 @@ async def reset_password(request: Request, payload: ResetPasswordRequest):
         db.commit()
 
         ip = get_client_ip(request)
-        log_access(user_id=db_user.id, username=db_user.username,
-                   action="password_reset_completed", ip=ip, user_agent=request.headers.get("user-agent"))
+        log_access(
+            user_id=db_user.id,
+            username=db_user.username,
+            action="password_reset_completed",
+            ip=ip,
+            user_agent=request.headers.get("user-agent"),
+        )
         logger.info(f"🔑 Пароль сброшен: {db_user.username}")
         return {"message": "Пароль изменён. Войдите с новым паролем."}
     finally:

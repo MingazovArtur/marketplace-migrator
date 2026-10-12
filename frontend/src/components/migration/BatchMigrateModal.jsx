@@ -18,12 +18,20 @@ const normalize = (p) => {
 };
 
 const isFinished = (n) =>
-  n.status === 'completed' || n.status === 'finished' || n.status === 'failed' ||
+  n.status === 'completed' ||
+  n.status === 'finished' ||
+  n.status === 'failed' ||
   (n.total > 0 && n.done >= n.total);
 
 const BatchMigrateModal = ({
-  isOpen, onClose, selectedIds, products,
-  onStartMigration, pollProgress, loading, onAutoExport,
+  isOpen,
+  onClose,
+  selectedIds,
+  products,
+  onStartMigration,
+  pollProgress,
+  loading,
+  onAutoExport,
 }) => {
   const [platform, setPlatform] = useState('ozon');
   const [autoExport, setAutoExport] = useState(true);
@@ -36,8 +44,12 @@ const BatchMigrateModal = ({
 
   useEffect(() => {
     if (isOpen) {
-      setBatch(null); setProg(null); setFinished(false);
-      setError(''); setStarting(false); setAutoExport(true);
+      setBatch(null);
+      setProg(null);
+      setFinished(false);
+      setError('');
+      setStarting(false);
+      setAutoExport(true);
       exportedRef.current = false;
     }
   }, [isOpen]);
@@ -92,10 +104,22 @@ const BatchMigrateModal = ({
 
   const stats = (
     <div className="progress-stats">
-      <div className="stat-item"><div className="stat-label">Всего</div><div className="stat-value">{n.total}</div></div>
-      <div className="stat-item"><div className="stat-label">Готово</div><div className="stat-value">{n.done}</div></div>
-      <div className="stat-item"><div className="stat-label">Успешно</div><div className="stat-value success-text">{n.success}</div></div>
-      <div className="stat-item"><div className="stat-label">Ошибки</div><div className="stat-value error-text">{n.errors}</div></div>
+      <div className="stat-item">
+        <div className="stat-label">Всего</div>
+        <div className="stat-value">{n.total}</div>
+      </div>
+      <div className="stat-item">
+        <div className="stat-label">Готово</div>
+        <div className="stat-value">{n.done}</div>
+      </div>
+      <div className="stat-item">
+        <div className="stat-label">Успешно</div>
+        <div className="stat-value success-text">{n.success}</div>
+      </div>
+      <div className="stat-item">
+        <div className="stat-label">Ошибки</div>
+        <div className="stat-value error-text">{n.errors}</div>
+      </div>
     </div>
   );
 
@@ -144,8 +168,14 @@ const BatchMigrateModal = ({
             )}
 
             <div className="modal-actions">
-              <Button variant="outline" onClick={onClose}>Отмена</Button>
-              <Button onClick={handleStart} disabled={starting || loading} loading={starting || loading}>
+              <Button variant="outline" onClick={onClose}>
+                Отмена
+              </Button>
+              <Button
+                onClick={handleStart}
+                disabled={starting || loading}
+                loading={starting || loading}
+              >
                 <Icon name="migrate" size={16} /> Запустить перенос
               </Button>
             </div>
@@ -160,7 +190,11 @@ const BatchMigrateModal = ({
               <span className="progress-bar-text">{percent}%</span>
             </div>
             {stats}
-            {error && <div className="alert alert-error"><div>{error}</div></div>}
+            {error && (
+              <div className="alert alert-error">
+                <div>{error}</div>
+              </div>
+            )}
             <p className="progress-status">
               Переносим карточки… окно можно закрыть — процесс продолжится на сервере.
             </p>

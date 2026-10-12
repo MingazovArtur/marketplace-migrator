@@ -10,11 +10,11 @@
 Документация: https://yandex.ru/dev/market/partner-api/
 OpenAPI-спека: https://github.com/yandex-market/yandex-market-partner-api
 """
+
 import hashlib
 import json
 import logging
 from datetime import datetime
-from typing import Optional
 
 import httpx
 
@@ -36,7 +36,10 @@ def _ym_headers(token: str) -> dict:
 
 # ========== Категории ==========
 
-async def fetch_yandex_categories(client: httpx.AsyncClient, token: str, business_id: str) -> list[dict]:
+
+async def fetch_yandex_categories(
+    client: httpx.AsyncClient, token: str, business_id: str
+) -> list[dict]:
     """Список категорий кабинета (с пагинацией)."""
     out = []
     page = 1
@@ -55,12 +58,14 @@ async def fetch_yandex_categories(client: httpx.AsyncClient, token: str, busines
             cats = result.get("categories") or result.get("items") or []
 
         for c in cats:
-            out.append({
-                "id": str(c.get("id")),
-                "name": c.get("name") or c.get("title") or str(c.get("id")),
-                "parent_id": str(c.get("parentId")) if c.get("parentId") else None,
-                "version": c.get("version"),
-            })
+            out.append(
+                {
+                    "id": str(c.get("id")),
+                    "name": c.get("name") or c.get("title") or str(c.get("id")),
+                    "parent_id": str(c.get("parentId")) if c.get("parentId") else None,
+                    "version": c.get("version"),
+                }
+            )
 
         # пагинация: если категорий меньше страницы — выходим
         if len(cats) < 100:
@@ -71,7 +76,11 @@ async def fetch_yandex_categories(client: httpx.AsyncClient, token: str, busines
 
 
 async def fetch_yandex_category_version(
-    client: httpx.AsyncClient, token: str, business_id: str, category_id: str, fallback: Optional[int] = None
+    client: httpx.AsyncClient,
+    token: str,
+    business_id: str,
+    category_id: str,
+    fallback: int | None = None,
 ) -> int:
     """Определяем актуальную версию категории (нужна для запроса параметров)."""
     if fallback:
@@ -96,6 +105,7 @@ async def fetch_yandex_category_version(
 
 
 # ========== Атрибуты ==========
+
 
 async def fetch_yandex_parameters(
     client: httpx.AsyncClient, token: str, business_id: str, category_id: str, version: int
@@ -124,23 +134,25 @@ async def fetch_yandex_parameters(
         if base_type == "select" and is_collection:
             base_type = "multiselect"
 
-        attributes.append({
-            "id": str(p.get("id")),
-            "name": p.get("name"),
-            "type": base_type,
-            "required": bool(p.get("required") or p.get("isRequired")),
-            "group": _map_yandex_group(p),
-            "values": values,
-            "case_sensitive": True,
-            "separator": ";",
-            "unit": p.get("unit"),
-            "allow_unit_in_value": False,
-        })
+        attributes.append(
+            {
+                "id": str(p.get("id")),
+                "name": p.get("name"),
+                "type": base_type,
+                "required": bool(p.get("required") or p.get("isRequired")),
+                "group": _map_yandex_group(p),
+                "values": values,
+                "case_sensitive": True,
+                "separator": ";",
+                "unit": p.get("unit"),
+                "allow_unit_in_value": False,
+            }
+        )
 
     return attributes
 
 
-def _map_yandex_type(t: Optional[str]) -> str:
+def _map_yandex_type(t: str | None) -> str:
     t = (t or "").upper()
     if t in ("NUMBER", "INTEGER", "DECIMAL", "FLOAT"):
         return "number"
@@ -163,11 +175,12 @@ def _map_yandex_group(p: dict) -> str:
 
 # ========== Оркестратор ==========
 
+
 async def refresh_yandex_specs(
     user_id: int,
     token: str,
     business_id: str,
-    category_ids: Optional[list[str]] = None,
+    category_ids: list[str] | None = None,
 ) -> dict:
     """Подтягивает категории + параметры, сохраняет как PlatformCategorySpec."""
     async with httpx.AsyncClient(timeout=60) as client:
@@ -232,7 +245,7 @@ def _build_validation_rules(attrs: list[dict]) -> dict:
 
 def _build_special_requirements() -> dict:
     return {
-        "okpd_required_for_tags": [],   # у Яндекса маркировка контролируется иначе
+        "okpd_required_for_tags": [],  # у Яндекса маркировка контролируется иначе
         "excisable_tags": [],
     }
 
@@ -258,15 +271,17 @@ def _upsert_spec(user_id, platform, category_id, category_name, parent_category_
             existing.version = version
             existing.fetched_at = datetime.utcnow()
         else:
-            db.add(PlatformCategorySpec(
-                user_id=user_id,
-                platform=platform,
-                category_id=category_id,
-                category_name=category_name,
-                parent_category_id=parent_category_id,
-                spec=spec,
-                version=version,
-            ))
+            db.add(
+                PlatformCategorySpec(
+                    user_id=user_id,
+                    platform=platform,
+                    category_id=category_id,
+                    category_name=category_name,
+                    parent_category_id=parent_category_id,
+                    spec=spec,
+                    version=version,
+                )
+            )
         db.commit()
     finally:
         db.close()

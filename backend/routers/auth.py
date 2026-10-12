@@ -1,7 +1,7 @@
 """
 Роутер аутентификации (регистрация, вход, профиль)
 """
-import asyncio
+
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -17,7 +17,7 @@ from core.rate_limit import limiter
 from database.access_log import get_client_ip, log_access
 from database.models import User
 from database.session import SessionLocal
-from models.schemas import UserCreate, UserLogin, UserResponse, Token
+from models.schemas import Token, UserCreate, UserLogin, UserResponse
 from services.email_service import send_verification_email
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ security = HTTPBearer()
 async def register(
     payload: UserCreate,
     request: Request,
-    background_tasks: BackgroundTasks,      # ← добавлено
+    background_tasks: BackgroundTasks,  # ← добавлено
 ):
     """Регистрация нового пользователя с логированием доступа и отправкой письма подтверждения."""
     if len(payload.password) < 6:
@@ -75,7 +75,13 @@ async def register(
         ua = request.headers.get("user-agent")
         log_access(user_id=user.id, username=user.username, action="register", ip=ip, user_agent=ua)
         if payload.consent:
-            log_access(user_id=user.id, username=user.username, action="consent_accepted", ip=ip, user_agent=ua)
+            log_access(
+                user_id=user.id,
+                username=user.username,
+                action="consent_accepted",
+                ip=ip,
+                user_agent=ua,
+            )
 
         logger.info(f"✅ Зарегистрирован пользователь: {user.username} (id={user.id})")
 
@@ -98,7 +104,9 @@ async def register(
                 finally:
                     bg_db.close()
             except Exception as e:
-                logger.error(f"📧 ❌ Не удалось отправить письмо подтверждения {user_snapshot['email']}: {e}")
+                logger.error(
+                    f"📧 ❌ Не удалось отправить письмо подтверждения {user_snapshot['email']}: {e}"
+                )
 
         background_tasks.add_task(_safe_send)
 
@@ -142,7 +150,9 @@ async def login(payload: UserLogin, request: Request):
                 detail="Аккаунт деактивирован",
             )
 
-        log_access(user_id=user.id, username=user.username, action="login_success", ip=ip, user_agent=ua)
+        log_access(
+            user_id=user.id, username=user.username, action="login_success", ip=ip, user_agent=ua
+        )
         token = create_access_token({"sub": str(user.id), "role": user.role})
         logger.info(f"✅ Вход выполнен: {user.username}")
         return {"access_token": token, "token_type": "bearer"}
@@ -160,7 +170,13 @@ async def logout(request: Request, current_user: User = Depends(get_current_user
     """Выход с логированием"""
     ip = get_client_ip(request)
     ua = request.headers.get("user-agent")
-    log_access(user_id=current_user.id, username=current_user.username, action="logout", ip=ip, user_agent=ua)
+    log_access(
+        user_id=current_user.id,
+        username=current_user.username,
+        action="logout",
+        ip=ip,
+        user_agent=ua,
+    )
     logger.info(f"👋 Выход: {current_user.username}")
     return {"message": "Вы вышли из системы"}
 

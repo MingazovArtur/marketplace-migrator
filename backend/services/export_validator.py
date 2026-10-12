@@ -2,21 +2,21 @@
 Валидатор товаров перед выгрузкой в формат площадок.
 Проверяет карточки на соответствие требованиям личных кабинетов маркетплейсов.
 """
+
 import logging
-from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
 # Требования площадок к полям карточки
 VALIDATION_RULES = {
     "wildberries": {"name_max": 100, "desc_max": 1000, "photos_min": 1, "photos_max": 30},
-    "ozon":        {"name_max": 255, "desc_max": 3000, "photos_min": 1, "photos_max": 15},
-    "yandex":      {"name_max": 255, "desc_max": 500,  "photos_min": 1, "photos_max": 10},
-    "magnit":      {"name_max": 255, "desc_max": 500,  "photos_min": 1, "photos_max": 10},
+    "ozon": {"name_max": 255, "desc_max": 3000, "photos_min": 1, "photos_max": 15},
+    "yandex": {"name_max": 255, "desc_max": 500, "photos_min": 1, "photos_max": 10},
+    "magnit": {"name_max": 255, "desc_max": 500, "photos_min": 1, "photos_max": 10},
 }
 
 
-def validate_product(product: Dict, platform: str) -> List[Dict]:
+def validate_product(product: dict, platform: str) -> list[dict]:
     """Возвращает список проблем карточки: [{field, level: error|warning, message}]."""
     rules = VALIDATION_RULES.get(platform, VALIDATION_RULES["ozon"])
     issues = []
@@ -26,10 +26,13 @@ def validate_product(product: Dict, platform: str) -> List[Dict]:
     if not name:
         issues.append({"field": "name", "level": "error", "message": "Пустое название товара"})
     elif len(name) > rules["name_max"]:
-        issues.append({
-            "field": "name", "level": "warning",
-            "message": f"Название {len(name)} симв. (лимит {rules['name_max']}) — будет обрезано",
-        })
+        issues.append(
+            {
+                "field": "name",
+                "level": "warning",
+                "message": f"Название {len(name)} симв. (лимит {rules['name_max']}) — будет обрезано",
+            }
+        )
 
     # Цена
     price = product.get("price") or 0
@@ -41,10 +44,13 @@ def validate_product(product: Dict, platform: str) -> List[Dict]:
     if len(photos) < rules["photos_min"]:
         issues.append({"field": "photos", "level": "warning", "message": "Нет ни одного фото"})
     elif len(photos) > rules["photos_max"]:
-        issues.append({
-            "field": "photos", "level": "warning",
-            "message": f"Фото {len(photos)} (лимит {rules['photos_max']}) — лишние отброшены",
-        })
+        issues.append(
+            {
+                "field": "photos",
+                "level": "warning",
+                "message": f"Фото {len(photos)} (лимит {rules['photos_max']}) — лишние отброшены",
+            }
+        )
 
     # Описание
     if not (product.get("description") or "").strip():
@@ -57,11 +63,11 @@ def validate_product(product: Dict, platform: str) -> List[Dict]:
     return issues
 
 
-def has_errors(issues: List[Dict]) -> bool:
+def has_errors(issues: list[dict]) -> bool:
     return any(i["level"] == "error" for i in issues)
 
 
-def validate_products(products: List[Dict], platform: str) -> Dict:
+def validate_products(products: list[dict], platform: str) -> dict:
     """Сводка валидации: сколько готово / с предупреждениями / с ошибками."""
     issues_by_product = []
     ready = with_warnings = with_errors = 0
@@ -76,11 +82,13 @@ def validate_products(products: List[Dict], platform: str) -> Dict:
         else:
             ready += 1
         if issues:
-            issues_by_product.append({
-                "product_id": p.get("id"),
-                "name": (p.get("name") or "")[:60],
-                "issues": issues,
-            })
+            issues_by_product.append(
+                {
+                    "product_id": p.get("id"),
+                    "name": (p.get("name") or "")[:60],
+                    "issues": issues,
+                }
+            )
 
     return {
         "total": len(products),

@@ -5,14 +5,15 @@
 Ozon чувствителен к регистру: «белый» ≠ «Белый» → ошибка «Такой товар уже существует»
 и создание дубля. При сохранении значение приводится к регистру словаря площадки.
 """
+
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
 
-from database.repository import attr_repo, repo
-from database.models import User, PlatformCategorySpec
-from database.session import SessionLocal
 from core.auth import get_current_user
+from database.models import PlatformCategorySpec, User
+from database.repository import attr_repo, repo
+from database.session import SessionLocal
 from services.attribute_normalizer import normalize_attributes
 
 router = APIRouter(prefix="/api/products", tags=["Attributes"])
@@ -24,31 +25,33 @@ PLATFORM_PRIORITY = ["ozon", "yandex", "wildberries"]
 class AttributeCreate(BaseModel):
     name: str
     value: str
-    platform_attribute_id: Optional[str] = None
+    platform_attribute_id: str | None = None
 
 
 class AttributeUpdate(BaseModel):
     name: str
     value: str
-    platform_attribute_id: Optional[str] = None
+    platform_attribute_id: str | None = None
 
 
 class BulkAttributesUpdate(BaseModel):
     """Массовое обновление характеристик для группы товаров"""
-    product_ids: List[int]
-    attributes: List[AttributeUpdate]  # набор характеристик для всех товаров
+
+    product_ids: list[int]
+    attributes: list[AttributeUpdate]  # набор характеристик для всех товаров
 
 
 # ==================== Вспомогательные функции нормализации ====================
 
-def _product_category(product) -> Optional[str]:
+
+def _product_category(product) -> str | None:
     """Категория товара (dict или ORM-объект)."""
     if isinstance(product, dict):
         return product.get("mapped_category") or product.get("category")
     return getattr(product, "mapped_category", None) or getattr(product, "category", None)
 
 
-def _get_spec_for_category(user_id: int, category_name: Optional[str]) -> Optional[dict]:
+def _get_spec_for_category(user_id: int, category_name: str | None) -> dict | None:
     """
     Ищет спек категории (словари значений атрибутов) среди загруженных спеков.
     Если категория есть в спеках нескольких платформ — берём по приоритету.
@@ -77,6 +80,7 @@ def _get_spec_for_category(user_id: int, category_name: Optional[str]) -> Option
 
 # ==================== Эндпоинты ====================
 
+
 @router.get("/{product_id}/attributes")
 def get_attributes(product_id: int, current_user: User = Depends(get_current_user)):
     """Получить характеристики товара"""
@@ -89,7 +93,7 @@ def get_attributes(product_id: int, current_user: User = Depends(get_current_use
 @router.put("/{product_id}/attributes")
 def set_attributes(
     product_id: int,
-    attributes: List[AttributeUpdate],
+    attributes: list[AttributeUpdate],
     current_user: User = Depends(get_current_user),
 ):
     """Заменить все характеристики товара на новые (с нормализацией регистра)."""
@@ -106,8 +110,8 @@ def set_attributes(
         "success": True,
         "attributes": result,
         "count": len(result),
-        "normalizations": norm["normalizations"],   # ✅ что было приведено к словарю
-        "warnings": norm["warnings"],               # ✅ значения не из словаря
+        "normalizations": norm["normalizations"],  # ✅ что было приведено к словарю
+        "warnings": norm["warnings"],  # ✅ значения не из словаря
     }
 
 
@@ -183,6 +187,6 @@ def bulk_set_attributes(
     return {
         "success": True,
         "updated": updated,
-        "normalizations": all_normalizations[:20],   # ограничиваем размер ответа
+        "normalizations": all_normalizations[:20],  # ограничиваем размер ответа
         "warnings": all_warnings[:20],
     }

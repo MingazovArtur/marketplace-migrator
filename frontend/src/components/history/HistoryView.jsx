@@ -4,25 +4,24 @@ import Icon from '../icons';
 import { api } from '../../api';
 import EmptyState from '../common/EmptyState';
 
-
 const TYPE_META = {
-  import:    { label: 'Импорт',   icon: 'import' },
-  export:    { label: 'Экспорт',  icon: 'export' },
+  import: { label: 'Импорт', icon: 'import' },
+  export: { label: 'Экспорт', icon: 'export' },
   migration: { label: 'Миграция', icon: 'migrate' },
-  media:     { label: 'Медиа',    icon: 'photo' },
+  media: { label: 'Медиа', icon: 'photo' },
 };
 
 const STATUS_META = {
-  success: { label: 'Успешно',  cls: 'badge-success' },
+  success: { label: 'Успешно', cls: 'badge-success' },
   partial: { label: 'Частично', cls: 'badge-pending' },
-  error:   { label: 'Ошибка',   cls: 'badge-error' },
+  error: { label: 'Ошибка', cls: 'badge-error' },
 };
 
 const FILTERS = [
-  { id: '',          label: 'Все' },
-  { id: 'import',    label: 'Импорт',   icon: 'import' },
+  { id: '', label: 'Все' },
+  { id: 'import', label: 'Импорт', icon: 'import' },
   { id: 'migration', label: 'Миграции', icon: 'migrate' },
-  { id: 'export',    label: 'Экспорт',  icon: 'export' },
+  { id: 'export', label: 'Экспорт', icon: 'export' },
 ];
 
 const formatDate = (iso) => {
@@ -78,9 +77,13 @@ const HistoryView = () => {
         title="История операций пуста"
         description="Здесь будут отображаться все ваши импорты, миграции и выгрузки. Импортируйте первый файл — и журнал заполнится."
         actionLabel="Перейти к импорту"
-        onAction={() => { window.location.hash = '#/'; }}
+        onAction={() => {
+          window.location.hash = '#/';
+        }}
         secondaryLabel="Как это работает"
-        onSecondary={() => { window.location.hash = '#/help'; }}
+        onSecondary={() => {
+          window.location.hash = '#/help';
+        }}
       />
     );
   };

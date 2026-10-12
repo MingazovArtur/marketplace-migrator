@@ -16,13 +16,14 @@ v3 — ОПТИМИЗАЦИЯ ПАМЯТИ:
 - POST /v1/description-category/attribute        → атрибуты категории
 - POST /v1/description-category/attribute/values → значения словаря
 """
+
 import asyncio
 import gc
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime
-from typing import Optional, Callable
 
 import httpx
 
@@ -36,13 +37,13 @@ OZON_API_BASE = "https://api-seller.ozon.ru"
 # =====================================================================
 # Конфигурация параллелизма (ОПТИМИЗИРОВАНО ДЛЯ ПАМЯТИ)
 # =====================================================================
-CONCURRENCY = 5                   # одновременных запросов к API Ozon (было 15)
-TIMEOUT = 60.0                    # таймаут одного запроса
-MAX_VALUES_PER_ATTR = 500         # потолок значений словаря (было 1000)
-MAX_DICT_PAGES = 3                # максимум страниц на словарь (было 5)
-DB_CHUNK = 50                     # категорий на один commit (было 200)
-PROGRESS_EVERY = 10               # частота вызова progress_cb (чаще для мониторинга)
-MAX_RETRIES = 3                   # попыток на запрос
+CONCURRENCY = 5  # одновременных запросов к API Ozon (было 15)
+TIMEOUT = 60.0  # таймаут одного запроса
+MAX_VALUES_PER_ATTR = 500  # потолок значений словаря (было 1000)
+MAX_DICT_PAGES = 3  # максимум страниц на словарь (было 5)
+DB_CHUNK = 50  # категорий на один commit (было 200)
+PROGRESS_EVERY = 10  # частота вызова progress_cb (чаще для мониторинга)
+MAX_RETRIES = 3  # попыток на запрос
 
 BASE_REQUIRED_FIELDS = [
     "Артикул",
@@ -55,6 +56,7 @@ BASE_REQUIRED_FIELDS = [
 # =====================================================================
 # HTTP-слой с retry и семафором
 # =====================================================================
+
 
 def _ozon_headers(client_id: str, api_key: str) -> dict:
     """Ozon требует Client-Id + Api-Key (не Bearer!)."""
@@ -134,6 +136,7 @@ async def _post(
 # Дерево категорий
 # =====================================================================
 
+
 async def fetch_ozon_category_tree(
     client: httpx.AsyncClient,
     sem: asyncio.Semaphore,
@@ -145,8 +148,9 @@ async def fetch_ozon_category_tree(
     Для атрибутов нужна пара: description_category_id (родителя) + type_id (листа).
     """
     headers = _ozon_headers(client_id, api_key)
-    data = await _post(client, sem, "/v1/description-category/tree",
-                       {"language": "DEFAULT"}, headers)
+    data = await _post(
+        client, sem, "/v1/description-category/tree", {"language": "DEFAULT"}, headers
+    )
     result = data.get("result") or []
 
     leaves = []
@@ -179,14 +183,16 @@ async def fetch_ozon_category_tree(
                 stats["skipped"] += 1
                 continue
 
-            leaves.append({
-                "id": str(cat_id),
-                "type_id": int(type_id),
-                "name": cat_name or "",
-                "type_name": type_name or "",
-                "parent_id": None,
-                "disabled": bool(node.get("disabled")),
-            })
+            leaves.append(
+                {
+                    "id": str(cat_id),
+                    "type_id": int(type_id),
+                    "name": cat_name or "",
+                    "type_name": type_name or "",
+                    "parent_id": None,
+                    "disabled": bool(node.get("disabled")),
+                }
+            )
             stats["leaves"] += 1
 
     walk(result)
@@ -199,6 +205,7 @@ async def fetch_ozon_category_tree(
 # =====================================================================
 # Словари значений (с лимитом и параллельно)
 # =====================================================================
+
 
 async def _fetch_values(
     client: httpx.AsyncClient,
@@ -215,7 +222,8 @@ async def _fetch_values(
     try:
         for page in range(MAX_DICT_PAGES):
             data = await _post(
-                client, sem,
+                client,
+                sem,
                 "/v1/description-category/attribute/values",
                 {
                     "attribute_id": attribute_id,
@@ -256,6 +264,7 @@ async def _fetch_values(
 # Сборка спека одной категории (атрибуты + параллельные словари)
 # =====================================================================
 
+
 def _map_ozon_type(ozon_type: str, dictionary_id: int) -> str:
     ozon_type = (ozon_type or "").strip()
     if ozon_type in ("Integer", "Decimal", "Float", "Number"):
@@ -269,7 +278,7 @@ def _map_ozon_type(ozon_type: str, dictionary_id: int) -> str:
     return "text"
 
 
-def _map_ozon_group(group_id: Optional[int]) -> str:
+def _map_ozon_group(group_id: int | None) -> str:
     groups = {
         1: "common",
         2: "brand",
@@ -280,7 +289,7 @@ def _map_ozon_group(group_id: Optional[int]) -> str:
     return groups.get(group_id, "common")
 
 
-def _map_attribute(attr: dict, values: Optional[list[str]]) -> dict:
+def _map_attribute(attr: dict, values: list[str] | None) -> dict:
     """Приводит атрибут Ozon к нашей схеме CategoryAttributeSpec."""
     ozon_type = attr.get("type") or ""
     is_collection = bool(attr.get("is_collection") or attr.get("is_dependent"))
@@ -322,7 +331,8 @@ async def _build_spec(
 
     # 1) Атрибуты категории
     data = await _post(
-        client, sem,
+        client,
+        sem,
         "/v1/description-category/attribute",
         {
             "description_category_id": desc_id,
@@ -342,10 +352,12 @@ async def _build_spec(
         mapped.append(item)
 
         if dict_id:
-            dict_tasks.append((
-                i,
-                _fetch_values(client, sem, headers, desc_id, type_id, int(a.get("id") or 0)),
-            ))
+            dict_tasks.append(
+                (
+                    i,
+                    _fetch_values(client, sem, headers, desc_id, type_id, int(a.get("id") or 0)),
+                )
+            )
 
     # 2) Параллельно грузим все словари
     if dict_tasks:
@@ -355,9 +367,7 @@ async def _build_spec(
         )
         for (idx, _), res in zip(dict_tasks, results):
             if isinstance(res, Exception):
-                logger.warning(
-                    f"Словарь не загружен {desc_id}/{mapped[idx]['id']}: {res}"
-                )
+                logger.warning(f"Словарь не загружен {desc_id}/{mapped[idx]['id']}: {res}")
                 mapped[idx]["values"] = []
             else:
                 mapped[idx]["values"] = res
@@ -375,6 +385,7 @@ async def _build_spec(
 # =====================================================================
 # Пакетная запись в БД (ОПТИМИЗИРОВАНО)
 # =====================================================================
+
 
 def _flush_buffer(user_id: int, buffer: list[tuple[dict, dict]]) -> None:
     """Записывает буфер (leaf, spec) в БД одним commit-ом."""
@@ -407,15 +418,17 @@ def _flush_buffer(user_id: int, buffer: list[tuple[dict, dict]]) -> None:
                 existing.version = version
                 existing.fetched_at = datetime.utcnow()
             else:
-                db.add(PlatformCategorySpec(
-                    user_id=user_id,
-                    platform="ozon",
-                    category_id=cid,
-                    category_name=cname,
-                    parent_category_id=leaf.get("parent_id"),
-                    spec=spec,
-                    version=version,
-                ))
+                db.add(
+                    PlatformCategorySpec(
+                        user_id=user_id,
+                        platform="ozon",
+                        category_id=cid,
+                        category_name=cname,
+                        parent_category_id=leaf.get("parent_id"),
+                        spec=spec,
+                        version=version,
+                    )
+                )
 
         db.commit()
     except Exception:
@@ -428,6 +441,7 @@ def _flush_buffer(user_id: int, buffer: list[tuple[dict, dict]]) -> None:
 # =====================================================================
 # Валидационные правила
 # =====================================================================
+
 
 def _build_validation_rules(attrs: list[dict]) -> dict:
     rules = {
@@ -450,12 +464,23 @@ def _build_special_requirements() -> dict:
     """Специальные требования Ozon (из официальной документации seller-edu.ozon.ru)."""
     return {
         "okpd_required_for_tags": [
-            "одежда", "обувь", "шубы", "парфюмерия", "духи", "туалетная вода",
-            "лекарства", "шины", "покрышки", "фотоаппараты", "лампы-вспышки",
+            "одежда",
+            "обувь",
+            "шубы",
+            "парфюмерия",
+            "духи",
+            "туалетная вода",
+            "лекарства",
+            "шины",
+            "покрышки",
+            "фотоаппараты",
+            "лампы-вспышки",
             "товары лёгкой промышленности",
         ],
         "excisable_tags": [
-            "сахаросодержащие напитки", "моторные масла", "безалкогольное пиво",
+            "сахаросодержащие напитки",
+            "моторные масла",
+            "безалкогольное пиво",
         ],
     }
 
@@ -464,11 +489,12 @@ def _build_special_requirements() -> dict:
 # Главный оркестратор (вызывается из tasks.refresh_specs_task)
 # =====================================================================
 
+
 async def refresh_ozon_specs(
     user_id: int,
     raw_api_key: str,
-    category_ids: Optional[list[str]] = None,
-    progress_cb: Optional[Callable] = None,
+    category_ids: list[str] | None = None,
+    progress_cb: Callable | None = None,
     concurrency: int = CONCURRENCY,
 ) -> dict:
     """
@@ -523,18 +549,20 @@ async def refresh_ozon_specs(
             except Exception as e:
                 errors += 1
                 if len(error_details) < 50:
-                    error_details.append({
-                        "category_id": leaf.get("id"),
-                        "type_id": leaf.get("type_id"),
-                        "error": str(e)[:300],
-                    })
+                    error_details.append(
+                        {
+                            "category_id": leaf.get("id"),
+                            "type_id": leaf.get("type_id"),
+                            "error": str(e)[:300],
+                        }
+                    )
             finally:
                 done_count += 1
                 if progress_cb and (done_count % PROGRESS_EVERY == 0 or done_count == total):
                     progress_cb({"total": total, "fetched": fetched, "errors": errors})
 
         for i in range(0, total, DB_CHUNK):
-            chunk = leaves[i:i + DB_CHUNK]
+            chunk = leaves[i : i + DB_CHUNK]
             await asyncio.gather(*(work(leaf) for leaf in chunk))
 
             # Commit чанка в БД
@@ -545,28 +573,27 @@ async def refresh_ozon_specs(
                 errors += len(buffer)
                 for leaf, _ in buffer:
                     if len(error_details) < 50:
-                        error_details.append({
-                            "category_id": leaf.get("id"),
-                            "type_id": leaf.get("type_id"),
-                            "error": f"DB commit failed: {e}",
-                        })
-            
+                        error_details.append(
+                            {
+                                "category_id": leaf.get("id"),
+                                "type_id": leaf.get("type_id"),
+                                "error": f"DB commit failed: {e}",
+                            }
+                        )
+
             # ✅ ОЧИСТКА ПАМЯТИ после каждого чанка
             buffer.clear()
             gc.collect()
 
             logger.info(
-                f"📦 Прогресс Ozon: {done_count}/{total} "
-                f"(успех {fetched}, ошибок {errors})"
+                f"📦 Прогресс Ozon: {done_count}/{total} " f"(успех {fetched}, ошибок {errors})"
             )
 
     # Финальная очистка
     buffer.clear()
     gc.collect()
 
-    logger.info(
-        f"✅ Ozon refresh complete: fetched={fetched}, errors={errors}"
-    )
+    logger.info(f"✅ Ozon refresh complete: fetched={fetched}, errors={errors}")
     return {
         "platform": "ozon",
         "fetched": fetched,

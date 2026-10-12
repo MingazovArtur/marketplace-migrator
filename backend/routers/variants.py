@@ -1,23 +1,25 @@
 """
 Роутер для управления вариациями товаров (SKU по размерам/цветам).
 """
+
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
-from database.repository import variant_repo, repo
-from database.models import User
+
 from core.auth import get_current_user
+from database.models import User
+from database.repository import repo, variant_repo
 
 router = APIRouter(prefix="/api/products", tags=["Variants"])
 
 
 class VariantInput(BaseModel):
     sku: str
-    size: Optional[str] = None
-    color: Optional[str] = None
-    price: Optional[float] = None
-    stock: Optional[int] = None
-    external_id: Optional[str] = None
+    size: str | None = None
+    color: str | None = None
+    price: float | None = None
+    stock: int | None = None
+    external_id: str | None = None
     sort_order: int = 0
 
 
@@ -32,7 +34,7 @@ def get_variants(product_id: int, current_user: User = Depends(get_current_user)
 @router.put("/{product_id}/variants")
 def set_variants(
     product_id: int,
-    variants: List[VariantInput],
+    variants: list[VariantInput],
     current_user: User = Depends(get_current_user),
 ):
     """Полностью заменить набор вариаций товара"""

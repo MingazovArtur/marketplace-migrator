@@ -1,8 +1,10 @@
 import React, { memo } from 'react';
 import Badge from '../common/Badge';
+import Icon from '../icons'; // ✅ Импорт добавлен
 
 const ProductRow = memo(({ product, isSelected, isMigrating, loading, onSelect, onMigrate }) => {
-  const isMigratable = product.status !== 'success' && product.status !== 'processing' && !isMigrating;
+  const isMigratable =
+    product.status !== 'success' && product.status !== 'processing' && !isMigrating;
 
   return (
     <tr className={isSelected ? 'row-selected' : ''}>
@@ -35,6 +37,7 @@ const ProductRow = memo(({ product, isSelected, isMigrating, loading, onSelect, 
           <span className="badge badge-success">✅ Готово</span>
         ) : product.status === 'error' ? (
           <button
+            type="button" // ✅ Добавлено для доступности
             className="btn btn-sm btn-primary"
             onClick={() => onMigrate(product.id)}
             disabled={loading}
@@ -43,16 +46,21 @@ const ProductRow = memo(({ product, isSelected, isMigrating, loading, onSelect, 
           </button>
         ) : (
           <button
+            type="button" // ✅ Добавлено для доступности
             className="btn btn-sm btn-primary"
             onClick={() => onMigrate(product.id)}
             disabled={loading || isMigrating}
           >
             {isMigrating ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                <div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
-                В работе
+                <div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />В
+                работе
               </span>
-            ) : 'Перенести'}
+            ) : (
+              <>
+                <Icon name="migrate" size={15} /> Перенести
+              </>
+            )}
           </button>
         )}
       </td>

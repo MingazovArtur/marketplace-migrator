@@ -28,7 +28,9 @@ const TopBar = ({ isAuthenticated, user, onOpenAuth, onLogout, onOpenHistory }) 
       ) : (
         <>
           <HelpLink />
-          <Button variant="secondary" onClick={() => onOpenAuth('register')}>Регистрация</Button>
+          <Button variant="secondary" onClick={() => onOpenAuth('register')}>
+            Регистрация
+          </Button>
           <Button onClick={() => onOpenAuth('login')}>Войти</Button>
         </>
       )}

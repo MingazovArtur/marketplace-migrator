@@ -1,14 +1,16 @@
 """
 Pydantic-схемы API
 """
+
 from datetime import datetime
-from typing import List, Optional
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 # ========== Аутентификация ==========
 class UserCreate(BaseModel):
     """Схема для регистрации нового пользователя"""
+
     email: EmailStr
     username: str
     password: str
@@ -28,12 +30,14 @@ class UserCreate(BaseModel):
 
 class UserLogin(BaseModel):
     """Схема для входа"""
+
     username: str
     password: str
 
 
 class UserResponse(BaseModel):
     """Схема ответа с данными пользователя"""
+
     id: int
     email: str
     username: str
@@ -47,13 +51,15 @@ class UserResponse(BaseModel):
 
 class Token(BaseModel):
     """Схема JWT токена"""
+
     access_token: str
     token_type: str = "bearer"
 
 
 class TokenData(BaseModel):
     """Данные внутри токена"""
-    user_id: Optional[int] = None
+
+    user_id: int | None = None
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -72,114 +78,122 @@ class VerifyEmailRequest(BaseModel):
 # ========== Характеристики товаров ==========
 class ProductAttributeBase(BaseModel):
     """Базовая схема характеристики товара"""
+
     name: str
     value: str
-    platform_attribute_id: Optional[str] = None
+    platform_attribute_id: str | None = None
     sort_order: int = 0
 
 
 class ProductAttribute(ProductAttributeBase):
     """Схема характеристики товара (ответ)"""
-    id: Optional[int] = None
-    product_id: Optional[int] = None
+
+    id: int | None = None
+    product_id: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class ProductAttributeCreate(ProductAttributeBase):
     """Схема создания характеристики"""
-    product_id: Optional[int] = None
+
+    product_id: int | None = None
 
 
 # ========== Вариации товаров ==========
 class ProductVariantBase(BaseModel):
     sku: str
-    size: Optional[str] = None
-    color: Optional[str] = None
-    price: Optional[float] = None
-    stock: Optional[int] = None
-    external_id: Optional[str] = None
+    size: str | None = None
+    color: str | None = None
+    price: float | None = None
+    stock: int | None = None
+    external_id: str | None = None
     sort_order: int = 0
 
 
 class ProductVariant(ProductVariantBase):
-    id: Optional[int] = None
-    product_id: Optional[int] = None
+    id: int | None = None
+    product_id: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class ProductVariantCreate(ProductVariantBase):
-    product_id: Optional[int] = None
+    product_id: int | None = None
 
 
 # ========== Товары ==========
 class ProductBase(BaseModel):
     """Базовая схема товара"""
+
     name: str
     source: str
     price: float
     status: str = "pending"
-    description: Optional[str] = ""
+    description: str | None = ""
     photos_count: int = 0
-    category: Optional[str] = "Не указана"
-    mapped_category: Optional[str] = None
-    sku: Optional[str] = None
-    external_id: Optional[str] = None
-    brand: Optional[str] = None
-    photos: Optional[List[str]] = Field(default_factory=list)
+    category: str | None = "Не указана"
+    mapped_category: str | None = None
+    sku: str | None = None
+    external_id: str | None = None
+    brand: str | None = None
+    photos: list[str] | None = Field(default_factory=list)
     sku_count: int = 1
-    attributes: Optional[List[ProductAttribute]] = Field(default_factory=list)
-    variants: Optional[List[ProductVariant]] = Field(default_factory=list)
+    attributes: list[ProductAttribute] | None = Field(default_factory=list)
+    variants: list[ProductVariant] | None = Field(default_factory=list)
 
     # ✅ Логистические данные для экспорта на маркетплейсы (требования Ozon/Яндекс)
-    barcode: Optional[str] = None                    # Штрихкод / EAN
-    weight_grams: Optional[int] = None               # Вес товара, г
-    package_weight_grams: Optional[int] = None       # Вес в упаковке, г
-    package_width_mm: Optional[int] = None           # Ширина упаковки, мм
-    package_height_mm: Optional[int] = None          # Высота упаковки, мм
-    package_length_mm: Optional[int] = None          # Длина упаковки, мм
-    vat_rate: Optional[str] = None                   # НДС: none | 10 | 22
-    okpd_code: Optional[str] = None                  # Код ОКПД/ТН ВЭД (маркировка)
-    units_per_item: Optional[int] = 1                # Единиц в одном товаре
+    barcode: str | None = None  # Штрихкод / EAN
+    weight_grams: int | None = None  # Вес товара, г
+    package_weight_grams: int | None = None  # Вес в упаковке, г
+    package_width_mm: int | None = None  # Ширина упаковки, мм
+    package_height_mm: int | None = None  # Высота упаковки, мм
+    package_length_mm: int | None = None  # Длина упаковки, мм
+    vat_rate: str | None = None  # НДС: none | 10 | 22
+    okpd_code: str | None = None  # Код ОКПД/ТН ВЭД (маркировка)
+    units_per_item: int | None = 1  # Единиц в одном товаре
 
 
 class Product(ProductBase):
     """Схема ответа (товар)"""
-    id: Optional[int] = None
-    user_id: Optional[int] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+
+    id: int | None = None
+    user_id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class ProductCreate(ProductBase):
     """Схема создания товара"""
+
     user_id: int
-    attributes: Optional[List[ProductAttributeCreate]] = Field(default_factory=list)
+    attributes: list[ProductAttributeCreate] | None = Field(default_factory=list)
 
 
 class ProductBulkUpdate(BaseModel):
     """Массовое обновление товаров (цена / бренд / категория)"""
-    product_ids: List[int]
-    price: Optional[float] = None            # фиксированная новая цена
-    price_percent: Optional[float] = None    # ИЛИ наценка в % к текущей цене
-    brand: Optional[str] = None
-    category: Optional[str] = None
+
+    product_ids: list[int]
+    price: float | None = None  # фиксированная новая цена
+    price_percent: float | None = None  # ИЛИ наценка в % к текущей цене
+    brand: str | None = None
+    category: str | None = None
 
 
 class ProductLogisticsUpdate(BaseModel):
     """Обновление логистических данных товара: штрихкод, габариты упаковки, НДС, ОКПД."""
-    barcode: Optional[str] = None
-    weight_grams: Optional[int] = Field(None, ge=0)
-    package_weight_grams: Optional[int] = Field(None, ge=0)
-    package_width_mm: Optional[int] = Field(None, ge=0)
-    package_height_mm: Optional[int] = Field(None, ge=0)
-    package_length_mm: Optional[int] = Field(None, ge=0)
-    vat_rate: Optional[str] = None
-    okpd_code: Optional[str] = None
-    units_per_item: Optional[int] = Field(None, ge=1)
+
+    barcode: str | None = None
+    weight_grams: int | None = Field(None, ge=0)
+    package_weight_grams: int | None = Field(None, ge=0)
+    package_width_mm: int | None = Field(None, ge=0)
+    package_height_mm: int | None = Field(None, ge=0)
+    package_length_mm: int | None = Field(None, ge=0)
+    vat_rate: str | None = None
+    okpd_code: str | None = None
+    units_per_item: int | None = Field(None, ge=1)
 
     # ✅ Синхронизация с модалкой и XLSX-генератором: Ozon принимает 5 ставок
     @field_validator("vat_rate")
@@ -206,11 +220,11 @@ class ImportRequest(BaseModel):
 class MigrateRequest(BaseModel):
     product_id: int
     target_marketplace: str
-    edited_data: Optional[dict] = None
+    edited_data: dict | None = None
 
 
 class BatchMigrateRequest(BaseModel):
-    product_ids: List[int]
+    product_ids: list[int]
     target_marketplace: str
 
 
@@ -222,24 +236,25 @@ class Stats(BaseModel):
     error: int
     processing: int
 
+
 # ========== Спецификации категорий ==========
 class CategoryAttributeSpec(BaseModel):
     id: str
     name: str
-    type: str                    # number | text | select | multiselect
+    type: str  # number | text | select | multiselect
     required: bool = False
-    group: str = "common"        # common | brand | variant | additional | fits_for
-    values: Optional[List[str]] = None
+    group: str = "common"  # common | brand | variant | additional | fits_for
+    values: list[str] | None = None
     case_sensitive: bool = True
     separator: str = ";"
-    unit: Optional[str] = None
+    unit: str | None = None
     allow_unit_in_value: bool = False
 
 
 class CategorySpecContent(BaseModel):
-    sheets: List[str] = Field(default_factory=list)
-    required_fields: List[str] = Field(default_factory=list)
-    attributes: List[CategoryAttributeSpec] = Field(default_factory=list)
+    sheets: list[str] = Field(default_factory=list)
+    required_fields: list[str] = Field(default_factory=list)
+    attributes: list[CategoryAttributeSpec] = Field(default_factory=list)
     validation_rules: dict = Field(default_factory=dict)
     special_requirements: dict = Field(default_factory=dict)
 
@@ -250,10 +265,10 @@ class PlatformCategorySpecResponse(BaseModel):
     platform: str
     category_id: str
     category_name: str
-    parent_category_id: Optional[str] = None
+    parent_category_id: str | None = None
     spec: CategorySpecContent
     fetched_at: datetime
-    version: Optional[str] = None
+    version: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -261,11 +276,12 @@ class PlatformCategorySpecResponse(BaseModel):
 class CategorySpecListResponse(BaseModel):
     platform: str
     count: int
-    specs: List[PlatformCategorySpecResponse]
+    specs: list[PlatformCategorySpecResponse]
 
 
 class RefreshSpecRequest(BaseModel):
     """Запрос на обновление спеков через API площадки (требует ключ продавца)."""
-    category_ids: Optional[List[str]] = None
-    api_key: Optional[str] = None
-    business_id: Optional[str] = None 
+
+    category_ids: list[str] | None = None
+    api_key: str | None = None
+    business_id: str | None = None

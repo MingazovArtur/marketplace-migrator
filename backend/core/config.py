@@ -4,6 +4,7 @@
 Все секреты и параметры окружения читаются из переменных окружения
 и файла .env через pydantic-settings. В коде секретов НЕТ.
 """
+
 import json
 import logging
 from functools import lru_cache
@@ -26,8 +27,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),  # ищем в backend/ и в корне проекта
         env_file_encoding="utf-8",
-        case_sensitive=False,          # для env-чтения регистр не важен
-        extra="ignore",                # игнорируем лишние переменные из .env
+        case_sensitive=False,  # для env-чтения регистр не важен
+        extra="ignore",  # игнорируем лишние переменные из .env
     )
 
     # --- Окружение ---
@@ -48,16 +49,16 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
 
     # --- Email (SMTP) ---
-    SMTP_HOST: str = ""             # smtp.yandex.ru | sandbox.smtp.mailtrap.io
+    SMTP_HOST: str = ""  # smtp.yandex.ru | sandbox.smtp.mailtrap.io
     SMTP_PORT: int = 587
-    SMTP_USER: str = ""             # noreply@kartovoz.ru
-    SMTP_PASSWORD: str = ""         # пароль приложения (не основной!)
-    SMTP_FROM_EMAIL: str = ""       # noreply@kartovoz.ru
+    SMTP_USER: str = ""  # noreply@kartovoz.ru
+    SMTP_PASSWORD: str = ""  # пароль приложения (не основной!)
+    SMTP_FROM_EMAIL: str = ""  # noreply@kartovoz.ru
     SMTP_FROM_NAME: str = "Marketplace Migrator"
     SMTP_TLS: bool = True
 
     # --- Базовый URL для ссылок в письмах ---
-    PUBLIC_URL: str = "http://localhost:5173"   # в проде → https://kartovoz.ru
+    PUBLIC_URL: str = "http://localhost:5173"  # в проде → https://kartovoz.ru
 
     # --- Домен ---
     APP_DOMAIN: str = ""
@@ -70,10 +71,10 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_cors(cls, v):
         """Принимает:
-          - Python list (из тестов)
-          - JSON-массив: '["https://a.ru","http://b.ru"]'
-          - CSV-строку: 'https://a.ru,http://b.ru'
-          - пустую строку → []
+        - Python list (из тестов)
+        - JSON-массив: '["https://a.ru","http://b.ru"]'
+        - CSV-строку: 'https://a.ru,http://b.ru'
+        - пустую строку → []
         """
         if isinstance(v, list):
             return v

@@ -11,7 +11,7 @@ export const useApi = () => {
   const callApi = useCallback(async (apiCall, errorMessage = 'Произошла ошибка') => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const result = await apiCall();
       return result;
@@ -32,6 +32,6 @@ export const useApi = () => {
     setError,
     clearError,
     callApi,
-    api
+    api,
   };
 };

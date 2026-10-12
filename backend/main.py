@@ -4,10 +4,11 @@
 Порядок обработки запроса (от внешнего к внутреннему):
   Запрос → CORS (самый внешний) → SlowAPI → ban_check → роутер
 """
+
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, Request, HTTPException, status
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,35 +16,42 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from core.config import settings
-from core.platforms import Platform, PLATFORM_CONFIG
+from core.error_handler import register_exception_handlers  # ✅ НОВЫЙ ИМПОРТ
+from core.platforms import PLATFORM_CONFIG, Platform
 from core.rate_limit import (
+    get_client_ip,
+    is_banned,
     limiter,
     rate_limit_exceeded_handler,
-    is_banned,
-    get_client_ip,
 )
 from routers import (
-    products,
-    import_router,
-    export,
-    auth,
-    email_router,
-    categories,
-    templates,
-    history,
     attributes,
-    variants,
+    auth,
+    categories,
+    email_router,
+    export,
+    history,
+    import_router,
+    products,
     stats,
+    templates,
+    variants,
+)
+from routers import (
     defaults as defaults_router,
 )
-from routers.migrate_router import router as migrate_router
 from routers.health import router as health_router
-
+from routers.migrate_router import router as migrate_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Marketplace Migrator API", version="3.4")
+
+# ============================================================
+# 0. Централизованная обработка ошибок (добавляем сразу после создания app)
+# ============================================================
+register_exception_handlers(app)
 
 
 # ============================================================
@@ -79,6 +87,7 @@ async def ban_check_middleware(request: Request, call_next):
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ", 1)[1]
             from core.auth import decode_token
+
             payload = decode_token(token)
             if payload and "sub" in payload:
                 user_id = str(payload["sub"])
@@ -189,4 +198,5 @@ def root():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -6,7 +6,7 @@ const API_URL = 'http://localhost:8000/api';
 const PLATFORMS = [
   { id: 'ozon', name: 'Ozon', color: '#005bff' },
   { id: 'wildberries', name: 'Wildberries', color: '#cb11ab' },
-  { id: 'yandex', name: 'Яндекс Маркет', color: '#fc3f1d' }
+  { id: 'yandex', name: 'Яндекс Маркет', color: '#fc3f1d' },
 ];
 
 const authHeaders = () => {
@@ -17,7 +17,7 @@ const authHeaders = () => {
   };
 };
 
-function CategoryMapping({ onBack }) {
+function CategoryMapping() {
   const [sourcePlatform, setSourcePlatform] = useState('ozon');
   const [targetPlatform, setTargetPlatform] = useState('wildberries');
   const [sourceCategories, setSourceCategories] = useState([]);
@@ -30,8 +30,8 @@ function CategoryMapping({ onBack }) {
   const [alertType, setAlertType] = useState('');
   const [sourceSearch, setSourceSearch] = useState('');
   const [targetSearch, setTargetSearch] = useState('');
-  const [onlyUnmapped, setOnlyUnmapped] = useState(false);       // ✅ фильтр
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);  // ✅ inline-подтверждение
+  const [onlyUnmapped, setOnlyUnmapped] = useState(false); // ✅ фильтр
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null); // ✅ inline-подтверждение
 
   const [sourceApiKey, setSourceApiKey] = useState('');
   const [targetApiKey, setTargetApiKey] = useState('');
@@ -67,7 +67,7 @@ function CategoryMapping({ onBack }) {
     loadMappings();
     setSelectedSource(null);
     setSelectedTarget(null);
-  }, [sourcePlatform, targetPlatform]);
+  }, [sourcePlatform, targetPlatform, loadCategories, loadMappings]);
 
   const loadCategories = async (useApiKey = false) => {
     setLoading(true);
@@ -78,7 +78,7 @@ function CategoryMapping({ onBack }) {
         const res = await fetch(`${API_URL}/categories/${sourcePlatform}/refresh`, {
           method: 'POST',
           headers: authHeaders(),
-          body: JSON.stringify({ api_key: sourceApiKey })
+          body: JSON.stringify({ api_key: sourceApiKey }),
         });
         const data = await res.json();
         setSourceCategories(data.categories || []);
@@ -92,7 +92,7 @@ function CategoryMapping({ onBack }) {
         const res = await fetch(`${API_URL}/categories/${targetPlatform}/refresh`, {
           method: 'POST',
           headers: authHeaders(),
-          body: JSON.stringify({ api_key: targetApiKey })
+          body: JSON.stringify({ api_key: targetApiKey }),
         });
         const data = await res.json();
         setTargetCategories(data.categories || []);
@@ -176,7 +176,14 @@ function CategoryMapping({ onBack }) {
     const total = sourceCategories.length;
     const covered = sourceCategories.filter((c) => mappedSourceIds.has(String(c.id))).length;
     const percent = total > 0 ? Math.round((covered / total) * 100) : 0;
-    return { covered, total, percent, remaining: total - covered, mappedSourceIds, mappedTargetIds };
+    return {
+      covered,
+      total,
+      percent,
+      remaining: total - covered,
+      mappedSourceIds,
+      mappedTargetIds,
+    };
   }, [mappings, sourceCategories]);
 
   /* 3. Фильтр "только несопоставленные" — ПОСЛЕ coverage */
@@ -219,15 +226,31 @@ function CategoryMapping({ onBack }) {
       <div className="mapping-platforms">
         <div className="platform-selector-group">
           <label>Источник:</label>
-          <select value={sourcePlatform} onChange={(e) => setSourcePlatform(e.target.value)} className="form-input">
-            {PLATFORMS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          <select
+            value={sourcePlatform}
+            onChange={(e) => setSourcePlatform(e.target.value)}
+            className="form-input"
+          >
+            {PLATFORMS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
           </select>
         </div>
         <div className="mapping-arrow">→</div>
         <div className="platform-selector-group">
           <label>Назначение:</label>
-          <select value={targetPlatform} onChange={(e) => setTargetPlatform(e.target.value)} className="form-input">
-            {PLATFORMS.filter((p) => p.id !== sourcePlatform).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          <select
+            value={targetPlatform}
+            onChange={(e) => setTargetPlatform(e.target.value)}
+            className="form-input"
+          >
+            {PLATFORMS.filter((p) => p.id !== sourcePlatform).map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -245,11 +268,23 @@ function CategoryMapping({ onBack }) {
         <div className="api-keys-section">
           <div className="api-key-input">
             <label>API ключ {sourceName}:</label>
-            <input type="text" value={sourceApiKey} onChange={(e) => setSourceApiKey(e.target.value)} placeholder="client_id:api_key" className="form-input" />
+            <input
+              type="text"
+              value={sourceApiKey}
+              onChange={(e) => setSourceApiKey(e.target.value)}
+              placeholder="client_id:api_key"
+              className="form-input"
+            />
           </div>
           <div className="api-key-input">
             <label>API ключ {targetName}:</label>
-            <input type="text" value={targetApiKey} onChange={(e) => setTargetApiKey(e.target.value)} placeholder="client_id:api_key или token" className="form-input" />
+            <input
+              type="text"
+              value={targetApiKey}
+              onChange={(e) => setTargetApiKey(e.target.value)}
+              placeholder="client_id:api_key или token"
+              className="form-input"
+            />
           </div>
           <div className="mapping-hint">
             <Icon name="help" size={16} />
@@ -262,8 +297,12 @@ function CategoryMapping({ onBack }) {
       {sourceCategories.length > 0 && (
         <div className="mapping-coverage">
           <div className="mapping-coverage-head">
-            <span>Покрытие маппинга ({sourceName} → {targetName})</span>
-            <span>{coverage.covered} из {coverage.total} ({coverage.percent}%)</span>
+            <span>
+              Покрытие маппинга ({sourceName} → {targetName})
+            </span>
+            <span>
+              {coverage.covered} из {coverage.total} ({coverage.percent}%)
+            </span>
           </div>
           <div className="mapping-coverage-bar">
             <div
@@ -282,14 +321,28 @@ function CategoryMapping({ onBack }) {
       <div className="mapping-columns">
         <div className="mapping-column">
           <h3>
-            <span>{sourceName} ({visibleSource.length})</span>
-            <label className="mapping-filter-toggle" title="Показать только несопоставленные категории">
-              <input type="checkbox" checked={onlyUnmapped} onChange={(e) => setOnlyUnmapped(e.target.checked)} />
+            <span>
+              {sourceName} ({visibleSource.length})
+            </span>
+            <label
+              className="mapping-filter-toggle"
+              title="Показать только несопоставленные категории"
+            >
+              <input
+                type="checkbox"
+                checked={onlyUnmapped}
+                onChange={(e) => setOnlyUnmapped(e.target.checked)}
+              />
               Только несопоставленные ({coverage.remaining})
             </label>
           </h3>
           <div className="mapping-search">
-            <input className="form-input" placeholder="Поиск категории..." value={sourceSearch} onChange={(e) => setSourceSearch(e.target.value)} />
+            <input
+              className="form-input"
+              placeholder="Поиск категории..."
+              value={sourceSearch}
+              onChange={(e) => setSourceSearch(e.target.value)}
+            />
           </div>
           <div className="category-list">
             {visibleSource.map((cat) => {
@@ -316,9 +369,18 @@ function CategoryMapping({ onBack }) {
         </div>
 
         <div className="mapping-column">
-          <h3><span>{targetName} ({filteredTarget.length})</span></h3>
+          <h3>
+            <span>
+              {targetName} ({filteredTarget.length})
+            </span>
+          </h3>
           <div className="mapping-search">
-            <input className="form-input" placeholder="Поиск категории..." value={targetSearch} onChange={(e) => setTargetSearch(e.target.value)} />
+            <input
+              className="form-input"
+              placeholder="Поиск категории..."
+              value={targetSearch}
+              onChange={(e) => setTargetSearch(e.target.value)}
+            />
           </div>
           <div className="category-list">
             {filteredTarget.map((cat) => {
@@ -361,19 +423,35 @@ function CategoryMapping({ onBack }) {
             {mappings.map((m) => (
               <div key={m.id} className="mapping-item">
                 <span className="mapping-item-text">
-                  {sourceNameById.get(String(m.source_category_id)) || `Категория ${m.source_category_id}`}
+                  {sourceNameById.get(String(m.source_category_id)) ||
+                    `Категория ${m.source_category_id}`}
                   {' → '}
-                  {targetNameById.get(String(m.target_category_id)) || `Категория ${m.target_category_id}`}
+                  {targetNameById.get(String(m.target_category_id)) ||
+                    `Категория ${m.target_category_id}`}
                 </span>
 
                 {confirmDeleteId === m.id ? (
                   <span className="mapping-item-confirm">
                     Удалить?
-                    <button className="btn btn-danger btn-sm" onClick={() => handleDeleteMapping(m)}>Да</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => setConfirmDeleteId(null)}>Нет</button>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => handleDeleteMapping(m)}
+                    >
+                      Да
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setConfirmDeleteId(null)}
+                    >
+                      Нет
+                    </button>
                   </span>
                 ) : (
-                  <button className="btn-icon-danger" title="Удалить маппинг" onClick={() => setConfirmDeleteId(m.id)}>
+                  <button
+                    className="btn-icon-danger"
+                    title="Удалить маппинг"
+                    onClick={() => setConfirmDeleteId(m.id)}
+                  >
                     <Icon name="close" size={14} />
                   </button>
                 )}

@@ -9,12 +9,12 @@
 Авторизация: сырой токен в заголовке Authorization (без схемы).
 Документация: https://dev.wildberries.ru/docs/openapi/item-management
 """
+
 import asyncio
 import hashlib
 import json
 import logging
 from datetime import datetime
-from typing import Optional
 
 import httpx
 
@@ -40,6 +40,7 @@ def _wb_headers(token: str) -> dict:
 
 # ========== Предметы (категории WB) ==========
 
+
 async def fetch_wb_subjects(client: httpx.AsyncClient, token: str) -> list[dict]:
     """Список всех предметов Wildberries."""
     resp = await client.get(
@@ -54,17 +55,22 @@ async def fetch_wb_subjects(client: httpx.AsyncClient, token: str) -> list[dict]
 
     out = []
     for s in items:
-        out.append({
-            "id": str(s.get("objectID") or s.get("id")),
-            "name": s.get("object") or s.get("name") or str(s.get("objectID")),
-            "parent_id": str(s.get("parentID")) if s.get("parentID") else None,
-        })
+        out.append(
+            {
+                "id": str(s.get("objectID") or s.get("id")),
+                "name": s.get("object") or s.get("name") or str(s.get("objectID")),
+                "parent_id": str(s.get("parentID")) if s.get("parentID") else None,
+            }
+        )
     return out
 
 
 # ========== Характеристики предмета ==========
 
-async def fetch_wb_characteristics(client: httpx.AsyncClient, token: str, object_id: str) -> list[dict]:
+
+async def fetch_wb_characteristics(
+    client: httpx.AsyncClient, token: str, object_id: str
+) -> list[dict]:
     """Характеристики конкретного предмета."""
     resp = await client.post(
         f"{WB_API_BASE}/content/v2/object/characteristics/list",
@@ -90,24 +96,28 @@ async def fetch_wb_characteristics(client: httpx.AsyncClient, token: str, object
         if base_type == "select" and max_count and max_count > 1:
             base_type = "multiselect"
 
-        attributes.append({
-            "id": str(ch.get("id")),
-            "name": ch.get("name"),
-            "type": base_type,
-            "required": bool(ch.get("required")),
-            "group": _map_wb_group(ch),
-            "values": values,
-            "case_sensitive": True,
-            "separator": ";",
-            "unit": ch.get("unit") or None,
-            "allow_unit_in_value": False,
-            "max_count": max_count,
-        })
+        attributes.append(
+            {
+                "id": str(ch.get("id")),
+                "name": ch.get("name"),
+                "type": base_type,
+                "required": bool(ch.get("required")),
+                "group": _map_wb_group(ch),
+                "values": values,
+                "case_sensitive": True,
+                "separator": ";",
+                "unit": ch.get("unit") or None,
+                "allow_unit_in_value": False,
+                "max_count": max_count,
+            }
+        )
 
     return attributes
 
 
-async def fetch_wb_directory(client: httpx.AsyncClient, token: str, directory_id: int, limit: int = 1000) -> Optional[list[str]]:
+async def fetch_wb_directory(
+    client: httpx.AsyncClient, token: str, directory_id: int, limit: int = 1000
+) -> list[str] | None:
     """Значения словаря WB (цвета, размеры и т.д.)."""
     try:
         resp = await client.get(
@@ -119,7 +129,9 @@ async def fetch_wb_directory(client: httpx.AsyncClient, token: str, directory_id
             data = resp.json()
             items = data.get("data") if isinstance(data, dict) else data
             items = items or []
-            return [i.get("value") or i.get("name") for i in items if i.get("value") or i.get("name")]
+            return [
+                i.get("value") or i.get("name") for i in items if i.get("value") or i.get("name")
+            ]
     except Exception as e:
         logger.warning(f"WB: не удалось получить словарь {directory_id}: {e}")
     return None
@@ -149,10 +161,11 @@ def _map_wb_group(ch: dict) -> str:
 
 # ========== Оркестратор ==========
 
+
 async def refresh_wildberries_specs(
     user_id: int,
     token: str,
-    category_ids: Optional[list[str]] = None,
+    category_ids: list[str] | None = None,
 ) -> dict:
     """Подтягивает предметы + характеристики, сохраняет как PlatformCategorySpec."""
     async with httpx.AsyncClient(timeout=60) as client:
@@ -190,7 +203,7 @@ async def refresh_wildberries_specs(
                 errors.append({"category_id": s["id"], "error": str(e)})
                 logger.warning(f"WB: ошибка загрузки характеристик предмета {s['id']}: {e}")
 
-            await asyncio.sleep(WB_REQUEST_DELAY)   # бережём rate-limit
+            await asyncio.sleep(WB_REQUEST_DELAY)  # бережём rate-limit
 
     return {
         "platform": "wildberries",
@@ -238,22 +251,24 @@ def _upsert_spec(user_id, platform, category_id, category_name, parent_category_
         version = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
 
         if existing:
-            existing.user_id = user_id 
+            existing.user_id = user_id
             existing.category_name = category_name
             existing.parent_category_id = parent_category_id
             existing.spec = spec
             existing.version = version
             existing.fetched_at = datetime.utcnow()
         else:
-            db.add(PlatformCategorySpec(
-                user_id=user_id,
-                platform=platform,
-                category_id=category_id,
-                category_name=category_name,
-                parent_category_id=parent_category_id,
-                spec=spec,
-                version=version,
-            ))
+            db.add(
+                PlatformCategorySpec(
+                    user_id=user_id,
+                    platform=platform,
+                    category_id=category_id,
+                    category_name=category_name,
+                    parent_category_id=parent_category_id,
+                    spec=spec,
+                    version=version,
+                )
+            )
         db.commit()
     finally:
         db.close()
