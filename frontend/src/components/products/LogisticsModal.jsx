@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Button from '../common/Button';
 import Icon from '../icons';
 import { api } from '../../api';
+import TnvedSelector from './TnvedSelector'; // ✅ Добавлен импорт умного селектора ТН ВЭД
 
 // ✅ Значения НДС точно как в XLS-шаблоне Ozon
 const VAT_OPTIONS = [
@@ -34,8 +35,6 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
   const [error, setError] = useState('');
 
   // ✅ Заполняем форму актуальными данными товара при каждом открытии.
-  // Зависимость от product.id — гарантирует перезаполнение даже если
-  // родительский products-список ещё не обновился.
   useEffect(() => {
     if (!isOpen || !product) return;
     setForm({
@@ -94,8 +93,6 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
         units_per_item: num(form.units_per_item) ?? 1,
       });
 
-      // ✅ Ждём, пока родительский список обновится — тогда при следующем
-      // открытии модалки `product` уже будет со свежими значениями
       if (onSaved) {
         try {
           await onSaved();
@@ -104,10 +101,8 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
         }
       }
 
-      // Закрываем только после успешного обновления списка
       onClose();
     } catch (e) {
-      // ✅ НЕ закрываем модалку при ошибке — пользователь видит причину
       setError(`Ошибка сохранения: ${e.message || 'Неизвестная ошибка'}`);
     } finally {
       setSaving(false);
@@ -157,21 +152,20 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
         </select>
         <p className="form-hint">
           Значения как в XLS-шаблоне Ozon: «Не облагается» (УСН), 22, 10, 7, 5. Ставки 7 и 5 — для
-          отдельных категорий товаров (например, реализация через маркетплейсы по спецрежимам).
+          отдельных категорий товаров.
         </p>
 
+        {/* ================= ТН ВЭД (Умный селектор) ================= */}
         <label className="form-label">ТН ВЭД коды ЕАЭС{req}</label>
-        <input
-          className="form-input"
-          type="text"
+        <TnvedSelector
           value={form.okpd_code}
-          onChange={set('okpd_code')}
-          placeholder="Например: 6109100010"
+          onChange={(val) => setForm((f) => ({ ...f, okpd_code: val }))}
+          productName={product.name}
+          category={product.mapped_category || product.category || ''}
           disabled={saving}
         />
         <p className="form-hint">
-          Обязателен для категорий одежда, обувь, парфюмерия, лекарства и др. Не знаете код —
-          уточните у таможенного представителя.
+          Обязателен для категорий одежда, обувь, парфюмерия, лекарства и др. Начните вводить название товара выше для автоподбора.
         </p>
 
         {/* ================= Габариты упаковки (ОВХ) ================= */}

@@ -49,6 +49,8 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
     volumes:
       - media:/app/media
       - ozon_templates:/app/templates/ozon
@@ -80,6 +82,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
     volumes:
       - media:/app/media
       - ozon_templates:/app/templates/ozon

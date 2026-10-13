@@ -4,7 +4,7 @@ import Icon from '../icons';
 
 const BulkEditModal = ({ isOpen, onClose, selectedIds, onSubmit, loading }) => {
   const [applyPrice, setApplyPrice] = useState(true);
-  const [priceMode, setPriceMode] = useState('fixed'); // percent | fixed
+  const [priceMode, setPriceMode] = useState('fixed'); // 'percent' | 'fixed'
   const [percent, setPercent] = useState('15');
   const [fixedPrice, setFixedPrice] = useState('990');
   const [applyBrand, setApplyBrand] = useState(false);
@@ -14,12 +14,15 @@ const BulkEditModal = ({ isOpen, onClose, selectedIds, onSubmit, loading }) => {
 
   if (!isOpen) return null;
 
-  const submit = () => {
+  const handleSubmit = () => {
     if (!applyPrice && !applyBrand && !applyCategory) {
+      // eslint-disable-next-line no-alert
       alert('Отметьте хотя бы одно поле для обновления');
       return;
     }
+
     const payload = { product_ids: selectedIds };
+
     if (applyPrice) {
       if (priceMode === 'percent') {
         payload.price_percent = parseFloat(percent) || 0;
@@ -29,6 +32,7 @@ const BulkEditModal = ({ isOpen, onClose, selectedIds, onSubmit, loading }) => {
     }
     if (applyBrand) payload.brand = brand;
     if (applyCategory) payload.category = category;
+
     onSubmit(payload);
   };
 
@@ -40,14 +44,18 @@ const BulkEditModal = ({ isOpen, onClose, selectedIds, onSubmit, loading }) => {
             <Icon name="edit" size={22} />
             Массовое редактирование
           </h2>
-          <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
+          <button 
+            type="button" 
+            className="close-btn" 
+            onClick={onClose} 
+            title="Закрыть"
+          >
             <Icon name="close" size={16} />
           </button>
         </div>
 
         <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-          Будет обновлено товаров: <b>{selectedIds.length}</b>. Отметьте поля, которые нужно
-          изменить.
+          Будет обновлено товаров: <b>{selectedIds.length}</b>. Отметьте поля, которые нужно изменить.
         </p>
 
         {/* Цена */}
@@ -64,12 +72,14 @@ const BulkEditModal = ({ isOpen, onClose, selectedIds, onSubmit, loading }) => {
             <div className="bulk-edit-fields">
               <div className="import-method-toggle" style={{ marginBottom: '0.5rem' }}>
                 <button
+                  type="button"
                   className={`toggle-btn ${priceMode === 'fixed' ? 'active' : ''}`}
                   onClick={() => setPriceMode('fixed')}
                 >
                   Фиксированная
                 </button>
                 <button
+                  type="button"
                   className={`toggle-btn ${priceMode === 'percent' ? 'active' : ''}`}
                   onClick={() => setPriceMode('percent')}
                 >
@@ -141,7 +151,7 @@ const BulkEditModal = ({ isOpen, onClose, selectedIds, onSubmit, loading }) => {
           <Button variant="outline" onClick={onClose}>
             Отмена
           </Button>
-          <Button onClick={submit} disabled={loading} loading={loading}>
+          <Button onClick={handleSubmit} disabled={loading} loading={loading}>
             Применить
           </Button>
         </div>

@@ -30,46 +30,25 @@ function CategoryMapping() {
   const [alertType, setAlertType] = useState('');
   const [sourceSearch, setSourceSearch] = useState('');
   const [targetSearch, setTargetSearch] = useState('');
-  const [onlyUnmapped, setOnlyUnmapped] = useState(false); // ✅ фильтр
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null); // ✅ inline-подтверждение
+  const [onlyUnmapped, setOnlyUnmapped] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const [sourceApiKey, setSourceApiKey] = useState('');
   const [targetApiKey, setTargetApiKey] = useState('');
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
 
-  const showAlert = (text, type = 'success') => {
+  const showAlert = useCallback((text, type = 'success') => {
     setMessage(text);
     setAlertType(type);
-  };
-  const clearAlert = () => {
+  }, []);
+
+  const clearAlert = useCallback(() => {
     setMessage('');
     setAlertType('');
-  };
+  }, []);
 
-  /* ==================== Маппинги с сервера ==================== */
-  const loadMappings = useCallback(async () => {
-    try {
-      const res = await fetch(
-        `${API_URL}/category-mapping?source_platform=${sourcePlatform}&target_platform=${targetPlatform}`,
-        { headers: authHeaders() }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setMappings(data.mappings || []);
-      }
-    } catch (e) {
-      console.error('Ошибка загрузки маппингов:', e);
-    }
-  }, [sourcePlatform, targetPlatform]);
-
-  useEffect(() => {
-    loadCategories();
-    loadMappings();
-    setSelectedSource(null);
-    setSelectedTarget(null);
-  }, [sourcePlatform, targetPlatform, loadCategories, loadMappings]);
-
-  const loadCategories = async (useApiKey = false) => {
+  /* ==================== 1. СНАЧАЛА объявляем функции ==================== */
+  const loadCategories = useCallback(async (useApiKey = false) => {
     setLoading(true);
     clearAlert();
 
@@ -105,12 +84,35 @@ function CategoryMapping() {
       if (useApiKey) showAlert('Справочники обновлены из API', 'success');
     } catch (error) {
       showAlert('Ошибка загрузки категорий', 'error');
+    } finally {
+      setLoading(false);
     }
+  }, [sourcePlatform, targetPlatform, sourceApiKey, targetApiKey, clearAlert, showAlert]);
 
-    setLoading(false);
-  };
+  const loadMappings = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `${API_URL}/category-mapping?source_platform=${sourcePlatform}&target_platform=${targetPlatform}`,
+        { headers: authHeaders() }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setMappings(data.mappings || []);
+      }
+    } catch (e) {
+      console.error('Ошибка загрузки маппингов:', e);
+    }
+  }, [sourcePlatform, targetPlatform]);
 
-  /* ==================== Сохранение / удаление ==================== */
+  /* ==================== 2. ТЕПЕРЬ useEffect (безопасно) ==================== */
+  useEffect(() => {
+    loadCategories();
+    loadMappings();
+    setSelectedSource(null);
+    setSelectedTarget(null);
+  }, [sourcePlatform, targetPlatform, loadCategories, loadMappings]);
+
+  /* ==================== 3. Остальная логика ==================== */
   const handleSaveMapping = async () => {
     if (!selectedSource || !selectedTarget) {
       showAlert('Выберите категории с обеих сторон', 'warning');
@@ -155,8 +157,6 @@ function CategoryMapping() {
     }
   };
 
-  /* ==================== ПРАВИЛЬНЫЙ ПОРЯДОК MEMO ==================== */
-  /* 1. Чистый поиск по названию */
   const filteredSource = useMemo(() => {
     const q = sourceSearch.trim().toLowerCase();
     if (!q) return sourceCategories;
@@ -169,7 +169,6 @@ function CategoryMapping() {
     return targetCategories.filter((c) => c.name.toLowerCase().includes(q));
   }, [targetCategories, targetSearch]);
 
-  /* 2. Покрытие: СНАЧАЛА объявляем, чтобы visibleSource мог его использовать */
   const coverage = useMemo(() => {
     const mappedSourceIds = new Set(mappings.map((m) => String(m.source_category_id)));
     const mappedTargetIds = new Set(mappings.map((m) => String(m.target_category_id)));
@@ -186,13 +185,11 @@ function CategoryMapping() {
     };
   }, [mappings, sourceCategories]);
 
-  /* 3. Фильтр "только несопоставленные" — ПОСЛЕ coverage */
   const visibleSource = useMemo(() => {
     if (!onlyUnmapped) return filteredSource;
     return filteredSource.filter((c) => !coverage.mappedSourceIds.has(String(c.id)));
   }, [filteredSource, onlyUnmapped, coverage.mappedSourceIds]);
 
-  /* 4. Карты id → name для списка сохранённых */
   const sourceNameById = useMemo(
     () => new Map(sourceCategories.map((c) => [String(c.id), c.name])),
     [sourceCategories]
@@ -293,7 +290,6 @@ function CategoryMapping() {
         </div>
       )}
 
-      {/* Индикатор покрытия */}
       {sourceCategories.length > 0 && (
         <div className="mapping-coverage">
           <div className="mapping-coverage-head">
@@ -324,10 +320,7 @@ function CategoryMapping() {
             <span>
               {sourceName} ({visibleSource.length})
             </span>
-            <label
-              className="mapping-filter-toggle"
-              title="Показать только несопоставленные категории"
-            >
+            <label className="mapping-filter-toggle" title="Показать только несопоставленные категории">
               <input
                 type="checkbox"
                 checked={onlyUnmapped}
@@ -423,26 +416,18 @@ function CategoryMapping() {
             {mappings.map((m) => (
               <div key={m.id} className="mapping-item">
                 <span className="mapping-item-text">
-                  {sourceNameById.get(String(m.source_category_id)) ||
-                    `Категория ${m.source_category_id}`}
+                  {sourceNameById.get(String(m.source_category_id)) || `Категория ${m.source_category_id}`}
                   {' → '}
-                  {targetNameById.get(String(m.target_category_id)) ||
-                    `Категория ${m.target_category_id}`}
+                  {targetNameById.get(String(m.target_category_id)) || `Категория ${m.target_category_id}`}
                 </span>
 
                 {confirmDeleteId === m.id ? (
                   <span className="mapping-item-confirm">
                     Удалить?
-                    <button
-                      className="btn btn-danger btn-sm"
-                      onClick={() => handleDeleteMapping(m)}
-                    >
+                    <button className="btn btn-danger btn-sm" onClick={() => handleDeleteMapping(m)}>
                       Да
                     </button>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setConfirmDeleteId(null)}
-                    >
+                    <button className="btn btn-secondary btn-sm" onClick={() => setConfirmDeleteId(null)}>
                       Нет
                     </button>
                   </span>

@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-
+from routers import tnved
 from core.config import settings
 from core.error_handler import register_exception_handlers  # ✅ НОВЫЙ ИМПОРТ
 from core.platforms import PLATFORM_CONFIG, Platform
@@ -158,7 +158,7 @@ app.include_router(email_router.router)
 app.include_router(categories.router)
 app.include_router(history.router)
 app.include_router(defaults_router.router)
-
+app.include_router(tnved.router)
 
 # ============================================================
 # Статика: раздача скачанных фото
