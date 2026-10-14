@@ -1,10 +1,12 @@
 """
-Парсер YML-фидов Яндекс Маркета
+Парсер YML-фидов Яндекс Маркета с защитой от SSRF и XML Bomb (XXE).
 Docs: https://yandex.ru/support/partner2/yml/yml-format.html
 """
 
+import ipaddress
 import logging
 import re
+import socket
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
@@ -12,11 +14,12 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+MAX_YML_SIZE_BYTES = 25 * 1024 * 1024  # 25 МБ — защита от переполнения памяти
+
 
 class YmlParser:
     """Парсер YML (Yandex Market Language) файлов"""
 
-    # Пространства имён, которые могут встречаться в YML
     NAMESPACES = {"yml": "http://www.w3.org/1999/xhtml"}
 
     def __init__(self, max_offers: int = 50):
@@ -27,20 +30,50 @@ class YmlParser:
         self.max_offers = max_offers
 
     def validate_url(self, url: str) -> bool:
-        """Проверяет, что URL валидный и похож на YML-фид"""
+        """
+        Проверяет, что URL валидный, использует http/https и НЕ ведёт
+        во внутреннюю сеть (защита от SSRF).
+        """
         try:
             result = urlparse(url)
             if not all([result.scheme, result.netloc]):
                 return False
             if result.scheme not in ("http", "https"):
                 return False
+
+            hostname = result.hostname
+            if not hostname:
+                return False
+
+            # Запрещаем очевидные локальные имена внутри Docker-сети
+            forbidden_hosts = {"localhost", "db", "redis", "backend", "celery", "nginx"}
+            if hostname.lower() in forbidden_hosts:
+                logger.warning(f"🚫 SSRF block: запрещённый хост {hostname}")
+                return False
+
+            # Резолвим все IP-адреса хоста и проверяем, что среди них нет приватных/локальных
+            addr_info = socket.getaddrinfo(hostname, None)
+            for item in addr_info:
+                ip_str = item[4][0]
+                ip_obj = ipaddress.ip_address(ip_str)
+                if (
+                    ip_obj.is_private
+                    or ip_obj.is_loopback
+                    or ip_obj.is_link_local
+                    or ip_obj.is_multicast
+                    or ip_obj.is_reserved
+                ):
+                    logger.warning(f"🚫 SSRF block: хост {hostname} резолвится во внутренний IP {ip_str}")
+                    return False
+
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Ошибка валидации URL {url}: {e}")
             return False
 
     def fetch_and_parse(self, url: str) -> dict:
         """
-        Скачивает и парсит YML-фид
+        Скачивает и парсит YML-фид.
         Возвращает: {
             "shop_name": str,
             "categories": {id: name},
@@ -50,22 +83,48 @@ class YmlParser:
         }
         """
         if not self.validate_url(url):
-            raise ValueError(f"Невалидный URL: {url}")
+            raise ValueError(
+                f"Невалидный или небезопасный URL: {url}. "
+                "Разрешены только публичные http/https адреса."
+            )
 
         logger.info(f"📡 Скачиваем YML-фид: {url}")
 
         try:
-            response = requests.get(
-                url, timeout=30, headers={"User-Agent": "Mozilla/5.0 (Marketplace Migrator Bot)"}
-            )
-            response.raise_for_status()
+            with requests.get(
+                url,
+                timeout=30,
+                stream=True,
+                allow_redirects=False,  # Защита от SSRF-редиректа на внутренний IP
+                headers={"User-Agent": "Mozilla/5.0 (Marketplace Migrator Bot)"},
+            ) as response:
+                if response.is_redirect or response.status_code in (301, 302, 303, 307, 308):
+                    redirect_url = response.headers.get("Location", "")
+                    if not self.validate_url(redirect_url):
+                        raise ValueError("Редирект фида ведёт на недопустимый адрес")
+                    return self.fetch_and_parse(redirect_url)
 
-            # Проверяем Content-Type
-            content_type = response.headers.get("Content-Type", "").lower()
-            if "xml" not in content_type and "text" not in content_type:
-                logger.warning(f"⚠️  Нестандартный Content-Type: {content_type}, пробуем парсить")
+                response.raise_for_status()
 
-            return self._parse_xml(response.content, url)
+                content_type = response.headers.get("Content-Type", "").lower()
+                if "xml" not in content_type and "text" not in content_type:
+                    logger.warning(
+                        f"⚠️ Нестандартный Content-Type: {content_type}, пробуем парсить"
+                    )
+
+                chunks = []
+                total_bytes = 0
+                for chunk in response.iter_content(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_YML_SIZE_BYTES:
+                        raise ValueError("Размер YML-фида превышает допустимый лимит (25 МБ)")
+                    chunks.append(chunk)
+
+                content = b"".join(chunks)
+
+            return self._parse_xml(content, url)
 
         except requests.exceptions.Timeout:
             raise ValueError("Таймаут при загрузке фида (лимит 30 секунд)")
@@ -77,16 +136,19 @@ class YmlParser:
             raise ValueError(f"Ошибка парсинга XML: {e}")
 
     def _parse_xml(self, content: bytes, source_url: str) -> dict:
-        """Парсит XML-содержимое YML-фида"""
+        """Парсит XML-содержимое YML-фида с защитой от XML Bomb (ENTITY)."""
+        # Защита от Billion Laughs / XXE: запрещаем объявления <!ENTITY в XML
+        head_sample = content[:4096].upper()
+        if b"<!ENTITY" in head_sample:
+            raise ValueError("XML содержит запрещённые конструкции <!ENTITY> (защита от XXE/XML Bomb)")
+
         try:
             root = ElementTree.fromstring(content)
         except ElementTree.ParseError as e:
             raise ValueError(f"Невалидный XML: {e}")
 
-        # Находим корневой элемент (может быть с namespace или без)
         shop = root.find(".//shop")
         if shop is None:
-            # Пробуем с namespace
             for ns_prefix in ["yml", ""]:
                 shop = root.find(f'.//{{{self.NAMESPACES.get(ns_prefix, "")}}}shop')
                 if shop is not None:
@@ -95,11 +157,13 @@ class YmlParser:
         if shop is None:
             raise ValueError("Не найден элемент <shop> в YML-фиде")
 
-        # 1. Получаем название магазина
         shop_name_elem = shop.find("name")
-        shop_name = shop_name_elem.text if shop_name_elem is not None else "Неизвестный магазин"
+        shop_name = (
+            shop_name_elem.text.strip()
+            if shop_name_elem is not None and shop_name_elem.text
+            else "Неизвестный магазин"
+        )
 
-        # 2. Парсим категории
         categories = {}
         categories_elem = shop.find("categories")
         if categories_elem is not None:
@@ -108,7 +172,6 @@ class YmlParser:
                 if cat_id and cat.text:
                     categories[cat_id] = cat.text.strip()
 
-        # 3. Парсим товары (offers)
         offers_elem = shop.find("offers")
         if offers_elem is None:
             raise ValueError("Не найден элемент <offers> в YML-фиде")
@@ -116,7 +179,6 @@ class YmlParser:
         all_offers = offers_elem.findall("offer")
         total_offers = len(all_offers)
 
-        # Ограничиваем количество для демо
         parsed_offers = []
         for offer in all_offers[: self.max_offers]:
             parsed = self._parse_offer(offer, categories)
@@ -141,9 +203,8 @@ class YmlParser:
             available = offer_elem.get("available", "true").lower() == "true"
 
             if not available:
-                return None  # Пропускаем недоступные товары
+                return None
 
-            # Базовые поля
             name_elem = offer_elem.find("name")
             name = (
                 name_elem.text.strip()
@@ -157,21 +218,17 @@ class YmlParser:
             currency_elem = offer_elem.find("currencyId")
             currency = currency_elem.text if currency_elem is not None else "RUR"
 
-            # Описание
             description_elem = offer_elem.find("description")
             description = ""
             if description_elem is not None and description_elem.text:
-                # Убираем HTML-теги из описания
                 description = re.sub(r"<[^>]+>", " ", description_elem.text).strip()
-                description = description[:500]  # Ограничиваем длину
+                description = description[:500]
 
-            # Фотографии
             pictures = []
             for pic_elem in offer_elem.findall("picture"):
                 if pic_elem.text:
                     pictures.append(pic_elem.text.strip())
 
-            # Категория
             category_id = ""
             category_name = "Без категории"
             cat_elem = offer_elem.find("categoryId")
@@ -179,7 +236,6 @@ class YmlParser:
                 category_id = cat_elem.text.strip()
                 category_name = categories.get(category_id, "Без категории")
 
-            # Артикул (vendorCode)
             vendor_code_elem = offer_elem.find("vendorCode")
             vendor_code = (
                 vendor_code_elem.text.strip()
@@ -187,13 +243,11 @@ class YmlParser:
                 else f"YML-{offer_id}"
             )
 
-            # Бренд
             vendor_elem = offer_elem.find("vendor")
             vendor = (
                 vendor_elem.text.strip() if vendor_elem is not None and vendor_elem.text else ""
             )
 
-            # Параметры (характеристики)
             params = {}
             for param_elem in offer_elem.findall("param"):
                 param_name = param_elem.get("name", "")
@@ -209,7 +263,7 @@ class YmlParser:
                 "currency": currency,
                 "category_id": category_id,
                 "category": category_name,
-                "photos": pictures[:5],  # Берём максимум 5 фото
+                "photos": pictures[:5],
                 "vendor": vendor,
                 "params": params,
                 "available": available,
@@ -217,7 +271,7 @@ class YmlParser:
             }
 
         except Exception as e:
-            logger.warning(f"⚠️  Ошибка парсинга offer {offer_elem.get('id')}: {e}")
+            logger.warning(f"⚠️ Ошибка парсинга offer {offer_elem.get('id')}: {e}")
             return None
 
 

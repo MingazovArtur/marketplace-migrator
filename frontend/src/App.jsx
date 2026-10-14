@@ -42,7 +42,7 @@ function App() {
   const [message, setMessage] = useState('');
   const [currentView, setCurrentView] = useState('products');
 
-  // ✅ Триггер синхронизации обоих списков товаров (App + ProductsPage)
+  // Триггер синхронизации обоих списков товаров (App + ProductsPage)
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Модалки
@@ -108,9 +108,8 @@ function App() {
     setMessage
   );
 
-  // ✅ ОБЪЕДИНЁННАЯ функция перезагрузки:
-  // обновляет App-овский список (useProducts) И внутренний список ProductsPage
-  // через refreshKey. Именно её надо передавать в onSaved/onSave модалок редактирования.
+  // ОБЪЕДИНЁННАЯ функция перезагрузки:
+  // обновляет App-овский список (useProducts) И внутренний список ProductsPage через refreshKey.
   const refreshAll = useCallback(async () => {
     try {
       await loadData();
@@ -168,7 +167,7 @@ function App() {
 
         if (autoExport) {
           try {
-            await api.exportXlsxV2(platform);
+            await api.exportXlsxV2(platform, 'success', id);
             setMessage(
               `✅ Карточка перенесена. Файл для ${platform} скачан — загрузите его в кабинете площадки.`
             );
@@ -176,11 +175,12 @@ function App() {
             setMessage(`✅ Карточка перенесена, но файл не скачался: ${e.message}`);
           }
         }
+        await refreshAll();
       } catch (e) {
         setMessage(`❌ Ошибка миграции: ${e.message}`);
       }
     },
-    [migrateProduct]
+    [migrateProduct, refreshAll]
   );
 
   const handleAutoExport = useCallback(
@@ -215,6 +215,8 @@ function App() {
       setShowBatchModal(true);
     } else if (target && target.id) {
       setMigrateProductId(target.id);
+    } else if (typeof target === 'number') {
+      setMigrateProductId(target);
     }
   }, []);
 
@@ -236,9 +238,9 @@ function App() {
 
   const handleExportForPlatform = useCallback(async (platform, status) => {
     try {
-      const ext = await api.exportXlsxV2(platform, status);
+      const filename = await api.exportXlsxV2(platform, status);
       setMessage(
-        ext === 'zip'
+        filename && filename.toLowerCase().endsWith('.zip')
           ? `✅ Скачан ZIP из нескольких файлов. Загрузите каждый в кабинете ${platform}.`
           : `✅ Файл по шаблону ${platform} скачан. Загрузите его в кабинете площадки.`
       );
@@ -448,6 +450,8 @@ function App() {
           onClose={() => setMigrateProductId(null)}
           product={getProductById(migrateProductId)}
           onConfirm={handleConfirmMigrate}
+          onSaved={refreshAll}
+          onNotify={setMessage}
           loading={isMigratingProductId === migrateProductId}
         />
       )}
@@ -482,8 +486,6 @@ function App() {
         loading={productsLoading}
       />
 
-      {/* ✅ ЛОГИСТИКА — берём СВЕЖИЙ продукт из обновлённого списка products,
-          а не устаревший объект из editLogisticsProduct */}
       {editLogisticsProduct && (
         <LogisticsModal
           key={`logistics-${editLogisticsProduct.id}-${refreshKey}`}
@@ -494,7 +496,6 @@ function App() {
         />
       )}
 
-      {/* ✅ АТРИБУТЫ */}
       {editAttributesProduct && (
         <AttributesModal
           key={`attrs-${editAttributesProduct.id}-${refreshKey}`}
@@ -502,10 +503,10 @@ function App() {
           onClose={() => setEditAttributesProduct(null)}
           product={getProductById(editAttributesProduct.id) || editAttributesProduct}
           onSave={refreshAll}
+          onNotify={setMessage}
         />
       )}
 
-      {/* ✅ ВАРИАНТЫ */}
       {editVariantsProduct && (
         <VariantsModal
           key={`variants-${editVariantsProduct.id}-${refreshKey}`}
@@ -516,7 +517,6 @@ function App() {
         />
       )}
 
-      {/* ✅ ФОТО */}
       {editPhotosProduct && (
         <PhotosModal
           key={`photos-${editPhotosProduct.id}-${refreshKey}`}

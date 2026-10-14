@@ -2,13 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Button from '../common/Button';
 import Icon from '../icons';
 import { PLATFORMS } from '../../utils/platformUtils';
-
-const API_URL = 'http://localhost:8000/api';
-
-const authHeaders = () => {
-  const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
+import { api } from '../../api';
 
 const HINTS = {
   ozon: 'Тест: test:test · Реальный API: CLIENT_ID:API_KEY',
@@ -79,7 +73,9 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
     }
     const k = authKey.trim();
     const full =
-      k.includes(':') && k.split(':')[0].toLowerCase() === selectedPlatform
+      k.startsWith('http://') ||
+      k.startsWith('https://') ||
+      (k.includes(':') && k.split(':')[0].toLowerCase() === selectedPlatform)
         ? k
         : `${selectedPlatform}:${k}`;
     setIsImported(true);
@@ -88,19 +84,7 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
 
   const downloadTemplate = async () => {
     try {
-      const res = await fetch(`${API_URL}/templates/${selectedPlatform}`, {
-        headers: authHeaders(),
-      });
-      if (!res.ok) throw new Error('шаблон не найден');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `template_${selectedPlatform}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await api.downloadImportTemplate(selectedPlatform);
     } catch (e) {
       setPreviewError('Не удалось скачать шаблон: ' + e.message);
     }
@@ -113,16 +97,8 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
     setPreviewLoading(true);
     setIsImported(false);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('platform', selectedPlatform);
-      const res = await fetch(`${API_URL}/import/preview`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: fd,
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.detail || 'Не удалось прочитать файл');
+      const data = await api.previewFileImport(selectedPlatform, file);
+      if (!data.success) throw new Error(data.detail || 'Не удалось прочитать файл');
       setPreview(data.preview);
     } catch (e) {
       setPreviewError(e.message);

@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     # --- Безопасность (секреты) ---
     SECRET_KEY: str = DEV_SECRET_FALLBACK
+    JWT_SECRET: str = ""  # алиас для совместимости с .env.example и docker-compose.prod.yml
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 часа
 
@@ -49,22 +50,23 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
 
     # --- Email (SMTP) ---
-    SMTP_HOST: str = ""  # smtp.yandex.ru | sandbox.smtp.mailtrap.io
+    SMTP_ENABLED: bool = False
+    EMAIL_VERIFICATION_REQUIRED: bool = False
+    SMTP_HOST: str = ""
     SMTP_PORT: int = 587
-    SMTP_USER: str = ""  # noreply@kartovoz.ru
-    SMTP_PASSWORD: str = ""  # пароль приложения (не основной!)
-    SMTP_FROM_EMAIL: str = ""  # noreply@kartovoz.ru
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
     SMTP_FROM_NAME: str = "Marketplace Migrator"
     SMTP_TLS: bool = True
 
-    # --- Базовый URL для ссылок в письмах ---
-    PUBLIC_URL: str = "http://localhost:5173"  # в проде → https://kartovoz.ru
+    # --- Базовый URL для ссылок в письмах и статики ---
+    PUBLIC_URL: str = "http://localhost:5173"
 
     # --- Домен ---
     APP_DOMAIN: str = ""
 
     # --- CORS (all-eating: JSON-массив или CSV) ---
-    # NoDecode запрещает Pydantic парсить JSON самому — наш парсер ниже сделает это надёжнее
     CORS_ORIGINS: Annotated[list[str], NoDecode] = []
 
     @field_validator("CORS_ORIGINS", mode="before")
@@ -116,6 +118,10 @@ class Settings(BaseSettings):
         return self.BASE_DIR / "photos"
 
     @property
+    def media_dir(self) -> Path:
+        return self.BASE_DIR / "media"
+
+    @property
     def data_dir(self) -> Path:
         return self.BASE_DIR / "data"
 
@@ -127,10 +133,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _ensure_secret_is_set(self) -> "Settings":
-        """Не даём запустить production без настоящего SECRET_KEY."""
+        """Унифицируем SECRET_KEY и JWT_SECRET; проверяем наличие ключа в production."""
+        if self.SECRET_KEY == DEV_SECRET_FALLBACK and self.JWT_SECRET:
+            self.SECRET_KEY = self.JWT_SECRET
+
         if self.ENVIRONMENT == "production" and self.SECRET_KEY == DEV_SECRET_FALLBACK:
             raise ValueError(
-                "ENVIRONMENT=production, но SECRET_KEY не задан. "
+                "ENVIRONMENT=production, но SECRET_KEY (или JWT_SECRET) не задан. "
                 "Укажите SECRET_KEY в .env или переменной окружения."
             )
         if self.SECRET_KEY == DEV_SECRET_FALLBACK:
@@ -146,15 +155,15 @@ def get_settings() -> Settings:
 
 settings = get_settings()
 
-# Директории создаём при старте (как раньше)
+# Директории создаём при старте
 settings.photos_dir.mkdir(parents=True, exist_ok=True)
+settings.media_dir.mkdir(parents=True, exist_ok=True)
 settings.data_dir.mkdir(parents=True, exist_ok=True)
 
 # --- Обратная совместимость ---
-# Старые импорты вида `from core.config import SECRET_KEY, DATABASE_URL`
-# продолжают работать без правок auth.py / session.py.
 BASE_DIR = settings.BASE_DIR
 PHOTOS_DIR = settings.photos_dir
+MEDIA_DIR = settings.media_dir
 DATA_DIR = settings.data_dir
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.JWT_ALGORITHM

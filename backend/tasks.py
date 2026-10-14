@@ -1,12 +1,14 @@
 """
 Celery задачи для фоновой миграции товаров и загрузки спеков площадок.
 
-✅ v3:
+✅ v4:
+  - Исправлен вызов cache_service.delete_pattern в refresh_specs_task.
+  - Убрана искусственная задержка time.sleep(0.3).
   - Авто-заполнение 4 канонических атрибутов XLS-шаблона Ozon
     (Бренд, Тип, Название модели, Нужен код маркировки) с поддержкой синонимов.
   - Авто-копирование ТН ВЭД из карточки в атрибут спека.
   - Защита от миграции с ценой 0 (Ozon отклонит карточку).
-  - ✅ Дозаполнение пустой логистики (НДС, ТН ВЭД, ОВХ, вес) из дефолтов
+  - Дозаполнение пустой логистики (НДС, ТН ВЭД, ОВХ, вес) из дефолтов
     категории/глобальных — перед миграцией и авто-атрибутами.
 """
 
@@ -29,15 +31,11 @@ category_mapper = CategoryMapper()
 # ---------------------------------------------------------------------------
 # Конфигурация канонических атрибутов XLS-шаблона Ozon
 # ---------------------------------------------------------------------------
-# Это 4 атрибута, которые ОЗОН требует в каждом XLS-файле (эталон 23.09.2026).
-# При миграции, если у товара их нет — вставляем автоматически значения из
-# словарей спека площадки (правило: пользователь работает только через UI).
-
 CANON_ATTRS = {
     "brand": {
         "names": ["бренд", "брендводеждеиобуви", "брендодеждыиобуви"],
         "fallback": "NoName",
-        "dict_pref": "нет бренда",  # предпочитаем «Нет бренда» из словаря
+        "dict_pref": "нет бренда",
     },
     "model": {
         "names": [
@@ -47,22 +45,21 @@ CANON_ATTRS = {
             "объединитьводнукарточку",
             "модель",
         ],
-        "fallback": None,  # берётся из названия товара
+        "fallback": None,
         "dict_pref": None,
     },
     "type": {
         "names": ["тип"],
         "fallback": "Футболка",
-        "dict_pref": None,  # первое значение словаря
+        "dict_pref": None,
     },
     "marking": {
         "names": ["нуженкодмаркировки", "кодмаркировки", "маркировка"],
         "fallback": "Нет",
-        "dict_pref": "нет",  # предпочитаем «Нет» из словаря
+        "dict_pref": "нет",
     },
 }
 
-# Каноническое имя атрибута «ТН ВЭД коды ЕАЭС» в спеке (для авто-копирования)
 TNVED_NAMES = ["тнвэдкодыеаэс", "тнвэд", "кодытнвэд"]
 
 
@@ -165,14 +162,6 @@ def _match_spec_by_text(text, platform: str):
 def _pick_target_category(product: dict, edited_category, target_platform: str, user_id: int):
     """
     Единая точка определения целевой категории. Возвращает (имя_спека, источник).
-
-    Приоритеты:
-      1) категория из модалки миграции — если это ТОЧНОЕ имя спека;
-      2) уже выставленный product.mapped_category — если он валиден;
-      3) ручное правило из раздела «Маппинг»;
-      4) авто-маппинг по тексту + проверка по спекам;
-      5) поиск типа товара по спекам (с префикс-матчингом);
-      6) None → миграция завершится ошибкой с инструкцией.
     """
     # 1) Категория из модалки
     if edited_category and _spec_name_exists(target_platform, edited_category):
@@ -266,7 +255,6 @@ def _ensure_canonical_attributes(
     if not spec_attrs:
         return
 
-    # ✅ Умный Тип: «Одежда / Футболка» → «Футболка» (сверка со словарём)
     derived_type = defaults_service.derive_type_value(target_category_name, spec)
 
     from database.models import ProductAttribute
@@ -292,7 +280,7 @@ def _ensure_canonical_attributes(
             if canon == "model":
                 value = (product_name or "").strip()[:50] or "Модель"
             elif canon == "type" and derived_type:
-                value = derived_type  # ✅ вместо первого значения словаря
+                value = derived_type
             elif canon == "brand":
                 pref = (defaults.get("brand") or "").strip().lower()
                 value = (
@@ -461,14 +449,19 @@ def migrate_product_task(
                 f"📂 Товар {product_id}: категория '{target_category_name}' (источник: {how})"
             )
 
+        # Дозаполнение пустой логистики и цены по умолчанию из дефолтов
+        upd = defaults_service.build_updates_for_product(product, user_id)
+        if upd:
+            repo.update(product_id, upd, user_id=user_id)
+            product.update(upd)
+            logger.info(f"🩹 Товар {product_id}: дефолты дописали поля {list(upd)}")
+
         original_price = _safe_float(
-            edited_data.get("price") if edited_data else product.get("price")
+            edited_data.get("price") if (edited_data and edited_data.get("price") is not None) else product.get("price")
         )
         price_multiplier = _safe_float(PRICE_RULES.get(target_platform, 1.0), default=1.0)
         final_price = round(original_price * price_multiplier, 2)
 
-        # ✅ Защита от цены 0: Ozon отклонит карточку, поэтому не мигрируем молча,
-        # а возвращаем понятную инструкцию для UI.
         if final_price <= 0:
             error_msg = (
                 "Цена товара = 0 ₽. Укажите цену в поле «Цена, ₽» в этом окне "
@@ -485,9 +478,7 @@ def migrate_product_task(
             logger.warning(f"⚠️ Товар {product_id}: миграция отклонена — цена 0")
             return {"status": "error", "message": error_msg, "product_id": product_id}
 
-        time.sleep(0.3)
-
-        final_name = edited_data.get("name") if edited_data else product.get("name")
+        final_name = edited_data.get("name") if (edited_data and edited_data.get("name")) else product.get("name")
         base_source = _base_source(product.get("source"))
         new_source = f"{base_source} → {PLATFORM_CONFIG[target_platform]['name']}"
 
@@ -512,21 +503,14 @@ def migrate_product_task(
             logger.warning(f"⚠️ Товар {product_id}: {error_msg}")
             return {"status": "error", "message": error_msg, "product_id": product_id}
 
-        # ✅ Дозаполнение пустой логистики из дефолтов (категория → глобальные)
-        upd = defaults_service.build_updates_for_product(product, user_id)
-        if upd:
-            repo.update(product_id, upd, user_id=user_id)
-            product.update(upd)
-            logger.info(f"🩹 Товар {product_id}: дефолты дописали поля {list(upd)}")
-
-        # ✅ Авто-дозаполнение обязательных атрибутов XLS-шаблона ДО обновления статуса
+        # Авто-дозаполнение обязательных атрибутов XLS-шаблона ДО обновления статуса
         _ensure_canonical_attributes(
             product_id=product_id,
             target_platform=target_platform,
             target_category_name=target_category_name,
             product_name=final_name or product.get("name"),
             okpd_code=product.get("okpd_code"),
-            user_id=user_id,  # ✅ передаём user_id для дефолтов
+            user_id=user_id,
         )
 
         repo.update(
@@ -662,13 +646,19 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
                 product, None, target_platform, user_id
             )
 
+            # Дозаполнение пустой логистики и цены по умолчанию из дефолтов
+            upd = defaults_service.build_updates_for_product(product, user_id)
+            if upd:
+                repo.update(product_id, upd, user_id=user_id)
+                product.update(upd)
+                logger.info(f"🩹 Товар {product_id}: дефолты дописали поля {list(upd)}")
+
             original_price = _safe_float(product.get("price"))
             price_multiplier = _safe_float(PRICE_RULES.get(target_platform, 1.0), default=1.0)
             final_price = round(original_price * price_multiplier, 2)
             base_source = _base_source(product.get("source"))
             new_source = f"{base_source} → {PLATFORM_CONFIG[target_platform]['name']}"
 
-            # ✅ Защита от цены 0 в пакетной миграции
             if final_price <= 0:
                 error_msg = "Цена = 0 ₽ — установите цену через «Обновить цену/бренд» и повторите"
                 repo.update(
@@ -720,21 +710,13 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
                     f"📂 Товар {product_id}: категория '{target_category_name}' (источник: {how})"
                 )
 
-                # ✅ Дозаполнение пустой логистики из дефолтов (категория → глобальные)
-                upd = defaults_service.build_updates_for_product(product, user_id)
-                if upd:
-                    repo.update(product_id, upd, user_id=user_id)
-                    product.update(upd)
-                    logger.info(f"🩹 Товар {product_id}: дефолты дописали поля {list(upd)}")
-
-                # ✅ Авто-дозаполнение обязательных атрибутов XLS-шаблона ДО обновления статуса
                 _ensure_canonical_attributes(
                     product_id=product_id,
                     target_platform=target_platform,
                     target_category_name=target_category_name,
                     product_name=product.get("name"),
                     okpd_code=product.get("okpd_code"),
-                    user_id=user_id,  # ✅ передаём user_id для дефолтов
+                    user_id=user_id,
                 )
 
                 repo.update(
@@ -933,8 +915,9 @@ def refresh_specs_task(self, user_id: int, platform: str, raw_api_key: str, cate
         logger.info(
             f"✅ Спеки {platform} загружены: {fetched} категорий, {errors} ошибок за {duration_ms} мс"
         )
-        cache_service.delete_cache_pattern(f"specs:{platform}:*")
-        cache_service.delete_cache_pattern(f"categories:{platform}:*")
+        # ✅ ИСПРАВЛЕНО: вызов существующего метода delete_pattern
+        cache_service.delete_pattern(f"specs:{platform}:*")
+        cache_service.delete_pattern(f"categories:{platform}:*")
 
         try:
             stats_repo.record(

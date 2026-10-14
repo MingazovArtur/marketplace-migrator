@@ -2,7 +2,7 @@
 Хранилище и заполнение ЭТАЛОННЫХ шаблонов Ozon.
 
 Пользователь скачивает XLSX-шаблон в кабинете Ozon для нужной категории и
-загружает его в систему. Мы храним файл и при выгрузке ОТКРЫВАЕМ ЕГО КАК КАРКАС:
+загружает его в систему. Мы храним файл и при выгрузке ОТКРЫВАЕМ ЕГО КАРКАС:
 строки 1–4 (группы, заголовки, маркеры, подсказки), стили, ширины колонок,
 data validation, скрытые листы-словари и доп. листы («Озон.Видео» и т.д.)
 остаются нетронутыми — мы лишь дописываем строки товаров с 5-й строки,
@@ -27,6 +27,7 @@ data validation, скрытые листы-словари и доп. листы 
 import io
 import json
 import logging
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -35,7 +36,7 @@ from openpyxl import load_workbook
 
 logger = logging.getLogger(__name__)
 
-TEMPLATES_DIR = Path("/app/templates/ozon")
+TEMPLATES_DIR = Path(os.getenv("OZON_TEMPLATES_DIR", "/app/templates/ozon"))
 INDEX_PATH = TEMPLATES_DIR / "index.json"
 DATA_START_ROW = 5
 
@@ -248,7 +249,8 @@ def _row_values(
         "высотаупаковкимм": product.get("package_height_mm"),
         "длинаупаковкимм": product.get("package_length_mm"),
         "ссылканаглавноефото": photos[0] if photos else None,
-        "ссылкинадполнительныефото": " ".join(photos[1:15]) if len(photos) > 1 else None,
+        # ✅ ИСПРАВЛЕНО: добавлена пропущенная буква «о» в «ссылкинадополнительныефото»
+        "ссылкинадополнительныефото": " ".join(photos[1:15]) if len(photos) > 1 else None,
     }
 
     # Атрибуты товара — по нормализованному имени колонки
@@ -318,7 +320,7 @@ def fill_official_template(
         if h:
             headers[_norm(str(h).rstrip("*").strip())] = col
 
-    # ✅ Зачищаем примеры/старые данные ниже шапки
+    # Зачищаем примеры/старые данные ниже шапки
     if ws.max_row >= DATA_START_ROW:
         ws.delete_rows(DATA_START_ROW, ws.max_row - DATA_START_ROW + 1)
 

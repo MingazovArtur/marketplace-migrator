@@ -1,17 +1,17 @@
 """Дефолты экспорта + массовое дозаполнение пропусков."""
 
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from core.auth import get_current_user
 from core.rate_limit import limiter
 from database.models import ExportDefault, Product, User
-from database.repository import repo
 from database.session import SessionLocal
 from services import defaults_service
 
-logger = __import__("logging").getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Defaults"])
 
@@ -38,7 +38,12 @@ class DefaultsPayload(BaseModel):
     package_length_mm: int | None = None
     brand: str | None = None
     marking: str | None = None
-    price_default: float | None = None  # ✅ цена по умолчанию (только для нулевых)
+    price_default: float | None = None  # цена по умолчанию (только для нулевых)
+
+
+class ApplyDefaultsPayload(BaseModel):
+    product_ids: list[int] | None = None
+    status: str | None = None
 
 
 def _row_to_dict(row: ExportDefault | None) -> dict | None:
@@ -132,25 +137,29 @@ def get_gaps(status: str = "all", current_user: User = Depends(get_current_user)
 def apply_defaults(
     request: Request,
     status: str = "all",
+    payload: ApplyDefaultsPayload | None = Body(default=None),
     current_user: User = Depends(get_current_user),
 ):
     """
-    ✅ Массовое дозаполнение: для ВСЕХ товаров пользователя дописывает пустые
-    поля (НДС, ТН ВЭД, ОВХ, вес, цена-по-умолчанию) из дефолтов категории/глобальных.
-    Один клик на 5000 товаров.
-
-    ✅ Оптимизация: dict товара собирается прямо из ORM-объекта (без repo.get_by_id),
-    поэтому на каждый товар остаётся только один UPDATE при наличии обновлений.
+    ✅ Массовое дозаполнение: дописывает пустые поля (НДС, ТН ВЭД, ОВХ, вес,
+    цена-по-умолчанию) из дефолтов категории/глобальных.
+    Поддерживает фильтр как по query-параметру status, так и по списку product_ids в теле запроса.
+    Все обновления выполняются в одной транзакции.
     """
+    effective_status = (payload.status if payload and payload.status else status) or "all"
+    product_ids = payload.product_ids if payload else None
+
     db = SessionLocal()
     try:
         q = db.query(Product).filter(Product.user_id == current_user.id)
-        if status and status != "all":
-            q = q.filter(Product.status == status)
+        if product_ids:
+            q = q.filter(Product.id.in_(product_ids))
+        elif effective_status != "all":
+            q = q.filter(Product.status == effective_status)
         products = q.all()
 
         updated = 0
-        field_counter: dict = {}
+        field_counter: dict[str, int] = {}
         for p in products:
             pdict = {
                 "id": p.id,
@@ -167,10 +176,13 @@ def apply_defaults(
             updates = defaults_service.build_updates_for_product(pdict, current_user.id)
             if not updates:
                 continue
-            repo.update(p.id, updates, user_id=current_user.id)
-            updated += 1
-            for k in updates:
+            for k, v in updates.items():
+                setattr(p, k, v)
                 field_counter[k] = field_counter.get(k, 0) + 1
+            updated += 1
+
+        if updated:
+            db.commit()
 
         logger.info(
             f"🩹 apply-defaults: обновлено {updated} из {len(products)}; поля: {field_counter}"

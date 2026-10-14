@@ -1,21 +1,14 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import './App.css';
 import Icon from './components/icons';
+import { api } from './api';
 
-const API_URL = 'http://localhost:8000/api';
 const PLATFORMS = [
   { id: 'ozon', name: 'Ozon', color: '#005bff' },
   { id: 'wildberries', name: 'Wildberries', color: '#cb11ab' },
   { id: 'yandex', name: 'Яндекс Маркет', color: '#fc3f1d' },
+  { id: 'magnit', name: 'Магнит Маркет', color: '#e31235' },
 ];
-
-const authHeaders = () => {
-  const token = localStorage.getItem('token');
-  return {
-    'Content-Type': 'application/json',
-    ...(token && { Authorization: `Bearer ${token}` }),
-  };
-};
 
 function CategoryMapping() {
   const [sourcePlatform, setSourcePlatform] = useState('ozon');
@@ -47,64 +40,43 @@ function CategoryMapping() {
     setAlertType('');
   }, []);
 
-  /* ==================== 1. СНАЧАЛА объявляем функции ==================== */
-  const loadCategories = useCallback(async (useApiKey = false) => {
-    setLoading(true);
-    clearAlert();
+  const loadCategories = useCallback(
+    async (useApiKey = false) => {
+      setLoading(true);
+      clearAlert();
 
-    try {
-      if (useApiKey && sourceApiKey) {
-        const res = await fetch(`${API_URL}/categories/${sourcePlatform}/refresh`, {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({ api_key: sourceApiKey }),
-        });
-        const data = await res.json();
-        setSourceCategories(data.categories || []);
-      } else {
-        const res = await fetch(`${API_URL}/categories/${sourcePlatform}`);
-        const data = await res.json();
-        setSourceCategories(data.categories || []);
+      try {
+        const srcData =
+          useApiKey && sourceApiKey
+            ? await api.refreshCategories(sourcePlatform, sourceApiKey)
+            : await api.getCategories(sourcePlatform);
+        setSourceCategories(srcData?.categories || []);
+
+        const tgtData =
+          useApiKey && targetApiKey
+            ? await api.refreshCategories(targetPlatform, targetApiKey)
+            : await api.getCategories(targetPlatform);
+        setTargetCategories(tgtData?.categories || []);
+
+        if (useApiKey) showAlert('Справочники обновлены из API', 'success');
+      } catch (error) {
+        showAlert(error.message || 'Ошибка загрузки категорий', 'error');
+      } finally {
+        setLoading(false);
       }
-
-      if (useApiKey && targetApiKey) {
-        const res = await fetch(`${API_URL}/categories/${targetPlatform}/refresh`, {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({ api_key: targetApiKey }),
-        });
-        const data = await res.json();
-        setTargetCategories(data.categories || []);
-      } else {
-        const res = await fetch(`${API_URL}/categories/${targetPlatform}`);
-        const data = await res.json();
-        setTargetCategories(data.categories || []);
-      }
-
-      if (useApiKey) showAlert('Справочники обновлены из API', 'success');
-    } catch (error) {
-      showAlert('Ошибка загрузки категорий', 'error');
-    } finally {
-      setLoading(false);
-    }
-  }, [sourcePlatform, targetPlatform, sourceApiKey, targetApiKey, clearAlert, showAlert]);
+    },
+    [sourcePlatform, targetPlatform, sourceApiKey, targetApiKey, clearAlert, showAlert]
+  );
 
   const loadMappings = useCallback(async () => {
     try {
-      const res = await fetch(
-        `${API_URL}/category-mapping?source_platform=${sourcePlatform}&target_platform=${targetPlatform}`,
-        { headers: authHeaders() }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setMappings(data.mappings || []);
-      }
+      const data = await api.getCategoryMapping(sourcePlatform, targetPlatform);
+      setMappings(data?.mappings || []);
     } catch (e) {
       console.error('Ошибка загрузки маппингов:', e);
     }
   }, [sourcePlatform, targetPlatform]);
 
-  /* ==================== 2. ТЕПЕРЬ useEffect (безопасно) ==================== */
   useEffect(() => {
     loadCategories();
     loadMappings();
@@ -112,7 +84,6 @@ function CategoryMapping() {
     setSelectedTarget(null);
   }, [sourcePlatform, targetPlatform, loadCategories, loadMappings]);
 
-  /* ==================== 3. Остальная логика ==================== */
   const handleSaveMapping = async () => {
     if (!selectedSource || !selectedTarget) {
       showAlert('Выберите категории с обеих сторон', 'warning');
@@ -120,11 +91,12 @@ function CategoryMapping() {
     }
 
     try {
-      const res = await fetch(
-        `${API_URL}/category-mapping?source_platform=${sourcePlatform}&source_category_id=${selectedSource.id}&target_platform=${targetPlatform}&target_category_id=${selectedTarget.id}`,
-        { method: 'POST', headers: authHeaders() }
+      const data = await api.saveCategoryMapping(
+        sourcePlatform,
+        selectedSource.id,
+        targetPlatform,
+        selectedTarget.id
       );
-      const data = await res.json();
 
       if (data.success) {
         showAlert(`Маппинг сохранён: ${selectedSource.name} → ${selectedTarget.name}`, 'success');
@@ -135,25 +107,18 @@ function CategoryMapping() {
         showAlert('Ошибка сохранения маппинга', 'error');
       }
     } catch (error) {
-      showAlert('Ошибка соединения с сервером', 'error');
+      showAlert(error.message || 'Ошибка соединения с сервером', 'error');
     }
   };
 
   const handleDeleteMapping = async (mapping) => {
     try {
-      const res = await fetch(`${API_URL}/category-mapping/${mapping.id}`, {
-        method: 'DELETE',
-        headers: authHeaders(),
-      });
-      if (res.ok) {
-        showAlert('Маппинг удалён', 'success');
-        setConfirmDeleteId(null);
-        await loadMappings();
-      } else {
-        showAlert('Ошибка удаления маппинга', 'error');
-      }
+      await api.deleteCategoryMapping(mapping.id);
+      showAlert('Маппинг удалён', 'success');
+      setConfirmDeleteId(null);
+      await loadMappings();
     } catch (e) {
-      showAlert('Ошибка соединения с сервером', 'error');
+      showAlert(e.message || 'Ошибка удаления маппинга', 'error');
     }
   };
 
@@ -225,7 +190,14 @@ function CategoryMapping() {
           <label>Источник:</label>
           <select
             value={sourcePlatform}
-            onChange={(e) => setSourcePlatform(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              setSourcePlatform(next);
+              if (next === targetPlatform) {
+                const alt = PLATFORMS.find((p) => p.id !== next);
+                if (alt) setTargetPlatform(alt.id);
+              }
+            }}
             className="form-input"
           >
             {PLATFORMS.map((p) => (
@@ -320,7 +292,10 @@ function CategoryMapping() {
             <span>
               {sourceName} ({visibleSource.length})
             </span>
-            <label className="mapping-filter-toggle" title="Показать только несопоставленные категории">
+            <label
+              className="mapping-filter-toggle"
+              title="Показать только несопоставленные категории"
+            >
               <input
                 type="checkbox"
                 checked={onlyUnmapped}
@@ -345,7 +320,7 @@ function CategoryMapping() {
                   key={cat.id}
                   className={`category-item ${selectedSource?.id === cat.id ? 'selected' : ''}`}
                   onClick={() => setSelectedSource(cat)}
-                  style={{ paddingLeft: `${8 + cat.level * 16}px` }}
+                  style={{ paddingLeft: `${8 + (cat.level || 0) * 16}px` }}
                   title={`${cat.name} — ${isMapped ? 'сопоставлено' : 'НЕ сопоставлено'}`}
                 >
                   <span className={`cat-dot ${isMapped ? 'mapped' : 'unmapped'}`} />
@@ -383,7 +358,7 @@ function CategoryMapping() {
                   key={cat.id}
                   className={`category-item ${selectedTarget?.id === cat.id ? 'selected' : ''}`}
                   onClick={() => setSelectedTarget(cat)}
-                  style={{ paddingLeft: `${8 + cat.level * 16}px` }}
+                  style={{ paddingLeft: `${8 + (cat.level || 0) * 16}px` }}
                   title={`${cat.name} — ${isUsed ? 'уже используется в маппинге' : 'свободна'}`}
                 >
                   <span className={`cat-dot ${isUsed ? 'mapped' : 'free'}`} />
@@ -416,18 +391,26 @@ function CategoryMapping() {
             {mappings.map((m) => (
               <div key={m.id} className="mapping-item">
                 <span className="mapping-item-text">
-                  {sourceNameById.get(String(m.source_category_id)) || `Категория ${m.source_category_id}`}
+                  {sourceNameById.get(String(m.source_category_id)) ||
+                    `Категория ${m.source_category_id}`}
                   {' → '}
-                  {targetNameById.get(String(m.target_category_id)) || `Категория ${m.target_category_id}`}
+                  {targetNameById.get(String(m.target_category_id)) ||
+                    `Категория ${m.target_category_id}`}
                 </span>
 
                 {confirmDeleteId === m.id ? (
                   <span className="mapping-item-confirm">
                     Удалить?
-                    <button className="btn btn-danger btn-sm" onClick={() => handleDeleteMapping(m)}>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => handleDeleteMapping(m)}
+                    >
                       Да
                     </button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => setConfirmDeleteId(null)}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setConfirmDeleteId(null)}
+                    >
                       Нет
                     </button>
                   </span>

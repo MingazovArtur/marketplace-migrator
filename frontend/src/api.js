@@ -1,9 +1,9 @@
-const API_URL =
+export const API_URL =
   import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'http://localhost:8000/api');
 
 /* ---------- Вспомогательные функции ---------- */
 
-// ✅ Все динамические сегменты пути (кириллица, пробелы, «→») обязаны кодироваться
+// Все динамические сегменты пути (кириллица, пробелы, «→») обязаны кодироваться
 const enc = encodeURIComponent;
 
 const getHeaders = () => {
@@ -19,27 +19,46 @@ const getAuthHeaders = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+function extractErrorMessage(data, fallback) {
+  if (!data) return fallback;
+
+  // 1. Формат централизованного обработчика backend/core/error_handler.py
+  if (data.error && typeof data.error === 'object') {
+    const fields = data.error.details?.fields;
+    if (Array.isArray(fields) && fields.length > 0) {
+      return fields.map((f) => `${f.field}: ${f.message}`).join('; ');
+    }
+    if (typeof data.error.message === 'string' && data.error.message) {
+      return data.error.message;
+    }
+  }
+
+  // 2. Стандартный формат FastAPI HTTPException / ValidationError
+  if (data.detail) {
+    if (Array.isArray(data.detail)) {
+      return data.detail.map((d) => `${(d.loc || []).join('.')} — ${d.msg}`).join('; ');
+    }
+    if (typeof data.detail === 'object') {
+      if (data.detail.message) return data.detail.message;
+      return JSON.stringify(data.detail);
+    }
+    return String(data.detail);
+  }
+
+  return data.message || fallback;
+}
+
 async function safeError(res, fallback) {
   try {
     const data = await res.json();
-    if (data.detail) {
-      if (Array.isArray(data.detail)) {
-        return data.detail.map((d) => `${(d.loc || []).join('.')} — ${d.msg}`).join('; ');
-      }
-      if (typeof data.detail === 'object') {
-        if (data.detail.message) return data.detail.message;
-        return JSON.stringify(data.detail);
-      }
-      return String(data.detail);
-    }
-    return data.message || fallback;
+    return extractErrorMessage(data, fallback);
   } catch {
     return `${fallback} (HTTP ${res.status})`;
   }
 }
 
 /**
- * ✅ Извлечь имя файла из Content-Disposition (RFC 5987):
+ * Извлечь имя файла из Content-Disposition (RFC 5987):
  * приоритет filename*=UTF-8''... (кириллица), затем filename="...".
  */
 const parseContentDisposition = (header, fallback = 'export.xlsx') => {
@@ -148,6 +167,7 @@ export const api = {
     if (params.search) q.append('search', params.search);
     if (params.status && params.status !== 'all') q.append('status', params.status);
     if (params.source && params.source !== 'all') q.append('source', params.source);
+    if (params.sort) q.append('sort', params.sort);
     if (params.sort_by) q.append('sort_by', params.sort_by);
     if (params.sort_order) q.append('sort_order', params.sort_order);
     if (params.skip !== undefined) q.append('skip', params.skip);
@@ -164,10 +184,7 @@ export const api = {
       method: 'DELETE',
       headers: getHeaders(),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Ошибка удаления товара');
-    }
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка удаления товара'));
     return res.json();
   },
 
@@ -177,10 +194,7 @@ export const api = {
       headers: getHeaders(),
       body: JSON.stringify({ product_ids: productIds }),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Ошибка массового удаления');
-    }
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка массового удаления'));
     return res.json();
   },
 
@@ -190,10 +204,7 @@ export const api = {
       headers: getHeaders(),
       body: JSON.stringify({ confirm: true }),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Ошибка полного удаления');
-    }
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка полного удаления'));
     return res.json();
   },
 
@@ -247,6 +258,18 @@ export const api = {
     return res.json();
   },
 
+  uploadProductPhotos: async (productId, files) => {
+    const fd = new FormData();
+    Array.from(files || []).forEach((f) => fd.append('files', f));
+    const res = await fetch(`${API_URL}/products/${enc(productId)}/photos/upload`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: fd,
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка загрузки файлов изображений'));
+    return res.json();
+  },
+
   downloadPhotos: async (productId) => {
     const res = await fetch(`${API_URL}/products/${enc(productId)}/photos/download`, {
       method: 'POST',
@@ -264,10 +287,7 @@ export const api = {
       headers: getHeaders(),
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Ошибка сохранения логистических данных');
-    }
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка сохранения логистических данных'));
     return res.json();
   },
 
@@ -288,6 +308,17 @@ export const api = {
     return res.json();
   },
 
+  refreshCategories: async (platform, apiKey) => {
+    const q = new URLSearchParams({ api_key: apiKey || '' });
+    const res = await fetch(`${API_URL}/categories/${enc(platform)}/refresh?${q.toString()}`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ api_key: apiKey || '' }),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка обновления категорий из API'));
+    return res.json();
+  },
+
   getCategoryMapping: async (sourcePlatform, targetPlatform) => {
     const q = new URLSearchParams({
       source_platform: sourcePlatform || '',
@@ -300,16 +331,74 @@ export const api = {
     return res.json();
   },
 
+  saveCategoryMapping: async (
+    sourcePlatform,
+    sourceCategoryId,
+    targetPlatform,
+    targetCategoryId
+  ) => {
+    const q = new URLSearchParams({
+      source_platform: sourcePlatform,
+      source_category_id: String(sourceCategoryId),
+      target_platform: targetPlatform,
+      target_category_id: String(targetCategoryId),
+    });
+    const res = await fetch(`${API_URL}/category-mapping?${q.toString()}`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка сохранения маппинга'));
+    return res.json();
+  },
+
+  deleteCategoryMapping: async (mappingId) => {
+    const res = await fetch(`${API_URL}/category-mapping/${enc(mappingId)}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка удаления маппинга'));
+    return res.json();
+  },
+
   /* ==================== Import ==================== */
 
   importProducts: async (authKey) => {
     const res = await fetch(`${API_URL}/import`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ url: 'mock', auth_key: authKey }),
+      body: JSON.stringify({ key: authKey, full_key: authKey, auth_key: authKey }),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка импорта'));
     return res.json();
+  },
+
+  previewFileImport: async (platform, file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('platform', platform);
+    const res = await fetch(`${API_URL}/import/preview`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: fd,
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось прочитать файл'));
+    return res.json();
+  },
+
+  downloadImportTemplate: async (platform) => {
+    const res = await fetch(`${API_URL}/templates/${enc(platform)}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Шаблон не найден'));
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `template_${platform}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   },
 
   importFromFile: async (platform, file, mode = 'create') => {
@@ -442,10 +531,6 @@ export const api = {
     return res.json();
   },
 
-  /**
-   * ✅ XLSX v2: файл под реальный шаблон площадки (эталон优先, иначе спек).
-   * Защита: JSON под видом файла не сохраняется, ZIP получает расширение .zip.
-   */
   exportXlsxV2: async (platform, status = 'success', productId = null) => {
     const q = new URLSearchParams();
     if (status) q.append('status', status);
@@ -456,32 +541,19 @@ export const api = {
     });
 
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 409 && data.detail && typeof data.detail === 'object') {
-        const sum = Object.entries(data.detail.summary || {})
-          .map(([k, v]) => `${k}: ${v.count} шт.`)
-          .join(', ');
-        throw new Error(
-          `${data.detail.message}\nПроблемы: ${sum}${data.detail.fix_hint ? `\n\n${data.detail.fix_hint}` : ''}`
-        );
-      }
-      const detail =
-        typeof data.detail === 'string'
-          ? data.detail
-          : data.detail?.message || JSON.stringify(data.detail || {});
+      const msg = await safeError(res, 'Ошибка формирования XLSX');
       throw new Error(
         productId
-          ? `Товар #${productId} не прошёл валидацию:\n\n${detail}`
-          : `${detail}\n\nОткройте «Выгрузка» — блок валидации покажет, каких полей не хватает.`
+          ? `Товар #${productId} не прошёл валидацию:\n\n${msg}`
+          : `${msg}\n\nОткройте «Выгрузка» — блок валидации покажет, каких полей не хватает.`
       );
     }
 
     const blob = await res.blob();
 
-    // ✅ ЗАЩИТА: JSON под видом файла → читаемая ошибка, а не «битый xlsx»
     if (blob.type && blob.type.includes('application/json')) {
       const data = JSON.parse(await blob.text());
-      throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail));
+      throw new Error(extractErrorMessage(data, 'Ошибка формирования XLSX'));
     }
 
     const cd = res.headers.get('content-disposition');
@@ -536,11 +608,6 @@ export const api = {
     return res.json();
   },
 
-  /**
-   * ✅ Массовое дозаполнение пропусков.
-   * 'all' | 'pending' | ... — по всем товарам статуса;
-   * { product_ids: [...] } — только по выделенным.
-   */
   applyDefaults: async (modeOrPayload = 'all') => {
     const body = modeOrPayload && typeof modeOrPayload === 'object' ? modeOrPayload : null;
     const q = !body && modeOrPayload ? `?status=${enc(modeOrPayload)}` : '';
@@ -553,7 +620,7 @@ export const api = {
     return res.json();
   },
 
-  /* ==================== Эталонные шаблоны Ozon (общие для всех пользователей) ==================== */
+  /* ==================== Эталонные шаблоны Ozon ==================== */
 
   uploadOzonTemplate: async (categoryName, file) => {
     const fd = new FormData();
@@ -574,7 +641,6 @@ export const api = {
     return res.json();
   },
 
-  /** ✅ Метаданные эталонов: категория, файл, дата, кто загрузил, число колонок */
   listOzonTemplatesMeta: async () => {
     const res = await fetch(`${API_URL}/export/ozon-template/meta`, { headers: getHeaders() });
     if (!res.ok) return { templates: [] };
@@ -590,7 +656,6 @@ export const api = {
     return res.json();
   },
 
-  /** ✅ Скачать текущий эталон категории (посмотреть / передать коллеге) */
   downloadOzonTemplate: async (categoryName) => {
     const res = await fetch(
       `${API_URL}/export/ozon-template/download?category_name=${enc(categoryName)}`,
@@ -630,6 +695,14 @@ export const api = {
     return res.json();
   },
 
+  getDashboardStats: async (days = 7) => {
+    const res = await fetch(`${API_URL}/stats/dashboard?days=${enc(days)}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить дашборд статистики'));
+    return res.json();
+  },
+
   getHistory: async (params = {}) => {
     const q = new URLSearchParams();
     if (params.operation) q.append('operation', params.operation);
@@ -650,10 +723,7 @@ export const api = {
 
   getSpecNames: async (platform) => {
     const res = await fetch(`${API_URL}/specs/${enc(platform)}/names`, { headers: getHeaders() });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${res.status}`);
-    }
+    if (!res.ok) throw new Error(await safeError(res, `HTTP ${res.status}`));
     const d = await res.json();
     return (d.names || []).sort();
   },

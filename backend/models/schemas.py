@@ -139,17 +139,18 @@ class ProductBase(BaseModel):
     brand: str | None = None
     photos: list[str] | None = Field(default_factory=list)
     sku_count: int = 1
+    stock: int | None = None
     attributes: list[ProductAttribute] | None = Field(default_factory=list)
     variants: list[ProductVariant] | None = Field(default_factory=list)
 
-    # ✅ Логистические данные для экспорта на маркетплейсы (требования Ozon/Яндекс)
+    # Логистические данные для экспорта на маркетплейсы (требования Ozon/Яндекс)
     barcode: str | None = None  # Штрихкод / EAN
     weight_grams: int | None = None  # Вес товара, г
     package_weight_grams: int | None = None  # Вес в упаковке, г
     package_width_mm: int | None = None  # Ширина упаковки, мм
     package_height_mm: int | None = None  # Высота упаковки, мм
     package_length_mm: int | None = None  # Длина упаковки, мм
-    vat_rate: str | None = None  # НДС: none | 10 | 22
+    vat_rate: str | None = None  # НДС: none | 10 | 22 | 7 | 5
     okpd_code: str | None = None  # Код ОКПД/ТН ВЭД (маркировка)
     units_per_item: int | None = 1  # Единиц в одном товаре
 
@@ -195,7 +196,6 @@ class ProductLogisticsUpdate(BaseModel):
     okpd_code: str | None = None
     units_per_item: int | None = Field(None, ge=1)
 
-    # ✅ Синхронизация с модалкой и XLSX-генератором: Ozon принимает 5 ставок
     @field_validator("vat_rate")
     @classmethod
     def check_vat(cls, v):
@@ -213,8 +213,10 @@ class ProductLogisticsUpdate(BaseModel):
 
 # ========== Импорт / миграция ==========
 class ImportRequest(BaseModel):
-    url: str
-    auth_key: str
+    url: str = ""
+    auth_key: str = ""
+    key: str = ""
+    full_key: str = ""
 
 
 class MigrateRequest(BaseModel):
@@ -261,13 +263,13 @@ class CategorySpecContent(BaseModel):
 
 class PlatformCategorySpecResponse(BaseModel):
     id: int
-    user_id: int
+    user_id: int | None = None  # ✅ ИСПРАВЛЕНО: nullable в соответствии с моделью БД
     platform: str
     category_id: str
     category_name: str
     parent_category_id: str | None = None
     spec: CategorySpecContent
-    fetched_at: datetime
+    fetched_at: datetime | None = None
     version: str | None = None
 
     model_config = ConfigDict(from_attributes=True)

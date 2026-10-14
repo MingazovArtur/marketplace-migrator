@@ -5,13 +5,15 @@
   - добавлен GET /specs/{platform}/names — лёгкий список имён (для datalist)
   - порядок маршрутов: /names объявлен ДО /{category_id} (иначе "names" ловится как id)
   - детализация: key-source теперь отдаёт also `hint` — что делать если ключа нет
-  - ✅ ИНТЕГРАЦИЯ КЭША: /specs/{platform}/names и /categories/{platform} теперь используют Redis
+  - ИНТЕГРАЦИЯ КЭША: /specs/{platform}/names и /categories/{platform} используют Redis
+  - /categories/{platform}/refresh и /category-mapping принимают как JSON body, так и query-параметры
 """
 
 import logging
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from core.auth import get_current_user
 from core.config import settings
@@ -21,7 +23,7 @@ from models.schemas import (
     PlatformCategorySpecResponse,
     RefreshSpecRequest,
 )
-from services import cache_service  # ✅ Новый импорт
+from services import cache_service
 from services.category_service import category_service
 from services.wb_specs import refresh_wildberries_specs
 from services.yandex_specs import refresh_yandex_specs
@@ -30,6 +32,18 @@ from tasks import get_progress, refresh_specs_task
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Categories"])
+
+
+class RefreshCategoriesPayload(BaseModel):
+    api_key: str = ""
+
+
+class SaveMappingPayload(BaseModel):
+    source_platform: str | None = None
+    source_category_id: str | None = None
+    target_platform: str | None = None
+    target_category_id: str | None = None
+
 
 # ===========================================================================
 # Спецификации категорий площадок
@@ -40,13 +54,13 @@ router = APIRouter(prefix="/api", tags=["Categories"])
 async def refresh_specs(
     platform: str,
     payload: RefreshSpecRequest,
-    current_user: User = Depends(get_current_user),  # ✅ ИСПРАВЛЕНО
+    current_user: User = Depends(get_current_user),
 ):
     """
     Обновить спецификации категорий площадки через её API.
-    ✅ Ozon — фоновая загрузка через Celery (8000+ категорий),
+    Ozon — фоновая загрузка через Celery (8000+ категорий),
        возвращает task_id для polling через /specs/{platform}/refresh/{task_id}/progress.
-    ✅ Yandex / WB — пока синхронно (они быстрее).
+    Yandex / WB — синхронно.
     """
     if platform not in ("ozon", "yandex", "wildberries"):
         raise HTTPException(status_code=501, detail=f"Загрузчик для {platform} ещё не реализован")
@@ -61,7 +75,6 @@ async def refresh_specs(
     try:
         # ==================== OZON — фоновая загрузка ====================
         if platform == "ozon":
-            # ✅ Сбрасываем кэш заранее, чтобы старые данные не показывались во время загрузки
             cache_service.delete_pattern(f"specs:{platform}:*")
 
             task = refresh_specs_task.delay(
@@ -84,7 +97,6 @@ async def refresh_specs(
                 token=raw_key,
                 category_ids=payload.category_ids,
             )
-            # ✅ Инвалидация кэша после успешного обновления
             cache_service.delete_pattern(f"specs:{platform}:*")
             return {"success": True, **result}
 
@@ -100,7 +112,6 @@ async def refresh_specs(
             business_id=payload.business_id,
             category_ids=payload.category_ids,
         )
-        # ✅ Инвалидация кэша после успешного обновления
         cache_service.delete_pattern(f"specs:{platform}:*")
         return {"success": True, **result}
 
@@ -127,7 +138,7 @@ def refresh_specs_progress(
 def spec_key_source(platform: str, current_user: User = Depends(get_current_user)):
     """
     Индикатор: есть ли серверный ключ площадки в .env.
-    ✅ При ошибке возвращает has_server_key=False + hint.
+    При ошибке возвращает has_server_key=False + hint.
     """
     has_server_key = False
     hint = ""
@@ -151,20 +162,15 @@ def spec_key_source(platform: str, current_user: User = Depends(get_current_user
 @router.get("/specs/{platform}/names")
 def list_spec_names(platform: str, current_user: User = Depends(get_current_user)):
     """
-    ✅ ЛЁГКИЙ список имён категорий спеков (для datalist/автокомплита).
-    Возвращает ТОЛЬКО имена (category_name), без атрибутов и словарей.
-    Размер ответа ~50-150 КБ (vs 10+ МБ у полного /specs/{platform}).
-    Используется в MigrateModal для выпадающего списка точных имён.
-    ✅ КЭШИРУЕТСЯ на 1 час для снижения нагрузки на БД.
+    ЛЁГКИЙ список имён категорий спеков (для datalist/автокомплита).
+    КЭШИРУЕТСЯ на 1 час для снижения нагрузки на БД.
     """
     cache_key = f"specs:{platform}:names"
 
-    # 1. Проверяем кэш
     cached = cache_service.get(cache_key)
     if cached is not None:
         return cached
 
-    # 2. Если нет в кэше — идём в БД
     db = SessionLocal()
     try:
         rows = (
@@ -180,7 +186,6 @@ def list_spec_names(platform: str, current_user: User = Depends(get_current_user
             "names": names,
         }
 
-        # 3. Сохраняем в кэш на 1 час (3600 сек)
         cache_service.set(cache_key, result, ttl=3600)
 
         logger.info(
@@ -242,7 +247,7 @@ def get_spec(platform: str, category_id: str, current_user: User = Depends(get_c
 def get_categories(platform: str, force_refresh: bool = False):
     """
     Получить список категорий для платформы.
-    ✅ КЭШИРУЕТСЯ на 2 часа, если не запрошен force_refresh.
+    КЭШИРУЕТСЯ на 2 часа, если не запрошен force_refresh.
     """
     cache_key = f"categories:{platform}:list"
 
@@ -252,8 +257,6 @@ def get_categories(platform: str, force_refresh: bool = False):
             return {"success": True, "categories": cached, "total": len(cached), "from_cache": True}
 
     categories = category_service.get_categories(platform, force_refresh)
-
-    # Сохраняем в кэш на 2 часа (7200 сек)
     cache_service.set(cache_key, categories, ttl=7200)
 
     return {
@@ -284,20 +287,24 @@ def get_categories_tree(platform: str):
 @router.post("/categories/{platform}/refresh")
 def refresh_categories_with_api(
     platform: str,
-    api_key: str,
+    api_key: str | None = Query(default=None),
+    payload: RefreshCategoriesPayload | None = Body(default=None),
     current_user: User = Depends(get_current_user),
 ):
-    """Обновить справочник категорий с использованием API ключа"""
-    categories = category_service.get_categories_with_api_key(platform, api_key)
+    """
+    ✅ ИСПРАВЛЕНО: Обновить справочник категорий с использованием API ключа.
+    Принимает api_key как из JSON-тела (от CategoryMapping.jsx), так и из query-параметра.
+    """
+    resolved_key = (api_key or (payload.api_key if payload else "") or "").strip()
+    categories = category_service.get_categories_with_api_key(platform, resolved_key)
 
-    # ✅ Инвалидация кэша после ручного обновления
     cache_service.delete_pattern(f"categories:{platform}:*")
 
     return {
         "success": True,
         "categories": categories,
         "total": len(categories),
-        "source": "api" if api_key else "mock",
+        "source": "api" if resolved_key else "mock",
     }
 
 
@@ -340,19 +347,28 @@ def get_category_mappings(
 
 @router.post("/category-mapping")
 def save_category_mapping(
-    source_platform: str,
-    source_category_id: str,
-    target_platform: str,
-    target_category_id: str,
+    source_platform: str | None = Query(default=None),
+    source_category_id: str | None = Query(default=None),
+    target_platform: str | None = Query(default=None),
+    target_category_id: str | None = Query(default=None),
+    payload: SaveMappingPayload | None = Body(default=None),
     current_user: User = Depends(get_current_user),
 ):
-    """Сохранить маппинг категории для текущего пользователя"""
+    """Сохранить маппинг категории для текущего пользователя (поддерживает query и body)."""
+    sp = source_platform or (payload.source_platform if payload else None)
+    sc = source_category_id or (payload.source_category_id if payload else None)
+    tp = target_platform or (payload.target_platform if payload else None)
+    tc = target_category_id or (payload.target_category_id if payload else None)
+
+    if not all([sp, sc, tp, tc]):
+        raise HTTPException(status_code=400, detail="Укажите все поля маппинга категорий")
+
     result = category_service.save_category_mapping(
         current_user.id,
-        source_platform,
-        source_category_id,
-        target_platform,
-        target_category_id,
+        sp,
+        str(sc),
+        tp,
+        str(tc),
     )
 
     if result["success"]:

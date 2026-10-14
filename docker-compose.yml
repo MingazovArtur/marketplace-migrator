@@ -4,16 +4,16 @@ services:
     stop_grace_period: 60s
     container_name: marketplace_db
     environment:
-      POSTGRES_USER: migrator_user
-      POSTGRES_PASSWORD: migrator_password_2026
-      POSTGRES_DB: marketplace_migrator
+      POSTGRES_USER: ${POSTGRES_USER:-migrator_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-migrator_password_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-marketplace_migrator}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U migrator_user -d marketplace_migrator"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-migrator_user} -d ${POSTGRES_DB:-marketplace_migrator}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -37,15 +37,18 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      - ozon_templates:/app/templates        # ✅ эталонные шаблоны Ozon
+      - media:/app/media
+      - ozon_templates:/app/templates/ozon
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
       - CELERY_BROKER_URL=redis://redis:6379/0
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   celery_worker:
@@ -54,14 +57,17 @@ services:
     command: celery -A celery_app worker --loglevel=info --pool=solo
     volumes:
       - ./backend:/app
-      - ozon_templates:/app/templates        # ✅ общий с backend, чтобы видеть эталоны
+      - media:/app/media
+      - ozon_templates:/app/templates/ozon
     env_file:
       - .env
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
@@ -78,4 +84,5 @@ services:
 
 volumes:
   postgres_data:
-  ozon_templates:                             # ✅ объявление volume для эталонов Ozon
+  media:
+  ozon_templates:

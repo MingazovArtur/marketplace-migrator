@@ -14,9 +14,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from routers import tnved
+
 from core.config import settings
-from core.error_handler import register_exception_handlers  # ✅ НОВЫЙ ИМПОРТ
+from core.error_handler import register_exception_handlers
 from core.platforms import PLATFORM_CONFIG, Platform
 from core.rate_limit import (
     get_client_ip,
@@ -28,17 +28,17 @@ from routers import (
     attributes,
     auth,
     categories,
+    defaults as defaults_router,
     email_router,
     export,
     history,
     import_router,
+    photos,  # ✅ ИСПРАВЛЕНО: подключен роутер фотографий
     products,
     stats,
     templates,
+    tnved,
     variants,
-)
-from routers import (
-    defaults as defaults_router,
 )
 from routers.health import router as health_router
 from routers.migrate_router import router as migrate_router
@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Marketplace Migrator API", version="3.4")
 
 # ============================================================
-# 0. Централизованная обработка ошибок (добавляем сразу после создания app)
+# 0. Централизованная обработка ошибок
 # ============================================================
 register_exception_handlers(app)
 
@@ -63,17 +63,14 @@ async def ban_check_middleware(request: Request, call_next):
     Проверяет бан IP и user_id перед обработкой запроса.
     Пропускает: healthcheck, статику, docs, OPTIONS (preflight).
     """
-    # Preflight CORS-запросы не трогаем — их обработает CORSMiddleware
     if request.method == "OPTIONS":
         return await call_next(request)
 
     path = request.url.path
 
-    # Пропускаем эндпоинты мониторинга и статику
     if path in ("/api/health", "/docs", "/openapi.json", "/redoc") or path.startswith("/media"):
         return await call_next(request)
 
-    # Проверка бана IP
     ip = get_client_ip(request)
     if is_banned(f"ip:{ip}"):
         return JSONResponse(
@@ -81,7 +78,6 @@ async def ban_check_middleware(request: Request, call_next):
             content={"detail": "Доступ временно ограничен из-за подозрительной активности"},
         )
 
-    # Проверка бана user_id (если авторизован)
     try:
         auth_header = request.headers.get("authorization")
         if auth_header and auth_header.startswith("Bearer "):
@@ -114,8 +110,6 @@ app.add_middleware(SlowAPIMiddleware)
 # ============================================================
 # 3. CORS — САМЫЙ ВНЕШНИЙ middleware (добавляется последним)
 # ============================================================
-# ✅ ИСПРАВЛЕНИЕ: Явно добавляем адреса локальной разработки (Vite = 5173, React = 3000)
-# и безопасно объединяем их с настройками из .env (settings.CORS_ORIGINS)
 local_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -149,6 +143,7 @@ app.include_router(migrate_router)
 app.include_router(variants.router)
 app.include_router(stats.router)
 app.include_router(attributes.router)
+app.include_router(photos.router)  # ✅ ИСПРАВЛЕНО: подключен роутер фотографий
 app.include_router(templates.router)
 app.include_router(products.router)
 app.include_router(import_router.router)

@@ -32,7 +32,7 @@ from core.auth import get_current_user
 from core.platforms import PLATFORM_CONFIG
 from core.rate_limit import limiter
 from database.models import User
-from database.repository import op_log, repo, stats_repo, variant_repo
+from database.repository import attr_repo, op_log, repo, stats_repo, variant_repo
 from models.schemas import ProductCreate
 from parsers import parse_file, preview_file
 from parsers.yml_parser import YmlParser
@@ -40,14 +40,18 @@ from parsers.yml_parser import YmlParser
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Import"])
 
+MAX_IMPORT_FILE_SIZE = 15 * 1024 * 1024  # 15 МБ
+
 
 class ImportRequest(BaseModel):
     key: str = ""
     full_key: str = ""
+    auth_key: str = ""
+    url: str = ""
 
     def get_key(self) -> str:
-        """Единая точка получения ключа (поддерживает оба поля фронта)."""
-        return (self.key or self.full_key).strip()
+        """Единая точка получения ключа (поддерживает все варианты полей фронта)."""
+        return (self.key or self.full_key or self.auth_key).strip()
 
 
 def _source_label(platform: str) -> str:
@@ -60,7 +64,7 @@ def _source_label(platform: str) -> str:
 @limiter.limit("30/minute")
 @router.post("/import/preview")
 async def preview_import(
-    request: Request,  # ← добавлен для slowapi
+    request: Request,
     platform: str = Form(...),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -71,14 +75,19 @@ async def preview_import(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Файл не выбран")
 
-    file_type = "csv" if file.filename.lower().endswith(".csv") else "xlsx"
-    if file_type not in ("csv", "xlsx"):
+    fname_lower = file.filename.lower()
+    if not (fname_lower.endswith(".csv") or fname_lower.endswith(".xlsx")):
         raise HTTPException(status_code=400, detail="Поддерживаются только файлы .csv и .xlsx")
+    file_type = "csv" if fname_lower.endswith(".csv") else "xlsx"
 
     try:
         contents = await file.read()
+        if len(contents) > MAX_IMPORT_FILE_SIZE:
+            raise HTTPException(status_code=400, detail="Файл слишком большой (максимум 15 МБ)")
         preview_data = preview_file(contents, platform, file_type, max_rows=10)
         return {"success": True, "preview": preview_data}
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -90,23 +99,29 @@ async def preview_import(
 @limiter.limit("10/minute;100/day")
 @router.post("/import")
 async def import_products(
-    request: Request,  # ← добавлен для slowapi
-    payload: ImportRequest,  # ← переименован (был request)
+    request: Request,
+    payload: ImportRequest,
     current_user: User = Depends(get_current_user),
 ):
     """Импорт по API-ключу, мок-ключу или YML-ссылке."""
     t0 = time.perf_counter()
-    auth_key = payload.get_key()  # ← использование нового имени
+    auth_key = payload.get_key()
 
     if not auth_key:
         raise HTTPException(status_code=400, detail="Не указан API-ключ или YML-ссылка")
+
+    # Если передан префикс вида "yandex:https://...", отделяем платформу от ссылки
+    if ":" in auth_key and not auth_key.startswith(("http://", "https://")):
+        prefix, rest = auth_key.split(":", 1)
+        if prefix.lower() in PLATFORM_CONFIG and rest.startswith(("http://", "https://")):
+            auth_key = rest.strip()
 
     is_mock = auth_key.lower() in (
         "test:test",
         "mock_wb_key",
         "mock_ozon_key",
         "mock_yandex_key",
-    ) or auth_key.lower().endswith(":test:test")
+    ) or auth_key.lower().endswith((":test:test", ":mock_wb_key", ":mock_ozon_key", ":mock_yandex_key"))
 
     # ---------- Мок-импорт (для демо и тестов) ----------
     if is_mock:
@@ -191,7 +206,8 @@ async def import_products(
     # ---------- YML-фид (Яндекс Маркет) ----------
     if auth_key.startswith(("http://", "https://")):
         try:
-            yml_products = YmlParser().fetch_and_parse(auth_key)
+            yml_result = YmlParser().fetch_and_parse(auth_key)
+            yml_products = yml_result.get("offers", []) if isinstance(yml_result, dict) else yml_result
         except Exception as e:
             logger.error(f"Ошибка парсинга YML: {e}")
             duration_ms = int((time.perf_counter() - t0) * 1000)
@@ -225,17 +241,27 @@ async def import_products(
 
         imported_count = 0
         for p_data in yml_products:
+            photos = p_data.get("photos") or []
             product_obj = ProductCreate(
                 name=p_data.get("name", "Без названия"),
                 source="Яндекс Маркет (YML)",
                 price=float(p_data.get("price", 0)),
                 status="pending",
                 description=p_data.get("description", ""),
-                photos_count=len(p_data.get("photos", [])),
+                photos=photos,
+                photos_count=len(photos),
                 category=p_data.get("category", "Не указана"),
+                sku=p_data.get("offer_id") or p_data.get("sku"),
+                external_id=p_data.get("external_id"),
+                brand=p_data.get("vendor") or p_data.get("brand"),
                 user_id=current_user.id,
             )
-            repo.add(product_obj)
+            created = repo.add(product_obj)
+            params = p_data.get("params") or {}
+            if created and isinstance(params, dict) and params:
+                attrs = [{"name": k, "value": str(v)} for k, v in params.items() if k and v]
+                if attrs:
+                    attr_repo.set_attributes(created["id"], attrs)
             imported_count += 1
 
         duration_ms = int((time.perf_counter() - t0) * 1000)
@@ -286,7 +312,7 @@ async def import_products(
 @limiter.limit("10/minute;100/day")
 @router.post("/import/file")
 async def import_from_file(
-    request: Request,  # ← добавлен для slowapi
+    request: Request,
     platform: str = Form(...),
     mode: str = Form("create"),  # create | upsert
     file: UploadFile = File(...),
@@ -306,14 +332,19 @@ async def import_from_file(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Файл не выбран")
 
-    file_type = "csv" if file.filename.lower().endswith(".csv") else "xlsx"
-    if file_type not in ("csv", "xlsx"):
+    fname_lower = file.filename.lower()
+    if not (fname_lower.endswith(".csv") or fname_lower.endswith(".xlsx")):
         raise HTTPException(status_code=400, detail="Поддерживаются только файлы .csv и .xlsx")
+    file_type = "csv" if fname_lower.endswith(".csv") else "xlsx"
 
     # ---------- Парсинг ----------
     try:
         contents = await file.read()
+        if len(contents) > MAX_IMPORT_FILE_SIZE:
+            raise HTTPException(status_code=400, detail="Файл слишком большой (максимум 15 МБ)")
         result = parse_file(contents, platform, file_type)
+    except HTTPException:
+        raise
     except ValueError as e:
         stats_repo.record(
             user_id=current_user.id,
@@ -371,6 +402,7 @@ async def import_from_file(
     updated = 0
 
     for p_data in products_data:
+        okpd_val = p_data.get("okpd_code") or p_data.get("tn_ved") or p_data.get("okpd2") or None
         payload_dict = dict(
             name=p_data.get("name"),
             source=source_label,
@@ -384,6 +416,16 @@ async def import_from_file(
             brand=p_data.get("brand"),
             photos=p_data.get("photos", []),
             sku_count=p_data.get("sku_count", 1),
+            # ✅ ИСПРАВЛЕНО: сохраняем распарсенные логистические поля
+            barcode=p_data.get("barcode") or None,
+            weight_grams=p_data.get("weight_grams"),
+            package_weight_grams=p_data.get("package_weight_grams"),
+            package_width_mm=p_data.get("package_width_mm"),
+            package_height_mm=p_data.get("package_height_mm"),
+            package_length_mm=p_data.get("package_length_mm"),
+            vat_rate=p_data.get("vat_rate") or None,
+            okpd_code=okpd_val,
+            units_per_item=p_data.get("units_per_item", 1),
         )
         variants = p_data.get("variants") or []
 
