@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Button from '../common/Button';
 import Icon from '../icons';
 import { api } from '../../api';
-import TnvedSelector from './TnvedSelector'; // ✅ Добавлен импорт умного селектора ТН ВЭД
+import TnvedSelector from './TnvedSelector';
 
-// ✅ Значения НДС точно как в XLS-шаблоне Ozon
+// Значения НДС как в XLS-шаблонах площадок
 const VAT_OPTIONS = [
   { value: 'none', label: 'Не облагается' },
   { value: '22', label: '22' },
@@ -13,7 +13,6 @@ const VAT_OPTIONS = [
   { value: '5', label: '5' },
 ];
 
-// ✅ Дефолты формы — защищают от undefined при первом рендере
 const DEFAULT_FORM = {
   barcode: '',
   weight_grams: '',
@@ -26,15 +25,31 @@ const DEFAULT_FORM = {
   units_per_item: 1,
 };
 
-// Хелпер: безопасное приведение к числу (пустая строка → null)
 const num = (v) => (v === '' || v == null ? null : Number(v));
+
+/**
+ * Генерирует валидный 13-значный штрихкод EAN-13 (префикс 200 + контрольная цифра по алгоритму GS1).
+ */
+const generateValidEan13 = (productId) => {
+  const pid = Number(productId) || Math.floor(Math.random() * 999999);
+  const randPart = String(Math.floor(100 + Math.random() * 900));
+  const base12 = (`200${String(pid).padStart(6, '0')}${randPart}`).slice(0, 12);
+  let oddSum = 0;
+  let evenSum = 0;
+  for (let i = 0; i < 12; i++) {
+    const digit = Number(base12[i]);
+    if (i % 2 === 0) oddSum += digit;
+    else evenSum += digit;
+  }
+  const checkDigit = (10 - ((oddSum + evenSum * 3) % 10)) % 10;
+  return `${base12}${checkDigit}`;
+};
 
 const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
   const [form, setForm] = useState(DEFAULT_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // ✅ Заполняем форму актуальными данными товара при каждом открытии.
   useEffect(() => {
     if (!isOpen || !product) return;
     setForm({
@@ -51,7 +66,6 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
     setError('');
   }, [isOpen, product?.id, product]);
 
-  // Сброс флага ошибки при закрытии
   useEffect(() => {
     if (!isOpen) setError('');
   }, [isOpen]);
@@ -63,11 +77,15 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
     []
   );
 
+  const handleGenerateBarcode = useCallback(() => {
+    const ean = generateValidEan13(product?.id);
+    setForm((f) => ({ ...f, barcode: ean }));
+  }, [product?.id]);
+
   if (!isOpen || !product) return null;
 
   const mainPhoto = (product.photos || [])[0] || '';
 
-  // Инлайн-валидация обязательных полей шаблона Ozon
   const missingRequired = [];
   if (!form.vat_rate) missingRequired.push('НДС, %');
   if (!form.okpd_code) missingRequired.push('ТН ВЭД коды ЕАЭС');
@@ -82,7 +100,7 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
     setError('');
     try {
       await api.updateProductLogistics(product.id, {
-        barcode: form.barcode || null,
+        barcode: form.barcode ? String(form.barcode).trim() : null,
         weight_grams: num(form.weight_grams),
         package_weight_grams: num(form.package_weight_grams),
         package_width_mm: num(form.package_width_mm),
@@ -131,8 +149,8 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
 
         <p className="form-hint" style={{ marginBottom: '0.75rem' }}>
           Поля со звёздочкой <span style={{ color: 'var(--accent-danger)' }}>*</span> обязательны в
-          XLS-шаблоне Ozon. Сохранение обновляет логистику товара. Статус «Ожидает» при этом не
-          меняется: в «Успешно» товар перейдёт после миграции (кнопка 🚀 в таблице).
+          XLS-шаблонах Ozon и Яндекс Маркета. При выгрузке на Яндекс Маркет граммы и миллиметры
+          автоматически пересчитываются в килограммы и сантиметры.
         </p>
 
         {/* ================= Налоги ================= */}
@@ -151,8 +169,7 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           ))}
         </select>
         <p className="form-hint">
-          Значения как в XLS-шаблоне Ozon: «Не облагается» (УСН), 22, 10, 7, 5. Ставки 7 и 5 — для
-          отдельных категорий товаров.
+          Значения: «Не облагается» (УСН), 22, 10, 7, 5.
         </p>
 
         {/* ================= ТН ВЭД (Умный селектор) ================= */}
@@ -165,7 +182,7 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           disabled={saving}
         />
         <p className="form-hint">
-          Обязателен для категорий одежда, обувь, парфюмерия, лекарства и др. Начните вводить название товара выше для автоподбора.
+          Обязателен в шаблонах Ozon и Яндекс Маркета. Начните вводить название товара выше для автоподбора.
         </p>
 
         {/* ================= Габариты упаковки (ОВХ) ================= */}
@@ -245,22 +262,40 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           </div>
         </div>
         <p className="form-hint">
-          Только числа без единиц измерения. Ozon сверяет ОВХ с фактическими при приёмке.
+          Указывайте в граммах и миллиметрах (для Яндекс Маркета перевод в кг и см выполняется автоматически).
         </p>
 
-        {/* ================= Штрихкод (НЕ обязательный) ================= */}
-        <label className="form-label">Штрихкод (Серийный номер / EAN)</label>
-        <input
-          className="form-input"
-          type="text"
-          value={form.barcode}
-          onChange={set('barcode')}
-          placeholder="Необязательно — Ozon сгенерирует код сам"
-          disabled={saving}
-        />
+        {/* ================= Штрихкод (обязателен для Яндекса, опционален для Ozon) ================= */}
+        <label className="form-label">
+          Штрихкод (Серийный номер / EAN){' '}
+          <span style={{ color: 'var(--accent-warning)', fontSize: '0.8rem', fontWeight: 500 }}>
+            (обязателен для Яндекс Маркета и WB)
+          </span>
+        </label>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <input
+            className="form-input"
+            style={{ flex: 1 }}
+            type="text"
+            value={form.barcode}
+            onChange={set('barcode')}
+            placeholder="Например: 4607001234567 или нажмите «Сгенерировать»"
+            disabled={saving}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={handleGenerateBarcode}
+            disabled={saving}
+            title="Сгенерировать валидный 13-значный штрихкод EAN-13"
+          >
+            🎲 Сгенерировать EAN-13
+          </Button>
+        </div>
         <p className="form-hint">
-          ✅ Поле НЕ обязательное в шаблоне Ozon. Свои коды (несколько — через «;») полезны для
-          FBO-приёмки и компенсий при утере, но экспорт пройдёт и без них.
+          ⚠️ В шаблоне <strong>Яндекс Маркета</strong> колонка «Штрихкод *» обязательна (если оставить пустым,
+          при выгрузке на Яндекс система сгенерирует валидный EAN-13 автоматически). В шаблоне{' '}
+          <strong>Ozon</strong> поле необязательное.
         </p>
 
         {/* ================= Индикатор главного фото ================= */}
@@ -273,8 +308,8 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
               <>✅ Ссылка на главное фото* установлена: {String(mainPhoto).slice(0, 60)}…</>
             ) : (
               <>
-                ❌ Ссылка на главное фото* не установлена — поле обязательное в шаблоне Ozon.
-                Добавьте фото в окне «Фото».
+                ❌ Ссылка на главное фото* не установлена — поле обязательное в шаблонах Ozon и
+                Яндекс Маркета. Добавьте фото в окне «Фото».
               </>
             )}
           </div>
@@ -284,7 +319,7 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
         {missingRequired.length > 0 && (
           <div className="alert alert-error" style={{ marginTop: '0.5rem' }}>
             <div>
-              Не заполнены обязательные поля шаблона Ozon:{' '}
+              Не заполнены обязательные поля шаблона:{' '}
               <strong>{missingRequired.join(', ')}</strong>. Сохранить можно, но товар не попадёт в
               выгрузку до заполнения.
             </div>

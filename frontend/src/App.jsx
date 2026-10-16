@@ -186,14 +186,15 @@ function App() {
   const handleAutoExport = useCallback(
     async (platform) => {
       try {
-        await api.exportXlsxV2(platform);
-        setMessage(`Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
+        const idsToExport = selectedProductIds.length > 0 ? selectedProductIds : null;
+        await api.exportXlsxV2(platform, 'success', idsToExport);
+        setMessage(`✅ Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
         await refreshAll();
       } catch (e) {
         setMessage('❌ Не удалось скачать файл: ' + e.message);
       }
     },
-    [refreshAll]
+    [refreshAll, selectedProductIds]
   );
 
   const handleCloseBatchModal = useCallback(() => {
@@ -220,7 +221,7 @@ function App() {
     }
   }, []);
 
-  // ==================== Обработчики массового обновления ====================
+  // ==================== Обработчики массового обновления и экспорта ====================
   const handleBulkEdit = useCallback(
     async (payload) => {
       try {
@@ -236,9 +237,9 @@ function App() {
     [refreshAll]
   );
 
-  const handleExportForPlatform = useCallback(async (platform, status) => {
+  const handleExportForPlatform = useCallback(async (platform, status, activeIds = null) => {
     try {
-      const filename = await api.exportXlsxV2(platform, status);
+      const filename = await api.exportXlsxV2(platform, status, activeIds);
       setMessage(
         filename && filename.toLowerCase().endsWith('.zip')
           ? `✅ Скачан ZIP из нескольких файлов. Загрузите каждый в кабинете ${platform}.`
@@ -248,6 +249,13 @@ function App() {
     } catch (e) {
       setMessage(`❌ ${e.message}`);
     }
+  }, []);
+
+  const handleOpenExport = useCallback((ids) => {
+    if (Array.isArray(ids)) {
+      setSelectedProductIds(ids);
+    }
+    setShowExportModal(true);
   }, []);
 
   // ==================== Обработчики авторизации ====================
@@ -381,7 +389,7 @@ function App() {
             onAttributes={handleEditAttributes}
             onVariants={handleEditVariants}
             onPhotos={handleEditPhotos}
-            onExport={() => setShowExportModal(true)}
+            onExport={handleOpenExport}
             onImport={() => setShowImportModal(true)}
           />
         );
@@ -469,10 +477,11 @@ function App() {
       />
 
       <ExportModal
-        key={`export-${showExportModal}`}
+        key={`export-${showExportModal}-${selectedProductIds.join('-')}`}
         isOpen={showExportModal}
         onClose={() => setShowExportModal(false)}
         onExport={handleExportForPlatform}
+        selectedIds={selectedProductIds}
         loading={productsLoading}
         onOpenTemplates={() => setCurrentView('templates')}
       />

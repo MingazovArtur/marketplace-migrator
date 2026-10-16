@@ -15,7 +15,6 @@ const MigrateModal = ({
   onSaved,
   onNotify,
 }) => {
-  // ✅ 1. ВСЕ STATE И REFS В НАЧАЛЕ
   const [platform, setPlatform] = useState('ozon');
   const [form, setForm] = useState({ name: '', price: '', category: '' });
   const [specCategories, setSpecCategories] = useState([]);
@@ -25,7 +24,6 @@ const MigrateModal = ({
   const [localError, setLocalError] = useState('');
   const pollTimerRef = useRef(null);
 
-  // ✅ 2. ВСЕ CALLBACK В НАЧАЛЕ
   const loadSpecCategories = useCallback(async (pl) => {
     setSpecsLoading(true);
     try {
@@ -57,13 +55,15 @@ const MigrateModal = ({
             }
           }
 
-          if (data.status === 'completed' && autoExport && platform === 'ozon' && product?.id) {
+          // ✅ ИСПРАВЛЕНО: автоскачивание ТОЛЬКО этого товара (product.id) работает для всех площадок
+          if (data.status === 'completed' && autoExport && product?.id) {
+            const platformTitle = PLATFORMS.find((p) => p.id === platform)?.name || platform;
             try {
-              await api.exportXlsxV2('ozon', 'success', product.id);
+              await api.exportXlsxV2(platform, 'success', product.id);
               if (onNotify) {
                 onNotify(
                   `✅ Карточка #${product.id} перенесена. ` +
-                    `XLSX с этим товаром скачан — загрузите его в кабинете Ozon.`
+                    `XLSX только с этим товаром скачан — загрузите его в кабинете ${platformTitle}.`
                 );
               }
             } catch (e) {
@@ -93,7 +93,7 @@ const MigrateModal = ({
     const priceInvalid = !Number.isFinite(priceNum) || priceNum <= 0;
 
     if (priceInvalid) {
-      setLocalError('Цена должна быть больше 0 ₽ — Ozon отклонит карточку с нулевой ценой.');
+      setLocalError('Цена должна быть больше 0 ₽ — площадка отклонит карточку с нулевой ценой.');
       return;
     }
 
@@ -123,7 +123,6 @@ const MigrateModal = ({
     }
   }, [form, product, platform, autoExport, onConfirm, onSaved, onClose, pollProgress]);
 
-  // ✅ 3. ВСЕ EFFECT В НАЧАЛЕ
   useEffect(() => {
     if (isOpen && product) {
       setForm({
@@ -146,10 +145,8 @@ const MigrateModal = ({
     };
   }, []);
 
-  // ✅ 4. ТЕПЕРЬ БЕЗОПАСНЫЙ РАННИЙ ВОЗВРАТ
   if (!isOpen || !product) return null;
 
-  // ✅ 5. ВЫЧИСЛЕНИЯ ДЛЯ РЕНДЕРА
   const priceNum = Number(form.price);
   const priceInvalid = !Number.isFinite(priceNum) || priceNum <= 0;
   const percent = progress?.percent ?? 0;
@@ -157,8 +154,8 @@ const MigrateModal = ({
     progress && (progress.status === 'progress' || progress.status === 'pending');
   const isCompleted = progress?.status === 'completed';
   const isFailed = progress?.status === 'failed';
+  const platformTitle = PLATFORMS.find((p) => p.id === platform)?.name || 'площадке';
 
-  // ✅ 6. РЕНДЕР
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
@@ -236,7 +233,7 @@ const MigrateModal = ({
             style={{ marginTop: '0.4rem', padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}
           >
             <div>
-              ❌ Цена должна быть больше 0 ₽ — без цены Ozon отклонит карточку, и товар не попадёт в
+              ❌ Цена должна быть больше 0 ₽ — без цены площадка отклонит карточку, и товар не попадёт в
               выгрузку. Укажите цену в поле выше.
             </div>
           </div>
@@ -244,7 +241,7 @@ const MigrateModal = ({
 
         {/* Категория */}
         <label className="form-label" style={{ marginTop: '0.6rem' }}>
-          Категория на {PLATFORMS.find((p) => p.id === platform)?.name || 'площадке'}
+          Категория на {platformTitle}
         </label>
         <input
           className="form-input"
@@ -263,7 +260,9 @@ const MigrateModal = ({
         <p className="form-hint">
           {specsLoading
             ? 'Загружаем список категорий спека...'
-            : `Формат «Родитель / Тип». Список из ${specCategories.length} категорий — из спека ${platform}.`}
+            : specCategories.length > 0
+              ? `Формат «Родитель / Тип». Список из ${specCategories.length} категорий — из спека ${platformTitle}.`
+              : `Укажите название категории на ${platformTitle} (или оставьте для автоподбора).`}
         </p>
 
         {/* Авто-экспорт */}
@@ -286,8 +285,8 @@ const MigrateModal = ({
           <span>Автоматически скачать XLSX для этого товара</span>
         </label>
         <p className="form-hint">
-          Будет скачан XLSX <strong>только с этим товаром</strong>. Для массовой выгрузки всех
-          товаров используйте «Выгрузка для площадки».
+          Будет скачан XLSX <strong>только с этим товаром (#{product.id})</strong>. Для массовой
+          выгрузки используйте кнопку «Выгрузка для площадки».
         </p>
 
         {/* Прогресс */}

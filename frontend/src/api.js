@@ -466,8 +466,15 @@ export const api = {
 
   /* ==================== Export ==================== */
 
-  exportForPlatform: async (platform, status = 'success') => {
-    const res = await fetch(`${API_URL}/export/platform/${enc(platform)}?status=${enc(status)}`, {
+  exportForPlatform: async (platform, status = 'success', productIdOrIds = null) => {
+    const q = new URLSearchParams();
+    if (status) q.append('status', status);
+    if (Array.isArray(productIdOrIds) && productIdOrIds.length > 0) {
+      q.append('product_ids', productIdOrIds.join(','));
+    } else if (productIdOrIds) {
+      q.append('product_id', productIdOrIds);
+    }
+    const res = await fetch(`${API_URL}/export/platform/${enc(platform)}?${q.toString()}`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось сформировать файл'));
@@ -482,8 +489,15 @@ export const api = {
     window.URL.revokeObjectURL(url);
   },
 
-  exportPreview: async (platform, status = 'success') => {
-    const res = await fetch(`${API_URL}/export/preview/${enc(platform)}?status=${enc(status)}`, {
+  exportPreview: async (platform, status = 'success', productIdOrIds = null) => {
+    const q = new URLSearchParams();
+    if (status) q.append('status', status);
+    if (Array.isArray(productIdOrIds) && productIdOrIds.length > 0) {
+      q.append('product_ids', productIdOrIds.join(','));
+    } else if (productIdOrIds) {
+      q.append('product_id', productIdOrIds);
+    }
+    const res = await fetch(`${API_URL}/export/preview/${enc(platform)}?${q.toString()}`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка предпросмотра выгрузки'));
@@ -520,10 +534,14 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
-  validateExport: async (platform, status = 'all', productId = null) => {
+  validateExport: async (platform, status = 'all', productIdOrIds = null) => {
     const q = new URLSearchParams();
     if (status) q.append('status', status);
-    if (productId) q.append('product_id', productId);
+    if (Array.isArray(productIdOrIds) && productIdOrIds.length > 0) {
+      q.append('product_ids', productIdOrIds.join(','));
+    } else if (productIdOrIds) {
+      q.append('product_id', productIdOrIds);
+    }
     const res = await fetch(`${API_URL}/export/validate/${enc(platform)}?${q.toString()}`, {
       headers: getHeaders(),
     });
@@ -531,10 +549,14 @@ export const api = {
     return res.json();
   },
 
-  exportXlsxV2: async (platform, status = 'success', productId = null) => {
+  exportXlsxV2: async (platform, status = 'success', productIdOrIds = null) => {
     const q = new URLSearchParams();
     if (status) q.append('status', status);
-    if (productId) q.append('product_id', productId);
+    if (Array.isArray(productIdOrIds) && productIdOrIds.length > 0) {
+      q.append('product_ids', productIdOrIds.join(','));
+    } else if (productIdOrIds) {
+      q.append('product_id', productIdOrIds);
+    }
 
     const res = await fetch(`${API_URL}/export/xlsx/${enc(platform)}?${q.toString()}`, {
       headers: getHeaders(),
@@ -542,9 +564,10 @@ export const api = {
 
     if (!res.ok) {
       const msg = await safeError(res, 'Ошибка формирования XLSX');
+      const isSingle = !Array.isArray(productIdOrIds) && productIdOrIds;
       throw new Error(
-        productId
-          ? `Товар #${productId} не прошёл валидацию:\n\n${msg}`
+        isSingle
+          ? `Товар #${productIdOrIds} не прошёл валидацию:\n\n${msg}`
           : `${msg}\n\nОткройте «Выгрузка» — блок валидации покажет, каких полей не хватает.`
       );
     }
@@ -620,11 +643,12 @@ export const api = {
     return res.json();
   },
 
-  /* ==================== Эталонные шаблоны Ozon ==================== */
+  /* ==================== Эталонные шаблоны площадок (Ozon, Яндекс Маркет, WB, Магнит) ==================== */
 
-  uploadOzonTemplate: async (categoryName, file) => {
+  uploadOzonTemplate: async (categoryName, file, platform = 'ozon') => {
     const fd = new FormData();
     fd.append('category_name', categoryName);
+    fd.append('platform', platform);
     fd.append('file', file);
     const res = await fetch(`${API_URL}/export/ozon-template/upload`, {
       method: 'POST',
@@ -635,8 +659,11 @@ export const api = {
     return res.json();
   },
 
-  listOzonTemplates: async () => {
-    const res = await fetch(`${API_URL}/export/ozon-template/list`, { headers: getHeaders() });
+  listOzonTemplates: async (platform = 'ozon') => {
+    const res = await fetch(
+      `${API_URL}/export/ozon-template/list?platform=${enc(platform)}`,
+      { headers: getHeaders() }
+    );
     if (!res.ok) return { templates: [] };
     return res.json();
   },
@@ -647,25 +674,25 @@ export const api = {
     return res.json();
   },
 
-  getOzonTemplateStatus: async (categoryName) => {
+  getOzonTemplateStatus: async (categoryName, platform = 'ozon') => {
     const res = await fetch(
-      `${API_URL}/export/ozon-template/status?category_name=${enc(categoryName)}`,
+      `${API_URL}/export/ozon-template/status?category_name=${enc(categoryName)}&platform=${enc(platform)}`,
       { headers: getHeaders() }
     );
     if (!res.ok) return { has_official_template: false, meta: null };
     return res.json();
   },
 
-  downloadOzonTemplate: async (categoryName) => {
+  downloadOzonTemplate: async (categoryName, platform = 'ozon') => {
     const res = await fetch(
-      `${API_URL}/export/ozon-template/download?category_name=${enc(categoryName)}`,
+      `${API_URL}/export/ozon-template/download?category_name=${enc(categoryName)}&platform=${enc(platform)}`,
       { headers: getHeaders() }
     );
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось скачать эталон'));
     const blob = await res.blob();
     const filename = parseContentDisposition(
       res.headers.get('content-disposition'),
-      'ozon_template.xlsx'
+      `${platform}_template.xlsx`
     );
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -678,11 +705,14 @@ export const api = {
     return filename;
   },
 
-  deleteOzonTemplate: async (categoryName) => {
-    const res = await fetch(`${API_URL}/export/ozon-template?category_name=${enc(categoryName)}`, {
-      method: 'DELETE',
-      headers: getHeaders(),
-    });
+  deleteOzonTemplate: async (categoryName, platform = 'ozon') => {
+    const res = await fetch(
+      `${API_URL}/export/ozon-template?category_name=${enc(categoryName)}&platform=${enc(platform)}`,
+      {
+        method: 'DELETE',
+        headers: getHeaders(),
+      }
+    );
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка удаления эталона'));
     return res.json();
   },

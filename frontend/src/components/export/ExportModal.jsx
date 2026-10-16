@@ -10,7 +10,6 @@ const STATUS_OPTIONS = [
   { value: 'all', label: 'Все' },
 ];
 
-// Канонические 13 полей XLS-шаблона Ozon (эталон 23–25.09.2026)
 const OZON_TEMPLATE_REQUIRED = [
   { field: 'article', label: 'Артикул' },
   { field: 'price', label: 'Предельная цена без акций, руб.' },
@@ -50,10 +49,17 @@ const canonFieldFor = (field) => {
   return field;
 };
 
-const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) => {
-  // ✅ 1. ВСЕ STATE В НАЧАЛЕ
+const ExportModal = ({
+  isOpen,
+  onClose,
+  onExport,
+  loading,
+  onOpenTemplates,
+  selectedIds = [],
+}) => {
   const [platform, setPlatform] = useState('ozon');
   const [status, setStatus] = useState('success');
+  const [onlySelected, setOnlySelected] = useState(selectedIds.length > 0);
   const [preview, setPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
@@ -62,7 +68,11 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
   const [categoryCounts, setCategoryCounts] = useState({});
   const [tplSet, setTplSet] = useState(new Set());
 
-  // ✅ 2. ВСЕ CALLBACK В НАЧАЛЕ
+  const activeIds = useMemo(
+    () => (onlySelected && selectedIds.length > 0 ? selectedIds : null),
+    [onlySelected, selectedIds]
+  );
+
   const loadPreview = useCallback(async () => {
     setPreviewLoading(true);
     setPreviewError('');
@@ -70,8 +80,8 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
     setValidation(null);
     try {
       const [pv, vv, prods, tpls] = await Promise.all([
-        api.exportPreview(platform, status),
-        api.validateExport(platform, status).catch(() => null),
+        api.exportPreview(platform, status, activeIds),
+        api.validateExport(platform, status, activeIds).catch(() => null),
         api
           .getProducts({ status: status === 'all' ? undefined : status, limit: 10000 })
           .catch(() => ({ products: [] })),
@@ -84,23 +94,26 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
       setTplSet(new Set(tpls.templates || []));
 
       const counts = {};
-      (prods.products || []).forEach((p) => {
-        const c = p.mapped_category || p.category || 'Без категории';
-        counts[c] = (counts[c] || 0) + 1;
-      });
+      const wanted = activeIds ? new Set(activeIds) : null;
+      (prods.products || [])
+        .filter((p) => (!wanted ? true : wanted.has(p.id)))
+        .forEach((p) => {
+          const c = p.mapped_category || p.category || 'Без категории';
+          counts[c] = (counts[c] || 0) + 1;
+        });
       setCategoryCounts(counts);
     } catch (e) {
       setPreviewError(e.message);
     } finally {
       setPreviewLoading(false);
     }
-  }, [platform, status]);
+  }, [platform, status, activeIds]);
 
   const handleDownload = useCallback(() => {
     if (downloaded || loading) return;
     setDownloaded(true);
-    onExport(platform, status);
-  }, [downloaded, loading, onExport, platform, status]);
+    onExport(platform, status, activeIds);
+  }, [downloaded, loading, onExport, platform, status, activeIds]);
 
   const handleTemplate = useCallback(() => {
     api.exportTemplate(platform).catch((e) => setPreviewError(e.message));
@@ -114,19 +127,23 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
     []
   );
 
-  // ✅ 3. ВСЕ EFFECT В НАЧАЛЕ
   useEffect(() => {
     if (isOpen) {
+      setOnlySelected(selectedIds.length > 0);
       setDownloaded(false);
+    }
+  }, [isOpen, selectedIds]);
+
+  useEffect(() => {
+    if (isOpen) {
       loadPreview();
     }
   }, [isOpen, loadPreview]);
 
   useEffect(() => {
     setDownloaded(false);
-  }, [platform, status]);
+  }, [platform, status, onlySelected]);
 
-  // ✅ 4. ВСЕ MEMO И ВЫЧИСЛЕНИЯ ДО РАННЕГО ВОЗВРАТА
   const v = validation || preview?.validation || {};
   const total = v.total ?? 0;
   const withErrors = v.products_with_errors ?? 0;
@@ -161,10 +178,8 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
     [categoryCounts, platform, tplSet]
   );
 
-  // ✅ 5. ТЕПЕРЬ БЕЗОПАСНЫЙ РАННИЙ ВОЗВРАТ
   if (!isOpen) return null;
 
-  // ✅ 6. РЕНДЕР
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
@@ -176,6 +191,29 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
             <Icon name="close" size={16} />
           </button>
         </div>
+
+        {/* Переключатель: выгружать только отмеченные в таблице товары */}
+        {selectedIds.length > 0 && (
+          <label
+            className="bulk-check"
+            style={{
+              marginBottom: '0.85rem',
+              padding: '0.6rem 0.85rem',
+              background: 'rgba(99, 102, 241, 0.1)',
+              border: '1px solid rgba(99, 102, 241, 0.35)',
+              borderRadius: '8px',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={onlySelected}
+              onChange={(e) => setOnlySelected(e.target.checked)}
+            />
+            <span>
+              Выгружать <strong>только выбранные в таблице товары ({selectedIds.length} шт.)</strong>
+            </span>
+          </label>
+        )}
 
         {/* Параметры */}
         <div className="export-controls">
@@ -199,6 +237,12 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
               className="form-input"
               value={status}
               onChange={(e) => setStatus(e.target.value)}
+              disabled={onlySelected && selectedIds.length > 0}
+              title={
+                onlySelected && selectedIds.length > 0
+                  ? 'Выгружаются выбранные чекбоксами товары независимо от статуса'
+                  : ''
+              }
             >
               {STATUS_OPTIONS.map((s) => (
                 <option key={s.value} value={s.value}>
@@ -214,7 +258,7 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
           </div>
         </div>
 
-        {/* ✅ Статус эталонов по категориям текущей выгрузки */}
+        {/* Статус эталонов Ozon */}
         {platform === 'ozon' && Object.keys(categoryCounts).length > 0 && (
           <div className="card" style={{ padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
             <h4
@@ -238,8 +282,12 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
                       borderRadius: 999,
                       fontSize: '0.8rem',
                       fontWeight: 600,
-                      background: tplSet.has(cat) ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-                      color: tplSet.has(cat) ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)',
+                      background: tplSet.has(cat)
+                        ? 'rgba(34,197,94,0.15)'
+                        : 'rgba(239,68,68,0.15)',
+                      color: tplSet.has(cat)
+                        ? 'var(--success, #22c55e)'
+                        : 'var(--danger, #ef4444)',
                       border: `1px solid ${tplSet.has(cat) ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)'}`,
                     }}
                   >
@@ -278,16 +326,10 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
                 </div>
               </div>
             )}
-            {missingTemplates.length === 0 && (
-              <p className="form-hint" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-                ✅ Все категории выгрузки обеспечены эталонными шаблонами — файлы будут идентичны
-                шаблонам Ozon.
-              </p>
-            )}
           </div>
         )}
 
-        {/* Чек-лист 13 канонических полей */}
+        {/* Чек-лист 13 канонических полей Ozon */}
         {platform === 'ozon' && (
           <div className="card" style={{ padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
             <h4
@@ -295,10 +337,6 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
             >
               <Icon name="check" size={16} /> Обязательные поля XLS-шаблона Ozon (13 колонок)
             </h4>
-            <p className="form-hint" style={{ marginTop: 0, marginBottom: '0.6rem' }}>
-              Только отсутствие этих полей блокирует экспорт. Прочие атрибуты спека —
-              предупреждения.
-            </p>
             <div
               style={{
                 display: 'grid',
@@ -326,19 +364,6 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
                 </div>
               ))}
             </div>
-            {!missingAny && total > 0 && (
-              <div className="alert alert-success" style={{ marginTop: '0.6rem', marginBottom: 0 }}>
-                <div>✅ Все обязательные поля заполнены. Файл пройдёт валидацию Ozon.</div>
-              </div>
-            )}
-            {missingAny && (
-              <div className="alert alert-error" style={{ marginTop: '0.6rem', marginBottom: 0 }}>
-                <div>
-                  ❌ Заполните поля со значком ❌ через «Логистику», «Характеристики», «Фото» или
-                  «Дефолты» и повторите экспорт.
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -440,43 +465,12 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
                           .slice(0, 3)
                           .map((i) => i.message)
                           .join('; ')}
-                        {warnings.length > 3 && <>; …и ещё {warnings.length - 3}</>}
                       </div>
                     )}
                   </li>
                 );
               })}
-              {v.issues.length > 8 && (
-                <li style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                  …и ещё {v.issues.length - 8} проблемных товаров
-                </li>
-              )}
             </ul>
-          </div>
-        )}
-
-        {preview?.rows && preview.rows.length > 0 && (
-          <div className="preview-table-wrap" style={{ marginTop: '0.75rem' }}>
-            <table className="preview-table">
-              <thead>
-                <tr>
-                  {preview.columns.map((c) => (
-                    <th key={c}>{c}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {preview.rows.map((row, i) => (
-                  <tr key={i}>
-                    {preview.columns.map((c) => (
-                      <td key={c} title={String(row[c] ?? '')}>
-                        {String(row[c] ?? '').slice(0, 50)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         )}
 
@@ -487,13 +481,6 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates }) =>
           <Button
             onClick={handleDownload}
             disabled={downloaded || loading || downloadable === 0}
-            title={
-              downloaded
-                ? 'Файл уже скачан. Закройте окно или измените параметры.'
-                : downloadable === 0
-                  ? `Все ${total} товаров имеют ошибки — исправьте поля со значком ❌`
-                  : `Скачать XLSX с ${downloadable} товарами`
-            }
           >
             {downloaded ? (
               <>

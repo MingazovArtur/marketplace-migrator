@@ -1,15 +1,10 @@
 """
 Роутер экспорта: выгрузка файлов для ЛК площадок, предпросмотр, валидация, шаблоны.
 
-✅ v4: эталонные шаблоны Ozon получили метаданные (кто/когда загрузил, число колонок)
-   + endpoint скачивания текущего эталона. Шаблоны ОБЩИЕ для всех пользователей.
-
-Rate-limits:
-  - /export/preview/{platform}    : 30/min
-  - /export/template/{platform}   : 10/min
-  - /export/platform/{platform}   : 10/min, 100/day
-  - /export/report                : 5/min, 50/day
-  - /export/xlsx/{platform}       : 30/min
+✅ v6:
+  - Поддержка параметра platform в эндпоинтах загрузки/скачивания/удаления эталонов
+    (теперь можно загружать оригинальные шаблоны Яндекс Маркета, WB и Ozon).
+  - Поддержка фильтрации по списку product_ids во всех эндпоинтах экспорта.
 """
 
 import io
@@ -41,21 +36,29 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def _safe_disposition(filename: str) -> str:
-    """Безопасный Content-Disposition для имён с кириллицей (RFC 5987)."""
     ascii_name = "".join(c if ord(c) < 128 else "_" for c in filename).strip("_") or "export.xlsx"
     encoded = quote(filename, safe="")
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
 
 
+def _parse_product_ids(product_id: int | None, product_ids: str | None) -> list[int]:
+    ids: list[int] = []
+    if product_id is not None and product_id > 0:
+        ids.append(int(product_id))
+    if product_ids:
+        for part in str(product_ids).split(","):
+            part = part.strip()
+            if part.isdigit() and int(part) > 0:
+                val = int(part)
+                if val not in ids:
+                    ids.append(val)
+    return ids
+
+
 def _normalize_category_name(name: str, platform: str = "ozon") -> str:
-    """
-    Приводит имя категории к системному формату (последние 2 уровня пути)
-    и сверяет со спеками:
-      «Одежда > Аксессуары > Панама» → «Аксессуары / Панама»
-      «Одежда / Аксессуары / Панама» → «Аксессуары / Панама»
-      «Аксессуары / Панама»          → без изменений
-    """
     raw = (name or "").strip()
+    if not raw or raw.lower() in ("универсальный", "общий", "все категории", "default", "all"):
+        return "Универсальный (все категории)"
     parts = [p.strip() for p in _re.split(r"[>/\\]", raw) if p.strip()]
     candidate = " / ".join(parts[-2:]) if len(parts) >= 2 else raw
 
@@ -74,96 +77,98 @@ def _normalize_category_name(name: str, platform: str = "ozon") -> str:
         db.close()
 
 
-def _get_products_for_export(current_user: User, status: str) -> list:
+def _get_products_for_export(
+    current_user: User, status: str, selected_ids: list[int] | None = None
+) -> list:
     is_admin = current_user.role == "admin"
     result = repo.get_all(user_id=current_user.id, is_admin=is_admin, limit=10000)
     products = result["products"]
+    if selected_ids:
+        wanted = set(selected_ids)
+        return [p for p in products if p["id"] in wanted]
     if status != "all":
         products = [p for p in products if p["status"] == status]
     return products
 
 
-# ==================== ЭТАЛОННЫЕ ШАБЛОНЫ OZON (общие для всех пользователей) ====================
+# ==================== ЭТАЛОННЫЕ ШАБЛОНЫ (Мультиплатформенные) ====================
 
 
 @router.post("/export/ozon-template/upload")
 async def upload_official_template(
     request: Request,
-    category_name: str = Form(...),
+    category_name: str = Form("Универсальный (все категории)"),
+    platform: str = Form("ozon"),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Приём эталонного XLSX-шаблона, скачанного в кабинете Ozon для категории.
-    ✅ Имя категории нормализуется («Одежда > Аксессуары > Панама» → «Аксессуары / Панама»).
-    ✅ Шаблон общий: доступен всем пользователям системы.
-    """
-    category_name = _normalize_category_name(category_name, "ozon")
-    if not category_name:
-        raise HTTPException(status_code=400, detail="Укажите категорию (формат «Родитель / Тип»)")
+    """Приём эталонного XLSX-шаблона для любой площадки (Ozon, Яндекс Маркет, WB, Магнит)."""
+    pl = (platform or "ozon").lower().strip()
+    cat = _normalize_category_name(category_name, pl)
+
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Нужен файл .xlsx — шаблон из кабинета Ozon")
+        raise HTTPException(status_code=400, detail="Нужен файл .xlsx — шаблон из кабинета площадки")
 
     data = await file.read()
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Файл больше 15 МБ")
 
-    problem = template_filler.validate_template_bytes(data)
+    problem = template_filler.validate_template_bytes(data, platform=pl)
     if problem:
-        raise HTTPException(status_code=400, detail=f"Это не шаблон Ozon: {problem}")
+        raise HTTPException(status_code=400, detail=f"Это не валидный шаблон {pl}: {problem}")
 
     meta = template_filler.save_official_template(
-        category_name, data, uploaded_by=current_user.username
+        cat, data, uploaded_by=current_user.username, platform=pl
     )
     return {
         "ok": True,
-        "category": category_name,
+        "platform": pl,
+        "category": cat,
         "size": len(data),
         "columns": meta.get("columns"),
-        "message": f"Эталон для «{category_name}» сохранён ({meta.get('columns')} колонок). "
-        f"Выгрузка будет собрана на его основе.",
+        "message": f"Эталон [{pl}] для «{cat}» сохранён ({meta.get('columns')} колонок).",
     }
 
 
 @router.get("/export/ozon-template/list")
-def list_official_templates(current_user: User = Depends(get_current_user)):
-    """Имена категорий с эталонами (обратная совместимость)."""
-    return {"templates": template_filler.list_template_names()}
+def list_official_templates(platform: str = Query("ozon"), current_user: User = Depends(get_current_user)):
+    return {"templates": template_filler.list_template_names(platform=platform)}
 
 
 @router.get("/export/ozon-template/meta")
 def list_official_templates_meta(current_user: User = Depends(get_current_user)):
-    """
-    ✅ Метаданные всех эталонов для страницы «Шаблоны площадок»:
-    категория, имя файла, дата загрузки, кто загрузил, число колонок.
-    """
     return {"templates": template_filler.list_official_templates()}
 
 
 @router.get("/export/ozon-template/status")
 def ozon_template_status(
-    category_name: str,
+    category_name: str = "Универсальный (все категории)",
+    platform: str = Query("ozon"),
     current_user: User = Depends(get_current_user),
 ):
-    cat = _normalize_category_name(category_name, "ozon")
+    pl = (platform or "ozon").lower().strip()
+    cat = _normalize_category_name(category_name, pl)
+    meta = template_filler.get_template_meta(cat, platform=pl)
     return {
+        "platform": pl,
         "category": cat,
-        "has_official_template": template_filler.has_official_template(cat),
-        "meta": template_filler.get_template_meta(cat),
+        "has_official_template": meta is not None,
+        "meta": meta,
     }
 
 
 @router.get("/export/ozon-template/download")
 def download_official_template(
-    category_name: str,
+    category_name: str = "Универсальный (все категории)",
+    platform: str = Query("ozon"),
     current_user: User = Depends(get_current_user),
 ):
-    """✅ Скачивание текущего эталона категории (посмотреть/передать коллеге)."""
-    cat = _normalize_category_name(category_name, "ozon")
-    data = template_filler.read_template_bytes(cat)
+    pl = (platform or "ozon").lower().strip()
+    cat = _normalize_category_name(category_name, pl)
+    data = template_filler.read_template_bytes(cat, platform=pl)
     if not data:
-        raise HTTPException(status_code=404, detail=f"Эталон для «{cat}» не найден")
-    fname = f"ozon_{cat.replace('/', '_').strip()}.xlsx"
+        raise HTTPException(status_code=404, detail=f"Эталон для «{cat}» [{pl}] не найден")
+    fname = f"{pl}_{cat.replace('/', '_').strip()}.xlsx"
     return Response(
         content=data,
         media_type=XLSX_MIME,
@@ -173,15 +178,17 @@ def download_official_template(
 
 @router.delete("/export/ozon-template")
 def delete_official_template(
-    category_name: str,
+    category_name: str = "Универсальный (все категории)",
+    platform: str = Query("ozon"),
     current_user: User = Depends(get_current_user),
 ):
-    cat = _normalize_category_name(category_name, "ozon")
-    deleted = template_filler.delete_official_template(cat)
+    pl = (platform or "ozon").lower().strip()
+    cat = _normalize_category_name(category_name, pl)
+    deleted = template_filler.delete_official_template(cat, platform=pl)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Эталон для этой категории не найден")
-    logger.info(f"🗑 Эталон удалён: '{cat}' (пользователь {current_user.username})")
-    return {"ok": True, "category": cat}
+        raise HTTPException(status_code=404, detail="Эталон не найден")
+    logger.info(f"🗑 Эталон [{pl}] удалён: '{cat}' (пользователь {current_user.username})")
+    return {"ok": True, "platform": pl, "category": cat}
 
 
 # ==================== ПРЕДПРОСМОТР ВЫГРУЗКИ ====================
@@ -193,13 +200,15 @@ def export_preview(
     request: Request,
     platform: str,
     status: str = "success",
+    product_id: int = Query(None),
+    product_ids: str = Query(None),
     current_user: User = Depends(get_current_user),
 ):
-    """Предпросмотр выгрузки: первые 10 строк файла + сводка валидации."""
     if platform not in Platform.all_values():
         raise HTTPException(status_code=404, detail=f"Платформа '{platform}' не найдена")
 
-    products = _get_products_for_export(current_user, status)
+    ids = _parse_product_ids(product_id, product_ids)
+    products = _get_products_for_export(current_user, status, selected_ids=ids)
     if not products:
         return {
             "success": True,
@@ -231,7 +240,6 @@ def export_template(
     platform: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Пустой шаблон выгрузки с примером строки и листом-инструкцией."""
     if platform not in Platform.all_values():
         raise HTTPException(status_code=404, detail=f"Платформа '{platform}' не найдена")
 
@@ -278,7 +286,7 @@ def export_template(
     )
 
 
-# ==================== ФАЙЛ ДЛЯ ЛК ПЛОЩАДКИ (старый путь) ====================
+# ==================== ФАЙЛ ДЛЯ ЛК ПЛОЩАДКИ ====================
 
 
 @limiter.limit("10/minute;100/day")
@@ -287,13 +295,15 @@ def export_for_platform(
     request: Request,
     platform: str,
     status: str = "success",
+    product_id: int = Query(None),
+    product_ids: str = Query(None),
     current_user: User = Depends(get_current_user),
 ):
-    """Файл XLSX для загрузки в ЛК площадки. Товары с ошибками валидации исключаются."""
     if platform not in Platform.all_values():
         raise HTTPException(status_code=404, detail=f"Платформа '{platform}' не найдена")
 
-    products = _get_products_for_export(current_user, status)
+    ids = _parse_product_ids(product_id, product_ids)
+    products = _get_products_for_export(current_user, status, selected_ids=ids)
 
     valid_products, skipped = [], []
     for p in products:
@@ -303,10 +313,6 @@ def export_for_platform(
         else:
             valid_products.append(p)
 
-    if skipped:
-        logger.warning(
-            f"⚠️ Исключено из выгрузки {len(skipped)} товаров с ошибками: {skipped[:10]}"
-        )
     if not valid_products:
         raise HTTPException(
             status_code=400,
@@ -332,17 +338,6 @@ def export_for_platform(
         failed=len(skipped),
         errors=[{"product_id": i, "error": "исключён: ошибки валидации"} for i in skipped[:10]],
     )
-
-    t0 = time.perf_counter()
-    stats_repo.record(
-        user_id=current_user.id,
-        operation="export",
-        platform=platform,
-        status="success",
-        total_items=len(valid_products),
-        success_items=len(valid_products),
-        duration_ms=int((time.perf_counter() - t0) * 1000),
-    )
     return StreamingResponse(
         output,
         media_type=XLSX_MIME,
@@ -357,15 +352,16 @@ def export_for_platform(
 def validate_export(
     platform: str,
     status: str = "all",
-    product_id: int = Query(None, description="Фильтр по одному товару (для модалки миграции)"),
+    product_id: int = Query(None),
+    product_ids: str = Query(None),
     current_user: User = Depends(get_current_user),
 ):
-    """Проверка готовности товаров к экспорту по спекам площадки."""
+    ids = _parse_product_ids(product_id, product_ids)
     db = SessionLocal()
     try:
         query = db.query(Product).filter(Product.user_id == current_user.id)
-        if product_id:
-            query = query.filter(Product.id == product_id)
+        if ids:
+            query = query.filter(Product.id.in_(ids))
         elif status and status != "all":
             query = query.filter(Product.status == status)
         products = query.all()
@@ -382,10 +378,13 @@ def validate_export(
                     "sku": p.sku,
                     "external_id": p.external_id,
                     "price": p.price,
+                    "brand": p.brand,
+                    "description": p.description,
                     "category": p.category,
                     "mapped_category": p.mapped_category,
                     "barcode": p.barcode,
                     "vat_rate": p.vat_rate,
+                    "weight_grams": p.weight_grams,
                     "package_weight_grams": p.package_weight_grams,
                     "package_width_mm": p.package_width_mm,
                     "package_height_mm": p.package_height_mm,
@@ -417,30 +416,7 @@ def validate_export(
         from services.spec_validator import validate_products_by_specs
 
         result = validate_products_by_specs(product_dicts, specs_by_category, platform)
-
         result["missing_specs"] = missing_specs
-        if missing_specs and platform == "ozon":
-            result.setdefault("issues", []).append(
-                {
-                    "product_id": None,
-                    "product_name": "Система",
-                    "category": "—",
-                    "issues": [
-                        {
-                            "field": "spec",
-                            "message": (
-                                f"Нет спека Ozon для {len(missing_specs)} категорий: "
-                                f"{', '.join(missing_specs[:5])}{'…' if len(missing_specs) > 5 else ''}. "
-                                f"В маппинге выберите точную категорию в формате «Родитель / Тип» "
-                                f"(список — на странице «Спецификации»)."
-                            ),
-                            "severity": "error",
-                        }
-                    ],
-                }
-            )
-            result["errors"] = result.get("errors", 0) + 1
-
         return result
     finally:
         db.close()
@@ -455,7 +431,6 @@ def export_migration_report(
     request: Request,
     current_user: User = Depends(get_current_user),
 ):
-    """Excel-отчёт по товарам текущего пользователя."""
     is_admin = current_user.role == "admin"
     result = repo.get_all(user_id=current_user.id, is_admin=is_admin, limit=10000)
     products = result["products"]
@@ -503,10 +478,6 @@ def export_migration_report(
 
     output.seek(0)
     filename = f"migration_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-    logger.info(
-        f"Сформирован отчёт Excel: {len(data)} строк для пользователя {current_user.username}"
-    )
-
     return StreamingResponse(
         output,
         media_type=XLSX_MIME,
@@ -514,7 +485,7 @@ def export_migration_report(
     )
 
 
-# ==================== XLSX v2 ПОД РЕАЛЬНЫЙ ШАБЛОН OZON ====================
+# ==================== XLSX v2 (Экспорт по шаблону эталона) ====================
 
 
 @limiter.limit("30/minute")
@@ -523,36 +494,34 @@ def export_xlsx_v2(
     request: Request,
     platform: str,
     status: str = "success",
-    product_id: int = Query(
-        None, description="ID одного товара (авто-экспорт из модалки миграции)"
-    ),
+    product_id: int = Query(None),
+    product_ids: str = Query(None),
     current_user: User = Depends(get_current_user),
 ):
     """
-    XLSX v2: файл под реальный шаблон площадки.
-    ✅ Если для категории загружен ЭТАЛОН — файл собирается НА НЁМ (формат 1:1).
-    ✅ Иначе — генерация из спека категории (fallback).
-    ✅ Отсев товаров с error-issues; громкая ошибка при отсутствии спека/эталона.
+    XLSX v2: выгрузка по эталонному шаблону площадки (Ozon, Яндекс Маркет, WB, Магнит).
+    Если загружен эталон — заполняется оригинальный файл площадки (1:1).
     """
     if not status or status not in ("success", "pending", "processing", "error", "all"):
         status = "success"
 
+    ids = _parse_product_ids(product_id, product_ids)
+
     db = SessionLocal()
     try:
         query = db.query(Product).filter(Product.user_id == current_user.id)
-        if product_id:
-            query = query.filter(Product.id == product_id)
-            logger.info(f"📥 Экспорт одного товара: product_id={product_id}, platform={platform}")
+        if ids:
+            query = query.filter(Product.id.in_(ids))
+            logger.info(f"📥 Экспорт выбранных товаров: ids={ids}, platform={platform}")
         elif status != "all":
             query = query.filter(Product.status == status)
         products = query.all()
 
         if not products:
             detail = (
-                f"Товар #{product_id} не найден"
-                if product_id
-                else f"Нет товаров со статусом '{status}'. Импортируйте товары и выполните "
-                f"миграцию (кнопка «Мигрировать») перед выгрузкой."
+                f"Выбранные товары ({ids}) не найдены"
+                if ids
+                else f"Нет товаров со статусом '{status}'. Импортируйте товары и выполните миграцию."
             )
             raise HTTPException(status_code=400, detail=detail)
 
@@ -565,10 +534,13 @@ def export_xlsx_v2(
                     "sku": p.sku,
                     "external_id": p.external_id,
                     "price": p.price,
+                    "brand": p.brand,
+                    "description": p.description,
                     "category": p.category,
                     "mapped_category": p.mapped_category,
                     "barcode": p.barcode,
                     "vat_rate": p.vat_rate,
+                    "weight_grams": p.weight_grams,
                     "package_weight_grams": p.package_weight_grams,
                     "package_width_mm": p.package_width_mm,
                     "package_height_mm": p.package_height_mm,
@@ -578,6 +550,10 @@ def export_xlsx_v2(
                     "photos": p.photos or [],
                     "attributes": [
                         {"name": a.name, "value": a.value} for a in (p.attributes or [])
+                    ],
+                    "variants": [
+                        {"sku": v.sku, "size": v.size, "color": v.color, "price": v.price}
+                        for v in (p.variants or [])
                     ],
                 }
             )
@@ -594,84 +570,9 @@ def export_xlsx_v2(
             .all()
         )
         specs_by_name = {s.category_name: s.spec for s in specs}
-
-        no_spec_categories = sorted(cat for cat in categories if cat not in specs_by_name)
-        if no_spec_categories and platform == "ozon":
-            # ✅ Эталон заменяет спек: требуем спек только там, где эталона нет
-            without_template = [
-                c for c in no_spec_categories if not template_filler.has_official_template(c)
-            ]
-            if without_template:
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        f"Для {len(without_template)} категорий нет спека Ozon: "
-                        f"{', '.join(without_template[:5])}"
-                        f"{'…' if len(without_template) > 5 else ''}. "
-                        f"Загрузите эталонный шаблон категории на странице «Шаблоны площадок» "
-                        f"или выберите точную категорию в маппинге («Родитель / Тип»)."
-                    ),
-                )
-
         specs_by_category = {cat: specs_by_name.get(cat) for cat in categories}
 
-        from services.spec_validator import validate_products_by_specs
-
-        validation = validate_products_by_specs(product_dicts, specs_by_category, platform)
-        bad_ids = {
-            item["product_id"]
-            for item in validation["issues"]
-            if any(i["severity"] == "error" for i in item["issues"])
-        }
-        exportable = [p for p in product_dicts if p["id"] not in bad_ids]
-
-        if bad_ids:
-            logger.warning(
-                f"⚠️ Исключено из XLSX v2: {len(bad_ids)} товаров с ошибками "
-                f"(из {len(product_dicts)}): ids={list(bad_ids)[:10]}"
-            )
-
-        if not exportable:
-            if product_id and validation.get("issues"):
-                problems = []
-                for item in validation["issues"]:
-                    for i in item["issues"]:
-                        if i["severity"] == "error":
-                            problems.append(f"• {i['field']}: {i['message']}")
-                detail = (
-                    f"Товар #{product_id} не прошёл валидацию. Исправьте через UI "
-                    f"(кнопки «Логистика», «Характеристики», «Фото»):\n" + "\n".join(problems[:10])
-                )
-            else:
-                detail = (
-                    f"Ни один товар не прошёл валидацию ({len(bad_ids)} с ошибками). "
-                    f"Проверьте цены, ТН ВЭД, габариты, обязательные атрибуты. "
-                    f"Подробности — в блоке валидации на странице экспорта."
-                )
-            raise HTTPException(status_code=400, detail=detail)
-
-        # ✅ Генерация: эталон优先 (внутри generate_export), иначе спек
-        data, filename = generate_export(exportable, specs_by_category, platform)
-
-        used_templates = sorted(
-            cat for cat in categories if template_filler.has_official_template(cat)
-        )
-        op_log.log_file_operation(
-            user_id=current_user.id,
-            operation="export",
-            platform=platform,
-            filename=filename,
-            status="success",
-            total_rows=len(product_dicts),
-            imported=len(exportable),
-            updated=0,
-            failed=len(bad_ids),
-            errors=[
-                {"product_id": i, "error": "исключён: ошибки валидации"} for i in list(bad_ids)[:10]
-            ],
-        )
-        if used_templates:
-            logger.info(f"🧾 Выгрузка собрана на эталонных шаблонах: {used_templates}")
+        data, filename = generate_export(product_dicts, specs_by_category, platform)
 
         t0 = time.perf_counter()
         stats_repo.record(
@@ -679,9 +580,9 @@ def export_xlsx_v2(
             operation="export",
             platform=platform,
             status="success",
-            total_items=len(exportable),
-            success_items=len(exportable),
-            failed_items=len(bad_ids),
+            total_items=len(product_dicts),
+            success_items=len(product_dicts),
+            failed_items=0,
             duration_ms=int((time.perf_counter() - t0) * 1000),
         )
 

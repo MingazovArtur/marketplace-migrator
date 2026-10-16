@@ -1,19 +1,20 @@
 """
 Загрузчик спецификаций категорий Яндекс Маркета через официальный Partner API.
 
-Эндпоинты (Content API):
-- GET /businesses/{businessId}/categories
-- GET /businesses/{businessId}/categories/{categoryId}/versions
-- GET /businesses/{businessId}/categories/{categoryId}/versions/{version}/parameters
-- GET /businesses/{businessId}/categories/{categoryId}/versions/{version}/parameters/{parameterId}/variants
+Актуальные эндпоинты Partner API:
+- POST /categories/tree                  → дерево всех категорий Маркета
+- POST /category/{categoryId}/parameters → характеристики и словари значений листовой категории
 
-Документация: https://yandex.ru/dev/market/partner-api/
-OpenAPI-спека: https://github.com/yandex-market/yandex-market-partner-api
+Поддерживает современные API-ключи формата 'ACMA:...' (заголовок Api-Key)
+и OAuth-токены (заголовок Authorization: OAuth).
 """
 
+import asyncio
+import gc
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime
 
 import httpx
@@ -25,207 +26,230 @@ logger = logging.getLogger(__name__)
 
 YANDEX_API_BASE = "https://api.partner.market.yandex.ru"
 
+CONCURRENCY = 4          # одновременных запросов параметров категорий
+TIMEOUT = 60.0           # таймаут одного HTTP-запроса
+MAX_VALUES_PER_ATTR = 500
+DB_CHUNK = 50            # категорий на один commit в БД
+PROGRESS_EVERY = 10
+MAX_RETRIES = 3
+
+# Базовые обязательные колонки официального шаблона Яндекс Маркета
+YM_BASE_REQUIRED_FIELDS = [
+    "Ваш SKU",
+    "Название товара",
+    "Ссылка на изображение",
+    "Описание товара",
+    "Категория на Маркете",
+    "Бренд",
+    "Штрихкод",
+    "Вес, кг",
+    "Длина, см",
+    "Ширина, см",
+    "Высота, см",
+    "Цена",
+    "ТН ВЭД",
+]
+
 
 def _ym_headers(token: str) -> dict:
-    """Яндекс использует схему 'OAuth', а не 'Bearer'."""
+    """
+    Формирует заголовки авторизации Яндекс Маркета:
+    - Новые токены (ACMA:...) передаются в заголовке 'Api-Key'
+    - Старые OAuth-токены (y0_...) — в 'Authorization: OAuth <token>'
+    """
+    clean = (token or "").strip()
+    if clean.lower().startswith("oauth "):
+        clean = clean[6:].strip()
+        return {
+            "Authorization": f"OAuth {clean}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+    if clean.startswith("y0_"):
+        return {
+            "Authorization": f"OAuth {clean}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
     return {
-        "Authorization": f"OAuth {token}",
+        "Api-Key": clean,
         "Accept": "application/json",
+        "Content-Type": "application/json",
     }
 
 
-# ========== Категории ==========
-
-
-async def fetch_yandex_categories(
-    client: httpx.AsyncClient, token: str, business_id: str
-) -> list[dict]:
-    """Список категорий кабинета (с пагинацией)."""
-    out = []
-    page = 1
-    while page <= 20:
-        resp = await client.get(
-            f"{YANDEX_API_BASE}/businesses/{business_id}/categories",
-            headers=_ym_headers(token),
-            params={"page": page, "page_size": 100},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        result = data.get("result") or {}
-        if isinstance(result, list):
-            cats = result
-        else:
-            cats = result.get("categories") or result.get("items") or []
-
-        for c in cats:
-            out.append(
-                {
-                    "id": str(c.get("id")),
-                    "name": c.get("name") or c.get("title") or str(c.get("id")),
-                    "parent_id": str(c.get("parentId")) if c.get("parentId") else None,
-                    "version": c.get("version"),
-                }
-            )
-
-        # пагинация: если категорий меньше страницы — выходим
-        if len(cats) < 100:
-            break
-        page += 1
-
-    return out
-
-
-async def fetch_yandex_category_version(
+async def _post_ym(
     client: httpx.AsyncClient,
-    token: str,
-    business_id: str,
-    category_id: str,
-    fallback: int | None = None,
-) -> int:
-    """Определяем актуальную версию категории (нужна для запроса параметров)."""
-    if fallback:
-        return fallback
-    try:
-        resp = await client.get(
-            f"{YANDEX_API_BASE}/businesses/{business_id}/categories/{category_id}/versions",
-            headers=_ym_headers(token),
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            result = data.get("result") or {}
-            versions = result.get("versions") if isinstance(result, dict) else result
-            versions = versions or []
-            nums = [v.get("version") if isinstance(v, dict) else v for v in versions]
-            nums = [n for n in nums if isinstance(n, int)]
-            if nums:
-                return max(nums)
-    except Exception as e:
-        logger.warning(f"Yandex: не удалось получить версии категории {category_id}: {e}")
-    return 1
+    sem: asyncio.Semaphore,
+    path: str,
+    body: dict,
+    headers: dict,
+) -> dict:
+    """POST-запрос к Partner API Яндекс Маркета с семафором и retry на 420/429/5xx."""
+    async with sem:
+        last_err = None
+        delay = 1.0
+        for attempt in range(MAX_RETRIES):
+            try:
+                resp = await client.post(f"{YANDEX_API_BASE}{path}", json=body, headers=headers)
+                if resp.status_code in (420, 429) or resp.status_code >= 500:
+                    logger.warning(
+                        f"⚠️ Yandex API {resp.status_code} на {path} (попытка {attempt + 1}/{MAX_RETRIES})"
+                    )
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (420, 429) or e.response.status_code >= 500:
+                    last_err = e
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                    continue
+                raise
+            except (httpx.TransportError, httpx.TimeoutException, OSError) as e:
+                last_err = e
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                continue
+        raise last_err or httpx.HTTPError(f"Max retries exceeded для {path}")
 
 
-# ========== Атрибуты ==========
+# ========== Дерево категорий (POST /categories/tree) ==========
 
 
-async def fetch_yandex_parameters(
-    client: httpx.AsyncClient, token: str, business_id: str, category_id: str, version: int
+async def fetch_yandex_categories_tree(
+    client: httpx.AsyncClient,
+    sem: asyncio.Semaphore,
+    headers: dict,
 ) -> list[dict]:
-    """Параметры (характеристики) категории со словарями значений."""
-    resp = await client.get(
-        f"{YANDEX_API_BASE}/businesses/{business_id}/categories/{category_id}/versions/{version}/parameters",
-        headers=_ym_headers(token),
+    """
+    Загружает полное дерево категорий Яндекс Маркета (POST /categories/tree)
+    и возвращает список ЛИСТОВЫХ категорий в формате:
+      {'id': '91491', 'name': 'Мобильные телефоны', 'full_name': 'Электроника / Мобильные телефоны', 'parent_id': '...'}
+    """
+    data = await _post_ym(client, sem, "/categories/tree", {"language": "RU"}, headers)
+    root = data.get("result") or {}
+
+    leaves: list[dict] = []
+
+    def walk(node: dict, parent_id: str | None = None, parent_name: str | None = None):
+        cat_id = node.get("id")
+        cat_name = (node.get("name") or "").strip()
+        children = node.get("children") or []
+
+        if children:
+            for ch in children:
+                walk(
+                    ch,
+                    parent_id=str(cat_id) if cat_id else parent_id,
+                    parent_name=cat_name if cat_name and cat_name != "Все товары" else parent_name,
+                )
+            return
+
+        if not cat_id or not cat_name:
+            return
+
+        full_name = f"{parent_name} / {cat_name}" if parent_name else cat_name
+        leaves.append(
+            {
+                "id": str(cat_id),
+                "name": cat_name,
+                "full_name": full_name,
+                "parent_id": parent_id,
+            }
+        )
+
+    walk(root)
+    logger.info(f"🌳 Яндекс Маркет: найдено {len(leaves)} листовых категорий")
+    return leaves
+
+
+# ========== Характеристики категории (POST /category/{categoryId}/parameters) ==========
+
+
+def _map_yandex_type(param_type: str | None, has_values: bool, multivalue: bool) -> str:
+    t = (param_type or "").upper()
+    if t in ("NUMERIC", "NUMBER", "INTEGER", "DECIMAL", "FLOAT"):
+        return "number"
+    if t in ("ENUM", "BOOLEAN") or has_values:
+        return "multiselect" if multivalue else "select"
+    return "text"
+
+
+def _map_yandex_group(name: str) -> str:
+    low = (name or "").strip().lower()
+    if low in ("бренд", "brand", "вендор", "производитель"):
+        return "brand"
+    if any(k in low for k in ("цвет", "размер", "объем", "вес", "рост")):
+        return "variant"
+    return "common"
+
+
+async def fetch_yandex_category_parameters(
+    client: httpx.AsyncClient,
+    sem: asyncio.Semaphore,
+    headers: dict,
+    category_id: str,
+) -> list[dict]:
+    """Получает характеристики конкретной листовой категории Яндекс Маркета."""
+    data = await _post_ym(
+        client,
+        sem,
+        f"/category/{category_id}/parameters",
+        {},
+        headers,
     )
-    resp.raise_for_status()
-    data = resp.json()
     result = data.get("result") or {}
-    params = result.get("parameters") or result.get("items") or []
-    if isinstance(result, list):
-        params = result
+    params = result.get("parameters") or []
 
-    attributes = []
+    attributes: list[dict] = []
     for p in params:
-        is_collection = bool(p.get("collection") or p.get("isCollection") or p.get("multiple"))
-        variants = p.get("variants") or p.get("values") or []
-        values = None
-        if variants:
-            values = [v.get("value") if isinstance(v, dict) else v for v in variants]
+        p_id = p.get("id")
+        p_name = (p.get("name") or "").strip()
+        if not p_id or not p_name:
+            continue
 
-        base_type = _map_yandex_type(p.get("type"))
-        if base_type == "select" and is_collection:
-            base_type = "multiselect"
+        multivalue = bool(p.get("multivalue") or p.get("collection"))
+        raw_values = p.get("values") or p.get("variants") or p.get("valueRestrictions") or []
+        values: list[str] | None = None
+        if isinstance(raw_values, list) and raw_values:
+            extracted = []
+            for v in raw_values[:MAX_VALUES_PER_ATTR]:
+                val_str = v.get("value") if isinstance(v, dict) else str(v)
+                if val_str:
+                    extracted.append(str(val_str))
+            if extracted:
+                values = extracted
+
+        unit_info = p.get("unit")
+        unit_name = None
+        if isinstance(unit_info, dict):
+            unit_name = unit_info.get("fullName") or unit_info.get("name")
+        elif isinstance(unit_info, str):
+            unit_name = unit_info
+
+        attr_type = _map_yandex_type(p.get("type"), bool(values), multivalue)
 
         attributes.append(
             {
-                "id": str(p.get("id")),
-                "name": p.get("name"),
-                "type": base_type,
-                "required": bool(p.get("required") or p.get("isRequired")),
-                "group": _map_yandex_group(p),
+                "id": str(p_id),
+                "name": p_name,
+                "type": attr_type,
+                "required": bool(p.get("required") or p.get("mandatory")),
+                "group": _map_yandex_group(p_name),
                 "values": values,
-                "case_sensitive": True,
+                "case_sensitive": False,
                 "separator": ";",
-                "unit": p.get("unit"),
-                "allow_unit_in_value": False,
+                "unit": unit_name,
+                "allow_unit_in_value": True,
+                "description": (p.get("description") or "")[:500],
             }
         )
 
     return attributes
-
-
-def _map_yandex_type(t: str | None) -> str:
-    t = (t or "").upper()
-    if t in ("NUMBER", "INTEGER", "DECIMAL", "FLOAT"):
-        return "number"
-    if t in ("ENUM", "BOOLEAN"):
-        return "select"
-    return "text"
-
-
-def _map_yandex_group(p: dict) -> str:
-    name = (p.get("name") or "").strip().lower()
-    if name in ("бренд", "brand"):
-        return "brand"
-    group = (p.get("group") or p.get("groupName") or "").lower()
-    if "вариант" in group or "variant" in group:
-        return "variant"
-    if "дополнительн" in group or "additional" in group:
-        return "additional"
-    return "common"
-
-
-# ========== Оркестратор ==========
-
-
-async def refresh_yandex_specs(
-    user_id: int,
-    token: str,
-    business_id: str,
-    category_ids: list[str] | None = None,
-) -> dict:
-    """Подтягивает категории + параметры, сохраняет как PlatformCategorySpec."""
-    async with httpx.AsyncClient(timeout=60) as client:
-        cats = await fetch_yandex_categories(client, token, business_id)
-
-        if category_ids:
-            cats = [c for c in cats if c["id"] in category_ids]
-
-        fetched = 0
-        errors = []
-
-        for c in cats:
-            try:
-                version = await fetch_yandex_category_version(
-                    client, token, business_id, c["id"], c.get("version")
-                )
-                attrs = await fetch_yandex_parameters(client, token, business_id, c["id"], version)
-
-                spec_content = {
-                    "sheets": ["Список товаров", "Инструкция", "Описание полей"],
-                    "required_fields": [a["name"] for a in attrs if a["required"]],
-                    "attributes": attrs,
-                    "validation_rules": _build_validation_rules(attrs),
-                    "special_requirements": _build_special_requirements(),
-                }
-
-                _upsert_spec(
-                    user_id=user_id,
-                    platform="yandex",
-                    category_id=c["id"],
-                    category_name=c["name"],
-                    parent_category_id=c["parent_id"],
-                    spec=spec_content,
-                )
-                fetched += 1
-            except Exception as e:
-                errors.append({"category_id": c["id"], "error": str(e)})
-                logger.warning(f"Yandex: ошибка загрузки параметров категории {c['id']}: {e}")
-
-    return {
-        "platform": "yandex",
-        "fetched": fetched,
-        "errors": len(errors),
-        "error_details": errors[:20],
-    }
 
 
 def _build_validation_rules(attrs: list[dict]) -> dict:
@@ -234,54 +258,159 @@ def _build_validation_rules(attrs: list[dict]) -> dict:
         "units_per_item": {"min": 1, "type": "integer"},
     }
     for attr in attrs:
-        if attr["values"]:
+        if attr.get("values"):
             rules[attr["id"]] = {
                 "enum": attr["values"],
-                "case_sensitive": attr["case_sensitive"],
-                "separator": attr["separator"] if attr["type"] == "multiselect" else None,
+                "case_sensitive": attr.get("case_sensitive", False),
+                "separator": attr.get("separator") if attr.get("type") == "multiselect" else None,
             }
     return rules
 
 
-def _build_special_requirements() -> dict:
-    return {
-        "okpd_required_for_tags": [],  # у Яндекса маркировка контролируется иначе
-        "excisable_tags": [],
-    }
-
-
-def _upsert_spec(user_id, platform, category_id, category_name, parent_category_id, spec):
+def _flush_ym_buffer(user_id: int, buffer: list[tuple[dict, dict]]) -> None:
+    """Пакетное сохранение спеков Яндекс Маркета в БД."""
+    if not buffer:
+        return
     db = SessionLocal()
     try:
-        existing = (
-            db.query(PlatformCategorySpec)
-            .filter(
-                PlatformCategorySpec.platform == platform,
-                PlatformCategorySpec.category_id == category_id,
-            )
-            .first()
-        )
-        version = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
+        for leaf, spec in buffer:
+            cid = str(leaf["id"])
+            cname = leaf.get("full_name") or leaf["name"]
+            version = hashlib.sha256(
+                json.dumps(spec, ensure_ascii=False, sort_keys=True).encode()
+            ).hexdigest()[:12]
 
-        if existing:
-            existing.user_id = user_id
-            existing.category_name = category_name
-            existing.parent_category_id = parent_category_id
-            existing.spec = spec
-            existing.version = version
-            existing.fetched_at = datetime.utcnow()
-        else:
-            db.add(
-                PlatformCategorySpec(
-                    user_id=user_id,
-                    platform=platform,
-                    category_id=category_id,
-                    category_name=category_name,
-                    parent_category_id=parent_category_id,
-                    spec=spec,
-                    version=version,
+            existing = (
+                db.query(PlatformCategorySpec)
+                .filter(
+                    PlatformCategorySpec.platform == "yandex",
+                    PlatformCategorySpec.category_id == cid,
                 )
+                .first()
             )
+            if existing:
+                existing.user_id = user_id
+                existing.category_name = cname
+                existing.parent_category_id = leaf.get("parent_id")
+                existing.spec = spec
+                existing.version = version
+                existing.fetched_at = datetime.utcnow()
+            else:
+                db.add(
+                    PlatformCategorySpec(
+                        user_id=user_id,
+                        platform="yandex",
+                        category_id=cid,
+                        category_name=cname,
+                        parent_category_id=leaf.get("parent_id"),
+                        spec=spec,
+                        version=version,
+                    )
+                )
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
+
+
+# ========== Оркестратор ==========
+
+
+async def refresh_yandex_specs(
+    user_id: int,
+    token: str,
+    business_id: str | None = None,
+    category_ids: list[str] | None = None,
+    progress_cb: Callable | None = None,
+    concurrency: int = CONCURRENCY,
+) -> dict:
+    """
+    Загружает дерево категорий Яндекс Маркета и их характеристики,
+    сохраняя в platform_category_specs.
+    """
+    if not token or not token.strip():
+        raise ValueError("Не указан API-ключ Яндекс Маркета (формат ACMA:...)")
+
+    headers = _ym_headers(token)
+    sem = asyncio.Semaphore(concurrency)
+    limits = httpx.Limits(max_connections=concurrency + 4, max_keepalive_connections=concurrency)
+
+    fetched = 0
+    errors = 0
+    error_details: list[dict] = []
+    done_count = 0
+    buffer: list[tuple[dict, dict]] = []
+
+    async with httpx.AsyncClient(timeout=TIMEOUT, limits=limits) as client:
+        leaves = await fetch_yandex_categories_tree(client, sem, headers)
+
+        if category_ids:
+            wanted = {str(c).strip() for c in category_ids if str(c).strip()}
+            leaves = [
+                leaf
+                for leaf in leaves
+                if leaf["id"] in wanted
+                or leaf["name"].lower() in {w.lower() for w in wanted}
+            ]
+
+        total = len(leaves)
+        logger.info(
+            f"🚀 Яндекс Маркет: к загрузке {total} категорий (business_id={business_id})"
+        )
+
+        if progress_cb:
+            progress_cb({"total": total, "fetched": 0, "errors": 0})
+
+        if total == 0:
+            return {
+                "platform": "yandex",
+                "fetched": 0,
+                "errors": 0,
+                "error_details": [],
+            }
+
+        async def work(leaf: dict) -> None:
+            nonlocal fetched, errors, done_count
+            try:
+                attrs = await fetch_yandex_category_parameters(client, sem, headers, leaf["id"])
+                spec_content = {
+                    "sheets": ["Список товаров", "Инструкция"],
+                    "required_fields": YM_BASE_REQUIRED_FIELDS
+                    + [a["name"] for a in attrs if a["required"]],
+                    "attributes": attrs,
+                    "validation_rules": _build_validation_rules(attrs),
+                    "special_requirements": {
+                        "yandex_category_name": leaf["name"],
+                        "yandex_category_id": leaf["id"],
+                    },
+                }
+                buffer.append((leaf, spec_content))
+                fetched += 1
+            except Exception as e:
+                errors += 1
+                if len(error_details) < 50:
+                    error_details.append({"category_id": leaf["id"], "error": str(e)[:300]})
+            finally:
+                done_count += 1
+                if progress_cb and (done_count % PROGRESS_EVERY == 0 or done_count == total):
+                    progress_cb({"total": total, "fetched": fetched, "errors": errors})
+
+        for i in range(0, total, DB_CHUNK):
+            chunk = leaves[i : i + DB_CHUNK]
+            await asyncio.gather(*(work(leaf) for leaf in chunk))
+            try:
+                _flush_ym_buffer(user_id, buffer)
+            except Exception as e:
+                logger.error(f"❌ Ошибка сохранения чанка Яндекс Маркета: {e}")
+                errors += len(buffer)
+            buffer.clear()
+            gc.collect()
+
+    return {
+        "platform": "yandex",
+        "fetched": fetched,
+        "errors": errors,
+        "error_details": error_details,
+    }

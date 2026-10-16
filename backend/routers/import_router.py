@@ -15,6 +15,7 @@ Rate-limits (на идентификатор: user_id или IP):
 """
 
 import logging
+import os
 import time
 
 from fastapi import (
@@ -28,6 +29,7 @@ from fastapi import (
 )
 from pydantic import BaseModel
 
+from connectors.yandex_seller import YandexSellerConnector
 from core.auth import get_current_user
 from core.platforms import PLATFORM_CONFIG
 from core.rate_limit import limiter
@@ -58,6 +60,39 @@ def _source_label(platform: str) -> str:
     """Каноническая метка источника импорта из файла."""
     cfg = PLATFORM_CONFIG.get(platform) or {}
     return f"{cfg.get('name', platform)} (Файл)"
+
+
+def _parse_yandex_api_credentials(raw_key: str) -> tuple[str, str] | None:
+    """
+    Разбирает строку ключа Яндекс Маркета.
+    Поддерживаемые форматы:
+      - 'yandex:217055223:ACMA:...'
+      - '217055223:ACMA:...'
+      - 'yandex:ACMA:...' (business_id берётся из YANDEX_BUSINESS_ID в .env)
+      - 'ACMA:...'        (business_id берётся из YANDEX_BUSINESS_ID в .env)
+    Возвращает (business_id, api_token) или None, если это не ключ Яндекса.
+    """
+    s = raw_key.strip()
+    if s.lower().startswith("yandex:"):
+        s = s[7:].strip()
+
+    default_biz_id = os.getenv("YANDEX_BUSINESS_ID", "217055223").strip()
+
+    # Вариант 1: сразу начинается с ACMA: или y0_
+    if s.startswith(("ACMA:", "y0_")):
+        if not default_biz_id:
+            raise ValueError(
+                "Укажите ID кабинета перед ключом через двоеточие: 'businessId:ACMA:...'"
+            )
+        return default_biz_id, s
+
+    # Вариант 2: '<business_id>:<token>' (где token может быть 'ACMA:...:...')
+    if ":" in s:
+        first, rest = s.split(":", 1)
+        if first.strip().isdigit() and (rest.startswith(("ACMA:", "y0_")) or len(rest) > 15):
+            return first.strip(), rest.strip()
+
+    return None
 
 
 # ==================== ПРЕДПРОСМОТР ФАЙЛА ====================
@@ -121,9 +156,11 @@ async def import_products(
         "mock_wb_key",
         "mock_ozon_key",
         "mock_yandex_key",
-    ) or auth_key.lower().endswith((":test:test", ":mock_wb_key", ":mock_ozon_key", ":mock_yandex_key"))
+    ) or auth_key.lower().endswith(
+        (":test:test", ":mock_wb_key", ":mock_ozon_key", ":mock_yandex_key")
+    )
 
-    # ---------- Мок-импорт (для демо и тестов) ----------
+    # ---------- 1. Мок-импорт (для демо и тестов) ----------
     if is_mock:
         if "yandex" in auth_key.lower():
             platform = "yandex"
@@ -203,11 +240,13 @@ async def import_products(
             "is_mock": True,
         }
 
-    # ---------- YML-фид (Яндекс Маркет) ----------
+    # ---------- 2. YML-фид (Яндекс Маркет по ссылке) ----------
     if auth_key.startswith(("http://", "https://")):
         try:
             yml_result = YmlParser().fetch_and_parse(auth_key)
-            yml_products = yml_result.get("offers", []) if isinstance(yml_result, dict) else yml_result
+            yml_products = (
+                yml_result.get("offers", []) if isinstance(yml_result, dict) else yml_result
+            )
         except Exception as e:
             logger.error(f"Ошибка парсинга YML: {e}")
             duration_ms = int((time.perf_counter() - t0) * 1000)
@@ -297,14 +336,99 @@ async def import_products(
             "is_mock": False,
         }
 
-    # ---------- Реальные API площадок: пока не реализовано ----------
+    # ---------- 3. Реальный API Яндекс Маркета (ACMA:... / businessId:ACMA:...) ----------
+    try:
+        ym_creds = _parse_yandex_api_credentials(auth_key)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if ym_creds:
+        business_id, api_token = ym_creds
+        try:
+            connector = YandexSellerConnector(business_id=business_id, api_token=api_token)
+            ym_offers = await connector.get_products(limit=200)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"Ошибка импорта через API Яндекс Маркета: {e}")
+            raise HTTPException(status_code=502, detail=f"Ошибка API Яндекс Маркета: {e}")
+
+        if not ym_offers:
+            raise HTTPException(
+                status_code=400,
+                detail=f"В кабинете Яндекс Маркета (businessId={business_id}) не найдено товаров",
+            )
+
+        imported_count = 0
+        for p_data in ym_offers:
+            photos = p_data.get("photos") or []
+            product_obj = ProductCreate(
+                name=p_data.get("name", "Без названия"),
+                source="Яндекс Маркет (API)",
+                price=float(p_data.get("price") or 0),
+                status="pending",
+                description=p_data.get("description", ""),
+                photos=photos,
+                photos_count=len(photos),
+                category=p_data.get("category", "Не указана"),
+                sku=p_data.get("sku"),
+                external_id=p_data.get("external_id"),
+                brand=p_data.get("brand"),
+                barcode=p_data.get("barcode"),
+                package_weight_grams=p_data.get("package_weight_grams"),
+                package_length_mm=p_data.get("package_length_mm"),
+                package_width_mm=p_data.get("package_width_mm"),
+                package_height_mm=p_data.get("package_height_mm"),
+                okpd_code=p_data.get("okpd_code"),
+                user_id=current_user.id,
+            )
+            repo.add(product_obj)
+            imported_count += 1
+
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+        op_log.log_file_operation(
+            user_id=current_user.id,
+            operation="import_api",
+            platform="yandex",
+            filename=f"businessId:{business_id}",
+            mode=None,
+            status="success",
+            total_rows=imported_count,
+            imported=imported_count,
+            updated=0,
+            failed=0,
+            errors=[],
+        )
+        stats_repo.record(
+            user_id=current_user.id,
+            operation="import_api",
+            platform="yandex",
+            status="success",
+            total_items=imported_count,
+            success_items=imported_count,
+            failed_items=0,
+            duration_ms=duration_ms,
+        )
+
+        return {
+            "success": True,
+            "imported": imported_count,
+            "updated": 0,
+            "platform_name": "Яндекс Маркет",
+            "is_mock": False,
+        }
+
+    # ---------- 4. Остальные API площадок ----------
     return {
         "success": False,
         "imported": 0,
         "updated": 0,
         "platform_name": "Неизвестно",
         "is_mock": False,
-        "detail": "Реальный API импорт пока в разработке. Используйте 'test:test' или YML-ссылку.",
+        "detail": (
+            "Для Яндекс Маркета укажите ключ в формате '217055223:ACMA:...' или YML-ссылку. "
+            "Для демо-режима используйте 'test:test'."
+        ),
     }
 
 
@@ -321,7 +445,7 @@ async def import_from_file(
     """
     Импорт товаров из Excel (.xlsx) или CSV.
     mode=upsert — обновляет существующие карточки по external_id/sku вместо дублей.
-    Варианты (SKU) из файла сохраняются в product_variants.
+    Варианты (SKU) и характеристики (attributes) из файла сохраняются в связанные таблицы.
     """
     t0 = time.perf_counter()
 
@@ -416,7 +540,6 @@ async def import_from_file(
             brand=p_data.get("brand"),
             photos=p_data.get("photos", []),
             sku_count=p_data.get("sku_count", 1),
-            # ✅ ИСПРАВЛЕНО: сохраняем распарсенные логистические поля
             barcode=p_data.get("barcode") or None,
             weight_grams=p_data.get("weight_grams"),
             package_weight_grams=p_data.get("package_weight_grams"),
@@ -428,6 +551,7 @@ async def import_from_file(
             units_per_item=p_data.get("units_per_item", 1),
         )
         variants = p_data.get("variants") or []
+        attributes = p_data.get("attributes") or []
 
         existing = None
         if mode == "upsert":
@@ -442,12 +566,17 @@ async def import_from_file(
             repo.update(existing["id"], payload_dict, user_id=current_user.id)
             if variants:
                 variant_repo.set_variants(existing["id"], variants)
+            if attributes:
+                attr_repo.set_attributes(existing["id"], attributes)
             updated += 1
         else:
             product_obj = ProductCreate(user_id=current_user.id, **payload_dict)
             created = repo.add(product_obj)
-            if created and variants:
-                variant_repo.set_variants(created["id"], variants)
+            if created:
+                if variants:
+                    variant_repo.set_variants(created["id"], variants)
+                if attributes:
+                    attr_repo.set_attributes(created["id"], attributes)
             imported += 1
 
     logger.info(
