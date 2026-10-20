@@ -1,38 +1,55 @@
 """
 Роутер экспорта: выгрузка файлов для ЛК площадок, предпросмотр, валидация, шаблоны.
 
-✅ v6:
+✅ v8 (AsyncSession + asyncpg + Celery Queue `xlsx_export`):
+  - Все обращения к БД переведены на неблокирующий AsyncSession (get_async_db).
+  - Связанные коллекции (Product.attributes, Product.variants) загружаются
+    одним циклом через selectinload() без ошибок MissingGreenlet.
+  - Вынос тяжёлой генерации openpyxl в выделенную очередь Celery `xlsx_export`
+    (прозрачный offload в GET /export/xlsx/{platform} + task-эндпоинты).
   - Поддержка параметра platform в эндпоинтах загрузки/скачивания/удаления эталонов
-    (теперь можно загружать оригинальные шаблоны Яндекс Маркета, WB и Ozon).
+    (Яндекс Маркет, Ozon, Wildberries, Магнит).
   - Поддержка фильтрации по списку product_ids во всех эндпоинтах экспорта.
 """
 
+import asyncio
 import io
 import logging
+import os
 import re as _re
 import time
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from celery_app import celery_app
 from core.auth import get_current_user
 from core.platforms import Platform
 from core.rate_limit import limiter
 from database.models import PlatformCategorySpec, Product, User
-from database.repository import op_log, repo, stats_repo
-from database.session import SessionLocal
+from database.repository import op_log, stats_repo
+from database.session import get_async_db
 from services import template_filler
 from services.export_builder import build_rows, build_upload_file
 from services.export_validator import has_errors, validate_product, validate_products
 from services.xlsx_generator import generate_export
+from tasks import generate_xlsx_export_task, get_progress
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Export"])
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+# Порог количества товаров, начиная с которого сборка XLSX автоматически уходит в очередь xlsx_export
+CELERY_XLSX_THRESHOLD = int(os.getenv("CELERY_XLSX_THRESHOLD", "30"))
+CELERY_XLSX_TIMEOUT_SEC = int(os.getenv("CELERY_XLSX_TIMEOUT_SEC", "180"))
 
 
 def _safe_disposition(filename: str) -> str:
@@ -55,40 +72,159 @@ def _parse_product_ids(product_id: int | None, product_ids: str | None) -> list[
     return ids
 
 
-def _normalize_category_name(name: str, platform: str = "ozon") -> str:
+async def _normalize_category_name(
+    db: AsyncSession, name: str, platform: str = "ozon"
+) -> str:
     raw = (name or "").strip()
     if not raw or raw.lower() in ("универсальный", "общий", "все категории", "default", "all"):
         return "Универсальный (все категории)"
     parts = [p.strip() for p in _re.split(r"[>/\\]", raw) if p.strip()]
     candidate = " / ".join(parts[-2:]) if len(parts) >= 2 else raw
 
-    db = SessionLocal()
-    try:
-        row = (
-            db.query(PlatformCategorySpec)
-            .filter(
-                PlatformCategorySpec.platform == platform,
-                PlatformCategorySpec.category_name == candidate,
-            )
-            .first()
+    stmt = select(PlatformCategorySpec).where(
+        PlatformCategorySpec.platform == platform,
+        PlatformCategorySpec.category_name == candidate,
+    )
+    res = await db.execute(stmt)
+    row = res.scalars().first()
+    return row.category_name if row else candidate
+
+
+def _product_to_dict(p: Product) -> dict:
+    """Преобразует ORM-модель Product (с предзагруженными attributes и variants) в словарь."""
+    return {
+        "id": p.id,
+        "user_id": getattr(p, "user_id", None),
+        "name": p.name,
+        "sku": p.sku,
+        "external_id": p.external_id,
+        "price": p.price,
+        "source": getattr(p, "source", ""),
+        "status": getattr(p, "status", ""),
+        "error_message": getattr(p, "error_message", None),
+        "brand": p.brand,
+        "description": p.description,
+        "category": p.category,
+        "mapped_category": p.mapped_category,
+        "barcode": p.barcode,
+        "vat_rate": p.vat_rate,
+        "weight_grams": p.weight_grams,
+        "package_weight_grams": p.package_weight_grams,
+        "package_width_mm": p.package_width_mm,
+        "package_height_mm": p.package_height_mm,
+        "package_length_mm": p.package_length_mm,
+        "okpd_code": p.okpd_code,
+        "units_per_item": getattr(p, "units_per_item", 1),
+        "stock": getattr(p, "stock", 0),
+        "photos": p.photos or [],
+        "attributes": [
+            {"name": a.name, "value": a.value} for a in (p.attributes or [])
+        ],
+        "variants": [
+            {"sku": v.sku, "size": v.size, "color": v.color, "price": v.price}
+            for v in (p.variants or [])
+        ],
+    }
+
+
+async def _get_products_for_export_async(
+    db: AsyncSession,
+    current_user: User,
+    status: str,
+    selected_ids: list[int] | None = None,
+    limit: int = 10000,
+) -> list[dict]:
+    """Асинхронная выборка товаров для экспорта с неблокирующей подгрузкой атрибутов и вариаций."""
+    is_admin = getattr(current_user, "role", "") == "admin"
+    stmt = (
+        select(Product)
+        .options(
+            selectinload(Product.attributes),
+            selectinload(Product.variants),
         )
-        return row.category_name if row else candidate
-    finally:
-        db.close()
+        .order_by(Product.id.desc())
+        .limit(limit)
+    )
+    if not is_admin:
+        stmt = stmt.where(Product.user_id == current_user.id)
 
-
-def _get_products_for_export(
-    current_user: User, status: str, selected_ids: list[int] | None = None
-) -> list:
-    is_admin = current_user.role == "admin"
-    result = repo.get_all(user_id=current_user.id, is_admin=is_admin, limit=10000)
-    products = result["products"]
     if selected_ids:
-        wanted = set(selected_ids)
-        return [p for p in products if p["id"] in wanted]
-    if status != "all":
-        products = [p for p in products if p["status"] == status]
-    return products
+        stmt = stmt.where(Product.id.in_(selected_ids))
+    elif status and status != "all":
+        stmt = stmt.where(Product.status == status)
+
+    res = await db.execute(stmt)
+    products = res.scalars().all()
+    return [_product_to_dict(p) for p in products]
+
+
+async def _load_specs_by_category_async(
+    db: AsyncSession, product_dicts: list[dict], platform: str
+) -> dict[str, dict | None]:
+    categories = {
+        (p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts
+    }
+    spec_stmt = select(PlatformCategorySpec).where(
+        PlatformCategorySpec.platform == platform,
+        PlatformCategorySpec.category_name.in_(categories),
+    )
+    spec_res = await db.execute(spec_stmt)
+    specs = spec_res.scalars().all()
+    specs_by_name = {s.category_name: s.spec for s in specs}
+    return {cat: specs_by_name.get(cat) for cat in categories}
+
+
+async def _run_xlsx_via_celery_or_thread(
+    product_dicts: list[dict],
+    specs_by_category: dict,
+    platform: str,
+    user_id: int,
+    force_celery: bool = False,
+) -> tuple[bytes, str]:
+    """
+    Выполняет генерацию XLSX:
+      - Если товаров >= CELERY_XLSX_THRESHOLD (или force_celery=True), отправляет задачу
+        в изолированную очередь `xlsx_export` и неблокирующе ждёт файл.
+      - Для малых партий (или при недоступности воркера) выполняет генерацию в отдельном
+        потоке через asyncio.to_thread, не блокируя event loop FastAPI.
+    """
+    use_celery = force_celery or len(product_dicts) >= CELERY_XLSX_THRESHOLD
+
+    if use_celery:
+        try:
+            async_res = generate_xlsx_export_task.apply_async(
+                args=[product_dicts, specs_by_category, platform, user_id],
+                queue="xlsx_export",
+            )
+            deadline = time.monotonic() + CELERY_XLSX_TIMEOUT_SEC
+            while time.monotonic() < deadline:
+                if async_res.ready():
+                    if async_res.successful():
+                        res_data = async_res.result or {}
+                        file_path = res_data.get("file_path")
+                        filename = res_data.get("filename") or f"{platform}_export.xlsx"
+                        if file_path and Path(file_path).is_file():
+                            data = await asyncio.to_thread(Path(file_path).read_bytes)
+                            try:
+                                await asyncio.to_thread(Path(file_path).unlink, True)
+                            except Exception:
+                                pass
+                            return data, filename
+                    break
+                await asyncio.sleep(0.25)
+            logger.warning(
+                f"⚠️ Celery xlsx_export не ответил вовремя для task={async_res.id}, "
+                f"переключаюсь на резервную сборку в asyncio.to_thread"
+            )
+        except Exception as e:
+            logger.warning(
+                f"⚠️ Не удалось отправить задачу в очередь xlsx_export ({e}), "
+                f"выполняю через asyncio.to_thread"
+            )
+
+    return await asyncio.to_thread(
+        generate_export, product_dicts, specs_by_category, platform
+    )
 
 
 # ==================== ЭТАЛОННЫЕ ШАБЛОНЫ (Мультиплатформенные) ====================
@@ -101,10 +237,11 @@ async def upload_official_template(
     platform: str = Form("ozon"),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Приём эталонного XLSX-шаблона для любой площадки (Ozon, Яндекс Маркет, WB, Магнит)."""
     pl = (platform or "ozon").lower().strip()
-    cat = _normalize_category_name(category_name, pl)
+    cat = await _normalize_category_name(db, category_name, pl)
 
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Нужен файл .xlsx — шаблон из кабинета площадки")
@@ -131,23 +268,27 @@ async def upload_official_template(
 
 
 @router.get("/export/ozon-template/list")
-def list_official_templates(platform: str = Query("ozon"), current_user: User = Depends(get_current_user)):
+async def list_official_templates(
+    platform: str = Query("ozon"),
+    current_user: User = Depends(get_current_user),
+):
     return {"templates": template_filler.list_template_names(platform=platform)}
 
 
 @router.get("/export/ozon-template/meta")
-def list_official_templates_meta(current_user: User = Depends(get_current_user)):
+async def list_official_templates_meta(current_user: User = Depends(get_current_user)):
     return {"templates": template_filler.list_official_templates()}
 
 
 @router.get("/export/ozon-template/status")
-def ozon_template_status(
+async def ozon_template_status(
     category_name: str = "Универсальный (все категории)",
     platform: str = Query("ozon"),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
     pl = (platform or "ozon").lower().strip()
-    cat = _normalize_category_name(category_name, pl)
+    cat = await _normalize_category_name(db, category_name, pl)
     meta = template_filler.get_template_meta(cat, platform=pl)
     return {
         "platform": pl,
@@ -158,13 +299,14 @@ def ozon_template_status(
 
 
 @router.get("/export/ozon-template/download")
-def download_official_template(
+async def download_official_template(
     category_name: str = "Универсальный (все категории)",
     platform: str = Query("ozon"),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
     pl = (platform or "ozon").lower().strip()
-    cat = _normalize_category_name(category_name, pl)
+    cat = await _normalize_category_name(db, category_name, pl)
     data = template_filler.read_template_bytes(cat, platform=pl)
     if not data:
         raise HTTPException(status_code=404, detail=f"Эталон для «{cat}» [{pl}] не найден")
@@ -177,13 +319,14 @@ def download_official_template(
 
 
 @router.delete("/export/ozon-template")
-def delete_official_template(
+async def delete_official_template(
     category_name: str = "Универсальный (все категории)",
     platform: str = Query("ozon"),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
     pl = (platform or "ozon").lower().strip()
-    cat = _normalize_category_name(category_name, pl)
+    cat = await _normalize_category_name(db, category_name, pl)
     deleted = template_filler.delete_official_template(cat, platform=pl)
     if not deleted:
         raise HTTPException(status_code=404, detail="Эталон не найден")
@@ -196,19 +339,20 @@ def delete_official_template(
 
 @limiter.limit("30/minute")
 @router.get("/export/preview/{platform}")
-def export_preview(
+async def export_preview(
     request: Request,
     platform: str,
     status: str = "success",
     product_id: int = Query(None),
     product_ids: str = Query(None),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
     if platform not in Platform.all_values():
         raise HTTPException(status_code=404, detail=f"Платформа '{platform}' не найдена")
 
     ids = _parse_product_ids(product_id, product_ids)
-    products = _get_products_for_export(current_user, status, selected_ids=ids)
+    products = await _get_products_for_export_async(db, current_user, status, selected_ids=ids)
     if not products:
         return {
             "success": True,
@@ -235,7 +379,7 @@ def export_preview(
 
 @limiter.limit("10/minute")
 @router.get("/export/template/{platform}")
-def export_template(
+async def export_template(
     request: Request,
     platform: str,
     current_user: User = Depends(get_current_user),
@@ -291,19 +435,20 @@ def export_template(
 
 @limiter.limit("10/minute;100/day")
 @router.get("/export/platform/{platform}")
-def export_for_platform(
+async def export_for_platform(
     request: Request,
     platform: str,
     status: str = "success",
     product_id: int = Query(None),
     product_ids: str = Query(None),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
     if platform not in Platform.all_values():
         raise HTTPException(status_code=404, detail=f"Платформа '{platform}' не найдена")
 
     ids = _parse_product_ids(product_id, product_ids)
-    products = _get_products_for_export(current_user, status, selected_ids=ids)
+    products = await _get_products_for_export_async(db, current_user, status, selected_ids=ids)
 
     valid_products, skipped = [], []
     for p in products:
@@ -320,7 +465,7 @@ def export_for_platform(
         )
 
     try:
-        output = build_upload_file(valid_products, platform)
+        output = await asyncio.to_thread(build_upload_file, valid_products, platform)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -349,77 +494,56 @@ def export_for_platform(
 
 
 @router.get("/export/validate/{platform}")
-def validate_export(
+async def validate_export(
     platform: str,
     status: str = "all",
     product_id: int = Query(None),
     product_ids: str = Query(None),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
     ids = _parse_product_ids(product_id, product_ids)
-    db = SessionLocal()
-    try:
-        query = db.query(Product).filter(Product.user_id == current_user.id)
-        if ids:
-            query = query.filter(Product.id.in_(ids))
-        elif status and status != "all":
-            query = query.filter(Product.status == status)
-        products = query.all()
 
-        if not products:
-            return {"total": 0, "errors": 0, "warnings": 0, "issues": [], "missing_specs": []}
-
-        product_dicts = []
-        for p in products:
-            product_dicts.append(
-                {
-                    "id": p.id,
-                    "name": p.name,
-                    "sku": p.sku,
-                    "external_id": p.external_id,
-                    "price": p.price,
-                    "brand": p.brand,
-                    "description": p.description,
-                    "category": p.category,
-                    "mapped_category": p.mapped_category,
-                    "barcode": p.barcode,
-                    "vat_rate": p.vat_rate,
-                    "weight_grams": p.weight_grams,
-                    "package_weight_grams": p.package_weight_grams,
-                    "package_width_mm": p.package_width_mm,
-                    "package_height_mm": p.package_height_mm,
-                    "package_length_mm": p.package_length_mm,
-                    "okpd_code": p.okpd_code,
-                    "photos": p.photos or [],
-                    "attributes": [
-                        {"name": a.name, "value": a.value} for a in (p.attributes or [])
-                    ],
-                }
-            )
-
-        categories = {
-            (p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts
-        }
-        specs = (
-            db.query(PlatformCategorySpec)
-            .filter(
-                PlatformCategorySpec.platform == platform,
-                PlatformCategorySpec.category_name.in_(categories),
-            )
-            .all()
+    stmt = (
+        select(Product)
+        .options(
+            selectinload(Product.attributes),
+            selectinload(Product.variants),
         )
-        specs_by_name = {s.category_name: s.spec for s in specs}
+        .where(Product.user_id == current_user.id)
+    )
+    if ids:
+        stmt = stmt.where(Product.id.in_(ids))
+    elif status and status != "all":
+        stmt = stmt.where(Product.status == status)
 
-        missing_specs = sorted(cat for cat in categories if cat not in specs_by_name)
-        specs_by_category = {cat: specs_by_name.get(cat) for cat in categories}
+    res = await db.execute(stmt)
+    products = res.scalars().all()
 
-        from services.spec_validator import validate_products_by_specs
+    if not products:
+        return {"total": 0, "errors": 0, "warnings": 0, "issues": [], "missing_specs": []}
 
-        result = validate_products_by_specs(product_dicts, specs_by_category, platform)
-        result["missing_specs"] = missing_specs
-        return result
-    finally:
-        db.close()
+    product_dicts = [_product_to_dict(p) for p in products]
+
+    categories = {
+        (p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts
+    }
+    spec_stmt = select(PlatformCategorySpec).where(
+        PlatformCategorySpec.platform == platform,
+        PlatformCategorySpec.category_name.in_(categories),
+    )
+    spec_res = await db.execute(spec_stmt)
+    specs = spec_res.scalars().all()
+    specs_by_name = {s.category_name: s.spec for s in specs}
+
+    missing_specs = sorted(cat for cat in categories if cat not in specs_by_name)
+    specs_by_category = {cat: specs_by_name.get(cat) for cat in categories}
+
+    from services.spec_validator import validate_products_by_specs
+
+    result = validate_products_by_specs(product_dicts, specs_by_category, platform)
+    result["missing_specs"] = missing_specs
+    return result
 
 
 # ==================== ОТЧЁТ ПО ВСЕМ ТОВАРАМ ====================
@@ -427,13 +551,14 @@ def validate_export(
 
 @limiter.limit("5/minute;50/day")
 @router.get("/export/report")
-def export_migration_report(
+async def export_migration_report(
     request: Request,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
-    is_admin = current_user.role == "admin"
-    result = repo.get_all(user_id=current_user.id, is_admin=is_admin, limit=10000)
-    products = result["products"]
+    products = await _get_products_for_export_async(
+        db, current_user, status="all", selected_ids=None, limit=10000
+    )
 
     data = []
     for p in products:
@@ -442,11 +567,11 @@ def export_migration_report(
                 "ID": p["id"],
                 "Название товара": p["name"],
                 "Артикул (SKU)": p.get("sku") or f"SKU-{p['id']}",
-                "Источник": p["source"],
+                "Источник": p.get("source") or "",
                 "Цена (₽)": p["price"],
                 "Категория (источник)": p.get("category") or "Не указана",
                 "Категория (назначение)": p.get("mapped_category") or "Не маппировалось",
-                "Статус": p["status"],
+                "Статус": p.get("status") or "",
                 "Ошибка": p.get("error_message") or "",
                 "Дата выгрузки": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
@@ -485,112 +610,170 @@ def export_migration_report(
     )
 
 
-# ==================== XLSX v2 (Экспорт по шаблону эталона) ====================
+# ==================== XLSX v2 (Экспорт по шаблону эталона + очередь Celery) ====================
 
 
 @limiter.limit("30/minute")
 @router.get("/export/xlsx/{platform}")
-def export_xlsx_v2(
+async def export_xlsx_v2(
     request: Request,
     platform: str,
     status: str = "success",
     product_id: int = Query(None),
     product_ids: str = Query(None),
+    use_celery: bool = Query(False, description="Принудительно собрать файл в очереди xlsx_export"),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     XLSX v2: выгрузка по эталонному шаблону площадки (Ozon, Яндекс Маркет, WB, Магнит).
-    Если загружен эталон — заполняется оригинальный файл площадки (1:1).
+    Тяжёлые выгрузки автоматически изолируются в очереди Celery `xlsx_export`.
     """
     if not status or status not in ("success", "pending", "processing", "error", "all"):
         status = "success"
 
     ids = _parse_product_ids(product_id, product_ids)
 
-    db = SessionLocal()
-    try:
-        query = db.query(Product).filter(Product.user_id == current_user.id)
-        if ids:
-            query = query.filter(Product.id.in_(ids))
-            logger.info(f"📥 Экспорт выбранных товаров: ids={ids}, platform={platform}")
-        elif status != "all":
-            query = query.filter(Product.status == status)
-        products = query.all()
-
-        if not products:
-            detail = (
-                f"Выбранные товары ({ids}) не найдены"
-                if ids
-                else f"Нет товаров со статусом '{status}'. Импортируйте товары и выполните миграцию."
-            )
-            raise HTTPException(status_code=400, detail=detail)
-
-        product_dicts = []
-        for p in products:
-            product_dicts.append(
-                {
-                    "id": p.id,
-                    "name": p.name,
-                    "sku": p.sku,
-                    "external_id": p.external_id,
-                    "price": p.price,
-                    "brand": p.brand,
-                    "description": p.description,
-                    "category": p.category,
-                    "mapped_category": p.mapped_category,
-                    "barcode": p.barcode,
-                    "vat_rate": p.vat_rate,
-                    "weight_grams": p.weight_grams,
-                    "package_weight_grams": p.package_weight_grams,
-                    "package_width_mm": p.package_width_mm,
-                    "package_height_mm": p.package_height_mm,
-                    "package_length_mm": p.package_length_mm,
-                    "okpd_code": p.okpd_code,
-                    "units_per_item": p.units_per_item,
-                    "photos": p.photos or [],
-                    "attributes": [
-                        {"name": a.name, "value": a.value} for a in (p.attributes or [])
-                    ],
-                    "variants": [
-                        {"sku": v.sku, "size": v.size, "color": v.color, "price": v.price}
-                        for v in (p.variants or [])
-                    ],
-                }
-            )
-
-        categories = {
-            (p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts
-        }
-        specs = (
-            db.query(PlatformCategorySpec)
-            .filter(
-                PlatformCategorySpec.platform == platform,
-                PlatformCategorySpec.category_name.in_(categories),
-            )
-            .all()
+    stmt = (
+        select(Product)
+        .options(
+            selectinload(Product.attributes),
+            selectinload(Product.variants),
         )
-        specs_by_name = {s.category_name: s.spec for s in specs}
-        specs_by_category = {cat: specs_by_name.get(cat) for cat in categories}
+        .where(Product.user_id == current_user.id)
+    )
+    if ids:
+        stmt = stmt.where(Product.id.in_(ids))
+        logger.info(f"📥 Экспорт выбранных товаров: ids={ids}, platform={platform}")
+    elif status != "all":
+        stmt = stmt.where(Product.status == status)
 
-        data, filename = generate_export(product_dicts, specs_by_category, platform)
+    res = await db.execute(stmt)
+    products = res.scalars().all()
 
-        t0 = time.perf_counter()
-        stats_repo.record(
-            user_id=current_user.id,
-            operation="export",
-            platform=platform,
-            status="success",
-            total_items=len(product_dicts),
-            success_items=len(product_dicts),
-            failed_items=0,
-            duration_ms=int((time.perf_counter() - t0) * 1000),
+    if not products:
+        detail = (
+            f"Выбранные товары ({ids}) не найдены"
+            if ids
+            else f"Нет товаров со статусом '{status}'. Импортируйте товары и выполните миграцию."
         )
+        raise HTTPException(status_code=400, detail=detail)
 
-        media = "application/zip" if filename.endswith(".zip") else XLSX_MIME
-        return Response(
-            content=data,
-            media_type=media,
-            headers={"Content-Disposition": _safe_disposition(filename)},
+    product_dicts = [_product_to_dict(p) for p in products]
+    specs_by_category = await _load_specs_by_category_async(db, product_dicts, platform)
+
+    t0 = time.perf_counter()
+    data, filename = await _run_xlsx_via_celery_or_thread(
+        product_dicts=product_dicts,
+        specs_by_category=specs_by_category,
+        platform=platform,
+        user_id=current_user.id,
+        force_celery=use_celery,
+    )
+
+    stats_repo.record(
+        user_id=current_user.id,
+        operation="export",
+        platform=platform,
+        status="success",
+        total_items=len(product_dicts),
+        success_items=len(product_dicts),
+        failed_items=0,
+        duration_ms=int((time.perf_counter() - t0) * 1000),
+    )
+
+    media = "application/zip" if filename.endswith(".zip") else XLSX_MIME
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": _safe_disposition(filename)},
+    )
+
+
+@limiter.limit("30/minute")
+@router.post("/export/xlsx/{platform}/async")
+async def start_async_xlsx_export(
+    request: Request,
+    platform: str,
+    status: str = "success",
+    product_id: int = Query(None),
+    product_ids: str = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Постановка генерации тяжёлого XLSX/ZIP файла в выделенную очередь Celery `xlsx_export`.
+    Возвращает task_id для отслеживания прогресса и скачивания через /export/tasks/{task_id}/download.
+    """
+    if not status or status not in ("success", "pending", "processing", "error", "all"):
+        status = "success"
+
+    ids = _parse_product_ids(product_id, product_ids)
+    stmt = (
+        select(Product)
+        .options(
+            selectinload(Product.attributes),
+            selectinload(Product.variants),
         )
-    finally:
-        db.close()
+        .where(Product.user_id == current_user.id)
+    )
+    if ids:
+        stmt = stmt.where(Product.id.in_(ids))
+    elif status != "all":
+        stmt = stmt.where(Product.status == status)
+
+    res = await db.execute(stmt)
+    products = res.scalars().all()
+    if not products:
+        raise HTTPException(status_code=400, detail="Нет товаров для выгрузки")
+
+    product_dicts = [_product_to_dict(p) for p in products]
+    specs_by_category = await _load_specs_by_category_async(db, product_dicts, platform)
+
+    task = generate_xlsx_export_task.apply_async(
+        args=[product_dicts, specs_by_category, platform, current_user.id],
+        queue="xlsx_export",
+    )
+    return {
+        "task_id": task.id,
+        "status": "pending",
+        "total": len(product_dicts),
+        "queue": "xlsx_export",
+    }
+
+
+@router.get("/export/tasks/{task_id}")
+async def get_export_task_status(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Статус фоновой задачи генерации XLSX."""
+    return get_progress(task_id)
+
+
+@router.get("/export/tasks/{task_id}/download")
+async def download_export_task_file(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Скачивание готового XLSX/ZIP файла, сгенерированного воркером очереди xlsx_export."""
+    res = celery_app.AsyncResult(task_id)
+    if not res.ready():
+        raise HTTPException(status_code=409, detail="Файл ещё формируется")
+    if not res.successful():
+        raise HTTPException(status_code=500, detail="Ошибка при генерации файла в воркере")
+
+    info = res.result or {}
+    file_path = info.get("file_path")
+    filename = info.get("filename") or "export.xlsx"
+
+    if not file_path or not Path(file_path).is_file():
+        raise HTTPException(status_code=404, detail="Сгенерированный файл не найден или уже скачан")
+
+    media = "application/zip" if filename.endswith(".zip") else XLSX_MIME
+    return FileResponse(
+        path=file_path,
+        media_type=media,
+        filename=filename,
+        headers={"Content-Disposition": _safe_disposition(filename)},
+    )

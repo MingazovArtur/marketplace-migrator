@@ -1,5 +1,6 @@
 """
 Модуль аутентификации: хэширование паролей (bcrypt) и JWT токены
+✅ v2: get_current_user переведён на неблокирующий AsyncSession + asyncpg
 """
 
 from datetime import datetime, timedelta
@@ -8,10 +9,12 @@ import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY
 from database.models import User
-from database.session import SessionLocal
+from database.session import get_async_db
 
 security = HTTPBearer()
 
@@ -60,6 +63,7 @@ def decode_token(token: str) -> dict | None:
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_async_db),
 ) -> User:
     token = credentials.credentials
     payload = decode_token(token)
@@ -86,18 +90,17 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Пользователь не найден",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return user
-    finally:
-        db.close()
+    stmt = select(User).where(User.id == user_id)
+    res = await db.execute(stmt)
+    user = res.scalars().first()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Пользователь не найден",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
 
 
 async def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:

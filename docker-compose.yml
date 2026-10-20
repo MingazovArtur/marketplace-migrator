@@ -32,6 +32,7 @@ services:
 
   backend:
     build: ./backend
+    image: marketplace_backend:latest
     container_name: marketplace_backend
     ports:
       - "8000:8000"
@@ -44,6 +45,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
@@ -52,9 +54,10 @@ services:
     restart: unless-stopped
 
   celery_worker:
-    build: ./backend
+    image: marketplace_backend:latest
+    pull_policy: never
     container_name: marketplace_celery
-    command: celery -A celery_app worker --loglevel=info --pool=solo
+    command: celery -A celery_app worker --loglevel=info --pool=solo -Q default
     volumes:
       - ./backend:/app
       - media:/app/media
@@ -63,7 +66,33 @@ services:
       - .env
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
+      backend:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery_xlsx_worker:
+    image: marketplace_backend:latest
+    pull_policy: never
+    container_name: marketplace_celery_xlsx
+    command: celery -A celery_app worker --loglevel=info --pool=solo --max-tasks-per-child=20 -Q xlsx_export -n xlsx_worker@%h
+    volumes:
+      - ./backend:/app
+      - media:/app/media
+      - ozon_templates:/app/templates/ozon
+    env_file:
+      - .env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      backend:
+        condition: service_started
       db:
         condition: service_healthy
       redis:

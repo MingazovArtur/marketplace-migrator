@@ -38,6 +38,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
+    image: marketplace_backend_prod:latest
     restart: unless-stopped
     env_file:
       - .env
@@ -75,15 +76,16 @@ services:
     networks: [internal]
 
   celery:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
+    image: marketplace_backend_prod:latest
+    pull_policy: never
     restart: unless-stopped
     command: >
       celery -A celery_app worker 
       --loglevel=info 
       --concurrency=1 
       --prefetch-multiplier=1 
+      -Q default 
+      -n default_worker@%h
     env_file:
       - .env
     environment:
@@ -104,6 +106,40 @@ services:
     mem_limit: 2048m
     memswap_limit: 2560m
     cpus: 1.5
+    networks: [internal]
+
+  celery_xlsx:
+    image: marketplace_backend_prod:latest
+    pull_policy: never
+    restart: unless-stopped
+    command: >
+      celery -A celery_app worker 
+      --loglevel=info 
+      --concurrency=1 
+      --prefetch-multiplier=1 
+      --max-tasks-per-child=20 
+      -Q xlsx_export 
+      -n xlsx_worker@%h
+    env_file:
+      - .env
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      SECRET_KEY: ${SECRET_KEY:-${JWT_SECRET}}
+      OZON_CLIENT_ID: ${OZON_CLIENT_ID:-}
+      OZON_API_KEY: ${OZON_API_KEY:-}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-${REDIS_URL}}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-${REDIS_URL}}
+    volumes:
+      - media:/app/media
+      - ozon_templates:/app/templates/ozon
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 1536m
+    memswap_limit: 2048m
+    cpus: 1.0
     networks: [internal]
 
   nginx:

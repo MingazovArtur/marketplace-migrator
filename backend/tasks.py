@@ -1,20 +1,16 @@
 """
-Celery задачи для фоновой миграции товаров и загрузки спеков площадок.
+Celery задачи для фоновой миграции товаров, загрузки спеков площадок и тяжёлого XLSX-экспорта.
 
-✅ v4:
-  - Исправлен вызов cache_service.delete_pattern в refresh_specs_task.
-  - Убрана искусственная задержка time.sleep(0.3).
-  - Авто-заполнение 4 канонических атрибутов XLS-шаблона Ozon
-    (Бренд, Тип, Название модели, Нужен код маркировки) с поддержкой синонимов.
-  - Авто-копирование ТН ВЭД из карточки в атрибут спека.
-  - Защита от миграции с ценой 0 (Ozon отклонит карточку).
-  - Дозаполнение пустой логистики (НДС, ТН ВЭД, ОВХ, вес) из дефолтов
-    категории/глобальных — перед миграцией и авто-атрибутами.
+✅ v5:
+  - Добавлена изолированная задача generate_xlsx_export_task для очереди xlsx_export.
+  - Сохранены все существующие задачи (миграции, скачивание фото, загрузка спеков).
 """
 
 import logging
-import re as _re
+import os
 import time
+import re as _re
+from pathlib import Path
 
 from celery_app import celery_app
 from core.platforms import PLATFORM_CONFIG, PRICE_RULES
@@ -23,9 +19,13 @@ from services import cache_service, defaults_service
 from services.category_mapper import CategoryMapper
 from services.category_service import category_service
 from services.platform_utils import detect_platform
+from services.xlsx_generator import generate_export
 
 logger = logging.getLogger(__name__)
 category_mapper = CategoryMapper()
+
+EXPORTS_DIR = Path("/app/media/exports")
+EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +376,7 @@ def get_progress(task_id: str) -> dict:
                     "percent": 100,
                     "error_details": r.get("error_details", []),
                     "platform": r.get("platform"),
+                    "filename": r.get("filename"),
                 }
             return {
                 "status": "completed",
@@ -915,7 +916,6 @@ def refresh_specs_task(self, user_id: int, platform: str, raw_api_key: str, cate
         logger.info(
             f"✅ Спеки {platform} загружены: {fetched} категорий, {errors} ошибок за {duration_ms} мс"
         )
-        # ✅ ИСПРАВЛЕНО: вызов существующего метода delete_pattern
         cache_service.delete_pattern(f"specs:{platform}:*")
         cache_service.delete_pattern(f"categories:{platform}:*")
 
@@ -972,3 +972,50 @@ def refresh_specs_task(self, user_id: int, platform: str, raw_api_key: str, cate
             "message": str(e),
             "error_details": [{"error": str(e)}],
         }
+
+
+# ---------------------------------------------------------------------------
+# Тяжелый XLSX-экспорт в очереди xlsx_export
+# ---------------------------------------------------------------------------
+
+
+@celery_app.task(bind=True, name="tasks.generate_xlsx_export_task")
+def generate_xlsx_export_task(
+    self, products: list, specs_by_category: dict, platform: str, user_id: int
+):
+    """
+    Фоновая генерация тяжёлых XLSX/ZIP отчётов и шаблонов в выделенной очереди xlsx_export.
+    Изолирует openpyxl от основного веб-процесса FastAPI.
+    """
+    t0 = time.perf_counter()
+    total = len(products)
+    logger.info(f"📊 Старт фоновой генерации XLSX для платформы '{platform}' (товаров: {total}, user={user_id})")
+
+    self.update_state(
+        state="PROGRESS",
+        meta={"total": total, "done": 0, "percent": 0, "message": "Сборка структуры openpyxl..."},
+    )
+
+    try:
+        data, filename = generate_export(products, specs_by_category, platform)
+        
+        # Сохранение файла на общий том /app/media/exports
+        file_path = EXPORTS_DIR / f"{self.request.id}_{filename}"
+        with open(file_path, "wb") as f:
+            f.write(data)
+
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(f"✅ XLSX успешно сгенерирован в Celery: {filename} ({len(data)} байт, {duration_ms} мс)")
+
+        return {
+            "status": "completed",
+            "filename": filename,
+            "file_path": str(file_path),
+            "size": len(data),
+            "total": total,
+            "percent": 100,
+            "duration_ms": duration_ms,
+        }
+    except Exception as e:
+        logger.error(f"❌ Ошибка генерации XLSX в Celery: {e}", exc_info=True)
+        raise e
