@@ -1,6 +1,7 @@
 """
 Мультиплатформенное хранилище и заполнение ЭТАЛОННЫХ шаблонов площадок
-(Ozon, Яндекс Маркет, Wildberries, Магнит Маркет).
+(Ozon, Яндекс Маркет, Wildberries, Магнит Маркет, Мегамаркет, Poizon,
+Холодильник.ру, Страна.маркет, UDS).
 
 Пользователь скачивает официальный XLSX-шаблон в кабинете площадки и загружает
 его в разделе «Шаблоны». При выгрузке мы открываем этот файл как КАРКАС:
@@ -30,12 +31,13 @@ INDEX_PATH = TEMPLATES_DIR / "index.json"
 
 VAT_LABELS = {"none": "Не облагается", "22": "22", "10": "10", "7": "7", "5": "5"}
 
-BRAND_SYNONYMS = ["бренд", "брендводеждеиобуви", "брендодеждыиобуви", "производитель"]
+BRAND_SYNONYMS = ["бренд", "брендводеждеиобуви", "брендодеждыиобуви", "производитель", "brand"]
 MODEL_SYNONYMS = [
     "объединитьнаоднойкарточке",
     "названиемодели",
     "названиемоделидляобъединенияводнукарточку",
     "модель",
+    "model",
 ]
 MARKING_SYNONYMS = ["нуженкодмаркировки", "кодмаркировки", "маркировка"]
 
@@ -171,10 +173,19 @@ def _save_index(index: dict[str, dict]) -> None:
 
 def _find_data_sheet(wb):
     """Находит рабочий лист с товарами в книге любой площадки."""
-    for candidate in ("Список товаров", "Шаблон", "Товары", "Офферы", "Шаблон Поставщика"):
+    for candidate in (
+        "Список товаров",
+        "Шаблон",
+        "Товары",
+        "Офферы",
+        "Шаблон Поставщика",
+        "Products",
+        "Assortment",
+        "Каталог",
+    ):
         if candidate in wb.sheetnames:
             return wb[candidate]
-    skip_words = ("инструкция", "описание полей", "справочник", "видео", "документация", "правила")
+    skip_words = ("инструкция", "описание полей", "справочник", "видео", "документация", "правила", "readme", "help")
     for name in wb.sheetnames:
         if not any(w in name.lower() for w in skip_words):
             return wb[name]
@@ -182,9 +193,24 @@ def _find_data_sheet(wb):
 
 
 def _find_header_row(ws) -> int | None:
-    """Ищет строку заголовков (по колонкам «Артикул», «Ваш SKU», «Seller SKU ID», «Наименование»)."""
-    header_markers = {"артикул", "вашsku", "sellerskuid", "артикулпродавца", "наименование"}
-    for row in range(1, 10):
+    """Ищет строку заголовков (по колонкам «Артикул», «Ваш SKU», «Seller SKU», «Код товара продавца», «Наименование»)."""
+    header_markers = {
+        "артикул",
+        "вашsku",
+        "sellerskuid",
+        "sellersku",
+        "артикулпродавца",
+        "артикулsku",
+        "кодтоварапродавца",
+        "кодтоварапродавцаofferid",
+        "offerid",
+        "sku",
+        "наименование",
+        "наименованиетовара",
+        "названиетовара",
+        "producttitle",
+    }
+    for row in range(1, 12):
         for cell in ws[row]:
             if cell.value:
                 norm_val = _norm(str(cell.value).rstrip("*"))
@@ -211,10 +237,16 @@ def _detect_data_start_row(ws, header_row: int, platform: str) -> int:
     if "обязательное поле" in row_plus_1_text or "рекомендуем к заполнению" in row_plus_1_text:
         return header_row + 3
 
-    # Проверяем, является ли строка header_row + 1 длинной строкой подсказок (как в Яндексе)
+    # Проверяем, является ли строка header_row + 1 длинной строкой подсказок (как в Яндексе или Мегамаркете)
     if any(
         m in row_plus_1_text
-        for m in ("уникальный идентификатор", "значение поля выгружено", "заполняется автоматически")
+        for m in (
+            "уникальный идентификатор",
+            "значение поля выгружено",
+            "заполняется автоматически",
+            "обязательный параметр",
+            "необязательный параметр",
+        )
     ):
         return header_row + 2
 
@@ -244,8 +276,7 @@ def _resolve_template_meta(category_name: str | None, platform: str = "ozon") ->
       1. Точное совпадение (platform, category_name).
       2. Совпадение по конечному типу категории (например, «Одежда / Футболки» -> «Футболки»).
       3. Универсальный шаблон площадки («Универсальный», «Общий», «Все категории»).
-      4. Для Яндекс Маркета (или если у площадки загружен хотя бы один шаблон) —
-         первый доступный шаблон этой площадки!
+      4. Фолбэк: первый доступный шаблон этой площадки.
     """
     pl = (platform or "ozon").lower().strip()
     cat = (category_name or "").strip()
@@ -278,8 +309,7 @@ def _resolve_template_meta(category_name: str | None, platform: str = "ozon") ->
         if m["category_name"].strip().lower() in UNIVERSAL_NAMES:
             return m
 
-    # 4. Фолбэк: для Яндекс Маркета шаблон единый для всех категорий,
-    #    а для других площадок используем загруженный шаблон, если точный не найден
+    # 4. Фолбэк: используем первый загруженный шаблон этой площадки
     return platform_templates[0]
 
 
@@ -320,7 +350,6 @@ def list_template_names(platform: str | None = None) -> list[str]:
 
 
 def read_template_bytes(category_name: str, platform: str = "ozon") -> bytes | None:
-    # Сначала ищем точное совпадение для скачивания конкретного шаблона из списка
     idx = _load_index()
     exact = idx.get(_make_key(platform, category_name))
     if exact and (TEMPLATES_DIR / exact["file"]).exists():
@@ -370,7 +399,6 @@ def delete_official_template(category_name: str, platform: str = "ozon") -> bool
     key = _make_key(platform, category_name)
     meta = idx.pop(key, None)
     if not meta:
-        # Поиск без учёта регистра
         for k in list(idx.keys()):
             if k.lower() == key.lower():
                 meta = idx.pop(k)
@@ -394,14 +422,14 @@ def validate_template_bytes(data: bytes, platform: str = "ozon") -> str | None:
         if header_row is None:
             return (
                 "В файле не найдена строка заголовков (ожидается колонка «Артикул», "
-                "«Ваш SKU *» или «Наименование»)"
+                "«Ваш SKU *», «Код товара продавца», «Seller SKU» или «Наименование»)"
             )
         return None
     finally:
         wb.close()
 
 
-# ==================== Значения строки товара (Ozon + Яндекс Маркет + WB) ====================
+# ==================== Значения строки товара (Все 9 площадок) ====================
 
 
 def _row_values(
@@ -411,7 +439,7 @@ def _row_values(
     platform: str = "ozon",
 ) -> dict[str, object]:
     """
-    Формирует словарь значений строки товара для любой площадки.
+    Формирует словарь значений строки товара для любой из 9 поддерживаемых площадок.
     Ключи — нормализованные имена колонок (без звёздочек, знаков препинания и пробелов).
     """
     photos = [str(u).strip() for u in (product.get("photos") or []) if str(u).strip()]
@@ -442,14 +470,21 @@ def _row_values(
         "noname",
         "no name",
     ):
-        brand_val = "Нет бренда"
+        brand_val = "NoBrand" if platform == "poizon" else "Нет бренда"
     else:
         brand_val = raw_brand
 
-    # Штрихкод (для Яндекса и WB генерируем валидный EAN-13, если не заполнен)
+    # Штрихкод (автогенерация EAN-13 при отсутствии)
     raw_bc = product.get("barcode") or attr_map.get("штрихкод") or ""
     bc_parts = [p.strip() for p in re.split(r"[;,]", str(raw_bc)) if p.strip()]
-    if not bc_parts and platform in ("yandex", "wildberries"):
+    if not bc_parts and platform in (
+        "yandex",
+        "wildberries",
+        "megamarket",
+        "poizon",
+        "holodilnik",
+        "strana",
+    ):
         for v in product.get("variants") or []:
             v_sku = str(v.get("sku") or "").strip()
             if v_sku.isdigit() and 8 <= len(v_sku) <= 14:
@@ -461,7 +496,7 @@ def _row_values(
     barcode_semi = ";".join(bc_parts) if bc_parts else None
     barcode_comma = ", ".join(bc_parts) if bc_parts else None
 
-    # Вес и габариты (в граммах/мм для Ozon и в кг/см для Яндекс Маркета)
+    # Вес и габариты (в граммах/мм и в кг/см)
     wg = product.get("package_weight_grams") or product.get("weight_grams")
     l_mm = product.get("package_length_mm")
     w_mm = product.get("package_width_mm")
@@ -479,6 +514,9 @@ def _row_values(
 
     okpd = product.get("okpd_code") or attr_map.get("тнвэдкодыеаэс") or attr_map.get("тнвэд")
     units = product.get("units_per_item")
+    stock_val = product.get("stock") if product.get("stock") is not None else 10
+    cat_val = _guess_category(product)
+    vat_val = VAT_LABELS.get(str(product.get("vat_rate") or ""), product.get("vat_rate") or "Не облагается")
 
     # Сборка колонки «Характеристики товара» для Яндекс Маркета (Имя|Значение;Имя|Значение)
     skip_ym_attrs = {
@@ -508,14 +546,29 @@ def _row_values(
         # --- Общие и Ozon ---
         "№": row_num,
         "артикул": article,
+        "артикулпродавца": article,
+        "артикулsku": article,
+        "кодтоварапродавца": article,
+        "кодтоварапродавцаofferid": article,
+        "offerid": article,
+        "sellersku": article,
+        "sellerskuid": article,
+        "вашsku": article,
         "названиетовара": product.get("name"),
         "название": product.get("name"),
         "наименование": product.get("name"),
+        "наименованиетовара": product.get("name"),
+        "producttitle": product.get("name"),
+        "title": product.get("name"),
         "предельнаяценабезакцийруб": product.get("price"),
         "зачёркнутаяценаруб": product.get("strike_price"),
         "зачеркнутаяценаруб": product.get("strike_price"),
-        "ндс": VAT_LABELS.get(str(product.get("vat_rate") or ""), product.get("vat_rate")),
+        "ндс": vat_val,
         "штрихкодсерийныйномерean": barcode_semi,
+        "штрихкодbarcode": barcode_semi,
+        "штрихкодean13": barcode_semi,
+        "barcodeean": barcode_semi,
+        "barcode": barcode_semi,
         "тнвэдкодыеаэс": okpd,
         "весвупаковкег": wg,
         "ширинаупаковкимм": w_mm,
@@ -524,17 +577,25 @@ def _row_values(
         "ссылканаглавноефото": photos[0] if photos else None,
         "ссылкинадополнительныефото": " ".join(photos[1:15]) if len(photos) > 1 else None,
         "аннотация": clean_desc,
-        # --- Яндекс Маркет (со скриншота эталона) ---
-        "вашsku": article,
+        # --- Яндекс Маркет / Мегамаркет / Холодильник / Страна / UDS / Poizon ---
         "ссылканаизображение": ", ".join(photos[:30]) if photos else None,
-        "ссылканафото": ", ".join(photos[:30]) if photos else None,
+        "ссылканафото": "; ".join(photos[:15]) if platform != "yandex" else (", ".join(photos[:30]) if photos else None),
+        "ссылкинафото": "; ".join(photos[:15]) if photos else None,
+        "фотоurl": "; ".join(photos[:10]) if photos else None,
+        "urlкартинки": photos[0] if photos else None,
+        "imageurls": "; ".join(photos[:12]) if photos else None,
         "описаниетовара": clean_desc[:6000] if clean_desc else None,
         "описание": clean_desc[:6000] if clean_desc else None,
-        "категориянамаркете": _guess_category(product),
-        "категория": _guess_category(product),
-        "предмет": _guess_category(product),
+        "description": clean_desc[:3000] if clean_desc else None,
+        "категориянамаркете": cat_val,
+        "категория": cat_val,
+        "предмет": cat_val,
+        "предметкатегория": cat_val,
+        "category": cat_val,
         "бренд": brand_val,
         "производитель": brand_val,
+        "производительбренд": brand_val,
+        "brand": brand_val,
         "штрихкод": barcode_comma if platform == "yandex" else barcode_semi,
         "баркод": barcode_comma if platform == "yandex" else barcode_semi,
         "странапроизводства": attr_map.get("странапроизводства")
@@ -551,6 +612,9 @@ def _row_values(
         "цена": product.get("price"),
         "ценаруб": product.get("price"),
         "ценасучетомскидок": product.get("price"),
+        "price": product.get("price"),
+        "остаток": stock_val,
+        "stock": stock_val,
         "зачёркнутаяцена": product.get("strike_price"),
         "зачеркнутаяцена": product.get("strike_price"),
         "ценадоскидки": product.get("strike_price"),
@@ -564,7 +628,7 @@ def _row_values(
         if val not in (None, ""):
             values.setdefault(key, val)
 
-    # Фолбэки-синонимы канонических колонок Ozon
+    # Фолбэки-синонимы канонических колонок
     for b in BRAND_SYNONYMS:
         values.setdefault(b, brand_val)
     if not any(values.get(m) for m in MODEL_SYNONYMS):
@@ -609,7 +673,8 @@ def fill_official_template(
     platform: str = "ozon",
 ) -> bytes:
     """
-    Открывает эталонный файл площадки (Ozon / Яндекс Маркет / WB / Магнит),
+    Открывает эталонный файл площадки (Ozon / Яндекс Маркет / WB / Магнит /
+    Мегамаркет / Poizon / Холодильник.ру / Страна.маркет / UDS),
     удаляет демонстрационные строки-примеры и заполняет нашими товарами.
     """
     pl = (platform or "ozon").lower().strip()
@@ -626,8 +691,6 @@ def fill_official_template(
     data_start_row = _detect_data_start_row(ws, header_row, pl)
 
     # Сопоставляем нормализованные заголовки с номерами столбцов
-    # Важно: в Яндекс Маркете есть две колонки «Категория на Маркете» (col 8 — редактируемая со '*',
-    # и col 47 — серая служебная без '*'). Сохраняем ПЕРВОЕ вхождение каждого заголовка!
     headers: dict[str, int] = {}
     for col in range(1, ws.max_column + 1):
         h = ws.cell(row=header_row, column=col).value
@@ -664,6 +727,10 @@ def fill_official_template(
         "высотасм",
         "цена",
         "ценаруб",
+        "ценасучетомскидок",
+        "price",
+        "остаток",
+        "stock",
         "зачёркнутаяцена",
         "зачеркнутаяцена",
     }

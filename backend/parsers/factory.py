@@ -12,12 +12,55 @@ from .yandex import YandexFileParser
 
 logger = logging.getLogger(__name__)
 
+
+class GenericMarketplaceParser(BaseFileParser):
+    """Универсальный парсер для новых площадок (Мегамаркет, Poizon, Холодильник.ру, Страна.маркет, UDS)."""
+    supported_formats = ["xlsx", "csv", "yml"]
+
+    def parse(self, file_content: bytes, file_type: str) -> ParseResult:
+        # Базовая реализация парсинга через общие утилиты или Excel/CSV reader
+        import io
+        import pandas as pd
+        from .utils import clean_row
+
+        result = ParseResult()
+        try:
+            if file_type == "csv":
+                df = pd.read_csv(io.BytesIO(file_content))
+            elif file_type == "xlsx":
+                df = pd.read_excel(io.BytesIO(file_content))
+            else:
+                result.errors.append({"row": 0, "error": f"Формат {file_type} не поддерживается универсальным парсером"})
+                return result
+
+            df = df.dropna(how="all")
+            result.total_rows = len(df)
+
+            for idx, row in df.iterrows():
+                row_dict = row.to_dict()
+                cleaned = clean_row(row_dict)
+                if not cleaned.get("name") and not cleaned.get("sku"):
+                    continue
+                result.products.append(cleaned)
+                result.imported += 1
+        except Exception as e:
+            logger.error(f"Ошибка универсального парсинга: {e}")
+            result.errors.append({"row": 0, "error": str(e)})
+
+        return result
+
+
 # Реестр парсеров
 PARSERS = {
     "ozon": OzonFileParser,
     "magnit": MagnitFileParser,
     "wildberries": WBFileParser,
     "yandex": YandexFileParser,
+    "megamarket": GenericMarketplaceParser,
+    "poizon": GenericMarketplaceParser,
+    "holodilnik": GenericMarketplaceParser,
+    "strana": GenericMarketplaceParser,
+    "uds": GenericMarketplaceParser,
 }
 
 
@@ -26,7 +69,7 @@ def get_parser(platform: str) -> BaseFileParser:
     Возвращает парсер для указанной площадки.
     
     Args:
-        platform: Название площадки (ozon, wildberries, yandex, magnit)
+        platform: Название площадки (ozon, wildberries, yandex, magnit, megamarket, poizon, holodilnik, strana, uds)
         
     Returns:
         Экземпляр парсера

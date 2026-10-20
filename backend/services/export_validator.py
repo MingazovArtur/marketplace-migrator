@@ -13,6 +13,11 @@ VALIDATION_RULES = {
     "ozon": {"name_max": 255, "desc_max": 3000, "photos_min": 1, "photos_max": 15},
     "yandex": {"name_max": 255, "desc_max": 500, "photos_min": 1, "photos_max": 10},
     "magnit": {"name_max": 255, "desc_max": 500, "photos_min": 1, "photos_max": 10},
+    "megamarket": {"name_max": 200, "desc_max": 2000, "photos_min": 1, "photos_max": 10},
+    "poizon": {"name_max": 150, "desc_max": 1000, "photos_min": 1, "photos_max": 12},
+    "holodilnik": {"name_max": 255, "desc_max": 2000, "photos_min": 1, "photos_max": 10},
+    "strana": {"name_max": 255, "desc_max": 1500, "photos_min": 1, "photos_max": 10},
+    "uds": {"name_max": 100, "desc_max": 500, "photos_min": 1, "photos_max": 5},
 }
 
 

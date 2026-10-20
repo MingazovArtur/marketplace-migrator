@@ -4,6 +4,28 @@
 """
 
 
+def _match_platform_token(text: str) -> str | None:
+    """Внутренний матчер ключевых слов площадки в нижнем регистре."""
+    if "ozon" in text or "озон" in text:
+        return "ozon"
+    if "wildberries" in text or "вайлдберриз" in text or "wb" in text:
+        return "wildberries"
+    if "яндекс" in text or "yandex" in text:
+        return "yandex"
+    if "мегамаркет" in text or "megamarket" in text or "сбермегамаркет" in text or "sbermegamarket" in text:
+        return "megamarket"
+    if "магнит" in text or "magnit" in text or "kazan" in text:
+        return "magnit"
+    if "poizon" in text or "пойзон" in text or "поизон" in text or "dewu" in text:
+        return "poizon"
+    if "холодильник" in text or "holodilnik" in text:
+        return "holodilnik"
+    if "страна" in text or "strana" in text:
+        return "strana"
+    if "uds" in text or "юдс" in text:
+        return "uds"
+    return None
+
 
 def detect_platform(source_str: str) -> str | None:
     """
@@ -12,10 +34,12 @@ def detect_platform(source_str: str) -> str | None:
     Args:
         source_str: строка с названием платформы
                     (например, "Ozon (тест)", "Ozon → Wildberries",
-                     "Магнит Маркет (файл)", "KazanExpress")
+                     "Магнит Маркет (файл)", "Мегамаркет", "Poizon",
+                     "Холодильник.ру", "Страна.маркет", "UDS")
 
     Returns:
-        'ozon', 'wildberries', 'yandex', 'magnit' или None
+        'ozon', 'wildberries', 'yandex', 'magnit', 'megamarket',
+        'poizon', 'holodilnik', 'strana', 'uds' или None
     """
     if not source_str:
         return None
@@ -25,23 +49,9 @@ def detect_platform(source_str: str) -> str | None:
     # Если есть стрелка → берём последнюю часть (целевая платформа)
     if "→" in s:
         last = s.split("→")[-1].strip()
-        if "ozon" in last:
-            return "ozon"
-        if "wildberries" in last or "wb" in last:
-            return "wildberries"
-        if "яндекс" in last or "yandex" in last:
-            return "yandex"
-        if "магнит" in last or "magnit" in last or "kazan" in last:
-            return "magnit"
+        matched = _match_platform_token(last)
+        if matched:
+            return matched
 
     # Иначе ищем во всей строке
-    if "ozon" in s:
-        return "ozon"
-    if "wildberries" in s or "wb" in s:
-        return "wildberries"
-    if "яндекс" in s or "yandex" in s:
-        return "yandex"
-    if "магнит" in s or "magnit" in s or "kazan" in s:
-        return "magnit"
-
-    return None
+    return _match_platform_token(s)

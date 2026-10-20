@@ -11,6 +11,11 @@ class Platform(str, Enum):
     WILDBERRIES = "wildberries"
     YANDEX = "yandex"
     MAGNIT = "magnit"
+    MEGAMARKET = "megamarket"
+    POIZON = "poizon"
+    HOLODILNIK = "holodilnik"
+    STRANA = "strana"
+    UDS = "uds"
 
     @classmethod
     def all_values(cls):
@@ -43,6 +48,36 @@ PLATFORM_CONFIG = {
         "logo": "ММ",
         "import_methods": ["file"],
     },
+    "megamarket": {
+        "name": "Мегамаркет",
+        "color": "#8b3ffd",
+        "logo": "СММ",
+        "import_methods": ["file", "yml"],
+    },
+    "poizon": {
+        "name": "Poizon",
+        "color": "#00c2b8",
+        "logo": "PZ",
+        "import_methods": ["file"],
+    },
+    "holodilnik": {
+        "name": "Холодильник.ру",
+        "color": "#0072bc",
+        "logo": "ХЛ",
+        "import_methods": ["file", "yml"],
+    },
+    "strana": {
+        "name": "Страна.маркет",
+        "color": "#10b981",
+        "logo": "СМ",
+        "import_methods": ["file", "yml"],
+    },
+    "uds": {
+        "name": "UDS",
+        "color": "#6366f1",
+        "logo": "UDS",
+        "import_methods": ["file"],
+    },
 }
 
 PRICE_RULES = {
@@ -50,4 +85,9 @@ PRICE_RULES = {
     "wildberries": 1.15,
     "yandex": 1.0,
     "magnit": 1.0,
+    "megamarket": 1.0,
+    "poizon": 1.0,
+    "holodilnik": 1.0,
+    "strana": 1.0,
+    "uds": 1.0,
 }
