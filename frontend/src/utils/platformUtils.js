@@ -20,7 +20,28 @@ export const PLATFORMS = [
     color: '#e31235',
     logoText: 'ММ',
     importMethods: ['file'],
-  }, // ✅ только файл
+  },
+  {
+    id: 'megamarket',
+    name: 'Мегамаркет',
+    color: '#8b3ffd',
+    logoText: 'СММ',
+    importMethods: ['key', 'file'],
+  },
+  {
+    id: 'holodilnik',
+    name: 'Холодильник.ру',
+    color: '#0072bc',
+    logoText: 'ХЛ',
+    importMethods: ['key', 'file'],
+  },
+  {
+    id: 'aliexpress',
+    name: 'AliExpress',
+    color: '#ff4747',
+    logoText: 'AE',
+    importMethods: ['key', 'file'],
+  },
 ];
 
 export const PLATFORM_NAMES = {
@@ -28,6 +49,33 @@ export const PLATFORM_NAMES = {
   wildberries: 'Wildberries',
   yandex: 'Яндекс Маркет',
   magnit: 'Магнит Маркет',
+  megamarket: 'Мегамаркет',
+  holodilnik: 'Холодильник.ру',
+  aliexpress: 'AliExpress',
+};
+
+const matchPlatformToken = (s) => {
+  if (s.includes('ozon') || s.includes('озон')) return 'ozon';
+  if (s.includes('wildberries') || s.includes('вайлдберриз') || s.includes('wb'))
+    return 'wildberries';
+  if (s.includes('яндекс') || s.includes('yandex')) return 'yandex';
+  if (
+    s.includes('мегамаркет') ||
+    s.includes('megamarket') ||
+    s.includes('сбермегамаркет') ||
+    s.includes('sbermegamarket')
+  )
+    return 'megamarket';
+  if (s.includes('магнит') || s.includes('magnit') || s.includes('kazan')) return 'magnit';
+  if (s.includes('холодильник') || s.includes('holodilnik')) return 'holodilnik';
+  if (
+    s.includes('aliexpress') ||
+    s.includes('алиэкспресс') ||
+    s.includes('алиекспресс') ||
+    s.includes('ali')
+  )
+    return 'aliexpress';
+  return null;
 };
 
 export const detectPlatform = (sourceStr) => {
@@ -35,17 +83,10 @@ export const detectPlatform = (sourceStr) => {
   const str = sourceStr.toLowerCase();
   if (str.includes('→')) {
     const lastPart = str.split('→').pop().trim();
-    if (lastPart.includes('ozon')) return 'ozon';
-    if (lastPart.includes('wildberries') || lastPart.includes('wb')) return 'wildberries';
-    if (lastPart.includes('яндекс') || lastPart.includes('yandex')) return 'yandex';
-    if (lastPart.includes('магнит') || lastPart.includes('magnit') || lastPart.includes('kazan'))
-      return 'magnit';
+    const matched = matchPlatformToken(lastPart);
+    if (matched) return matched;
   }
-  if (str.includes('ozon')) return 'ozon';
-  if (str.includes('wildberries') || str.includes('wb')) return 'wildberries';
-  if (str.includes('яндекс') || str.includes('yandex')) return 'yandex';
-  if (str.includes('магнит') || str.includes('magnit') || str.includes('kazan')) return 'magnit';
-  return null;
+  return matchPlatformToken(str);
 };
 
 export const getAvailablePlatforms = (currentSource, allPlatforms = PLATFORMS) => {

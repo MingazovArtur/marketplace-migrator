@@ -8,6 +8,10 @@ const PLATFORMS = [
   { id: 'ozon', name: 'Ozon', color: '#005bff' },
   { id: 'yandex', name: 'Яндекс Маркет', color: '#fc3f1d' },
   { id: 'wildberries', name: 'Wildberries', color: '#cb11ab' },
+  { id: 'magnit', name: 'Магнит Маркет', color: '#e31235' },
+  { id: 'megamarket', name: 'Мегамаркет', color: '#8b3ffd' },
+  { id: 'holodilnik', name: 'Холодильник.ру', color: '#0072bc' },
+  { id: 'aliexpress', name: 'AliExpress', color: '#ff4747' },
 ];
 
 /* Оценка свежести спека */
@@ -221,7 +225,7 @@ const SpecsPage = () => {
         </div>
       </header>
 
-      <div className="products-toolbar">
+      <div className="products-toolbar" style={{ flexWrap: 'wrap' }}>
         {PLATFORMS.map((p) => (
           <Button
             key={p.id}

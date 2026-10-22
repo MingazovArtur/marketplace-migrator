@@ -10,7 +10,15 @@ const HINTS = {
   yandex: 'Тест: test:test · API: campaign_id:oauth_token · или ссылка на YML-фид',
   magnit:
     'Магнит Маркет: только XLSX из личного кабинета, лист «SKU». Цен в файле нет — задайте их после импорта через «Редактировать».',
+  megamarket:
+    'Мегамаркет: импорт по ссылке на YML-фид (https://...) или загрузка XLSX/CSV файла карточек товаров из личного кабинета.',
+  holodilnik:
+    'Холодильник.ру: импорт по ссылке на YML-фид (https://...) или загрузка прайс-листа XLSX/CSV.',
+  aliexpress:
+    'AliExpress: импорт по ссылке на YML-фид (https://...) или загрузка XLSX/CSV шаблона массовых операций из личного кабинета.',
 };
+
+const YML_CAPABLE_PLATFORMS = new Set(['yandex', 'megamarket', 'holodilnik', 'aliexpress']);
 
 const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
   const [selectedPlatform, setSelectedPlatform] = useState('ozon');
@@ -204,7 +212,7 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
               <span className="hint-icon">
                 <Icon name="info" size={18} />
               </span>
-              <p>{HINTS[selectedPlatform]}</p>
+              <p>{HINTS[selectedPlatform] || HINTS.ozon}</p>
             </div>
             <label className="form-label">Ключ или ссылка</label>
             <input
@@ -216,7 +224,9 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
                 setKeyError('');
               }}
               placeholder={
-                selectedPlatform === 'yandex' ? 'test:test или https://.../yml.xml' : 'test:test'
+                YML_CAPABLE_PLATFORMS.has(selectedPlatform)
+                  ? 'test:test или https://.../yml.xml'
+                  : 'test:test'
               }
             />
             {keyError && <div className="input-error-message">{keyError}</div>}
@@ -242,7 +252,7 @@ const ImportModal = ({ isOpen, onClose, onImport, onFileImport, loading }) => {
                   <span className="hint-icon">
                     <Icon name="info" size={18} />
                   </span>
-                  <p>{HINTS[selectedPlatform]}</p>
+                  <p>{HINTS[selectedPlatform] || HINTS.ozon}</p>
                 </div>
 
                 <div

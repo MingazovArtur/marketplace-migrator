@@ -39,6 +39,15 @@ const CANON_SYNONYMS = {
   marking: ['нуженкодмаркировки', 'кодмаркировки', 'маркировка'],
 };
 
+const UNIVERSAL_NAMES = new Set([
+  'универсальный',
+  'универсальный (все категории)',
+  'общий',
+  'все категории',
+  'default',
+  'all',
+]);
+
 const normName = (s) => (s || '').toLowerCase().replace(/[^a-zа-я0-9]/g, '');
 const canonFieldFor = (field) => {
   if (!field || !field.startsWith('attr:')) return field;
@@ -85,9 +94,7 @@ const ExportModal = ({
         api
           .getProducts({ status: status === 'all' ? undefined : status, limit: 10000 })
           .catch(() => ({ products: [] })),
-        platform === 'ozon'
-          ? api.listOzonTemplates().catch(() => ({ templates: [] }))
-          : { templates: [] },
+        api.listOzonTemplates(platform).catch(() => ({ templates: [] })),
       ]);
       setPreview(pv);
       setValidation(vv);
@@ -121,8 +128,8 @@ const ExportModal = ({
 
   const groupIssues = useCallback(
     (issues) => ({
-      errors: issues.filter((i) => i.severity === 'error'),
-      warnings: issues.filter((i) => i.severity === 'warning'),
+      errors: issues.filter((i) => (i.severity || i.level) === 'error'),
+      warnings: issues.filter((i) => (i.severity || i.level) === 'warning'),
     }),
     []
   );
@@ -146,15 +153,18 @@ const ExportModal = ({
 
   const v = validation || preview?.validation || {};
   const total = v.total ?? 0;
-  const withErrors = v.products_with_errors ?? 0;
-  const withWarnings = Math.max(0, (v.products_with_warnings ?? 0) - withErrors);
+  const withErrors = v.products_with_errors ?? v.with_errors ?? 0;
+  const withWarnings = Math.max(
+    0,
+    (v.products_with_warnings ?? v.with_warnings ?? 0) - withErrors
+  );
   const downloadable = total - withErrors;
 
   const errorCountByCanon = useMemo(() => {
     const counts = {};
     (v.issues || []).forEach((it) =>
       (it.issues || []).forEach((i) => {
-        if (i.severity === 'error') {
+        if ((i.severity || i.level) === 'error') {
           const f = canonFieldFor(i.field);
           counts[f] = (counts[f] || 0) + 1;
         }
@@ -168,14 +178,31 @@ const ExportModal = ({
     [errorCountByCanon]
   );
 
-  const missingAny = useMemo(() => checklist.some((f) => f.count > 0), [checklist]);
+  const hasUniversalTemplate = useMemo(
+    () => Array.from(tplSet).some((name) => UNIVERSAL_NAMES.has(String(name).trim().toLowerCase())),
+    [tplSet]
+  );
+
+  const hasTemplateForCategory = useCallback(
+    (cat) => {
+      if (tplSet.has(cat) || hasUniversalTemplate) return true;
+      if (platform !== 'ozon' && tplSet.size > 0) return true;
+      return false;
+    },
+    [tplSet, hasUniversalTemplate, platform]
+  );
 
   const missingTemplates = useMemo(
     () =>
       Object.keys(categoryCounts)
-        .filter((c) => platform === 'ozon' && !tplSet.has(c))
+        .filter((c) => !hasTemplateForCategory(c))
         .sort((a, b) => categoryCounts[b] - categoryCounts[a]),
-    [categoryCounts, platform, tplSet]
+    [categoryCounts, hasTemplateForCategory]
+  );
+
+  const currentPlatformMeta = useMemo(
+    () => PLATFORMS.find((p) => p.id === platform) || PLATFORMS[0],
+    [platform]
   );
 
   if (!isOpen) return null;
@@ -258,48 +285,46 @@ const ExportModal = ({
           </div>
         </div>
 
-        {/* Статус эталонов Ozon */}
-        {platform === 'ozon' && Object.keys(categoryCounts).length > 0 && (
+        {/* Статус эталонов выбранной площадки */}
+        {Object.keys(categoryCounts).length > 0 && (
           <div className="card" style={{ padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
             <h4
               style={{ margin: '0 0 0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
             >
-              <Icon name="template" size={16} /> Эталонные шаблоны категорий выгрузки
+              <Icon name="template" size={16} /> Эталонные шаблоны выгрузки ({currentPlatformMeta.name})
             </h4>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
               {Object.entries(categoryCounts)
                 .sort((a, b) => b[1] - a[1])
-                .map(([cat, n]) => (
-                  <span
-                    key={cat}
-                    title={
-                      tplSet.has(cat)
-                        ? `Эталон загружен — файл соберётся на его основе (${n} тов.)`
-                        : `Эталона нет — файл сгенерируется из спека (${n} тов.)`
-                    }
-                    style={{
-                      padding: '0.2rem 0.6rem',
-                      borderRadius: 999,
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      background: tplSet.has(cat)
-                        ? 'rgba(34,197,94,0.15)'
-                        : 'rgba(239,68,68,0.15)',
-                      color: tplSet.has(cat)
-                        ? 'var(--success, #22c55e)'
-                        : 'var(--danger, #ef4444)',
-                      border: `1px solid ${tplSet.has(cat) ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)'}`,
-                    }}
-                  >
-                    {tplSet.has(cat) ? '✅' : '❌'} {cat} · {n}
-                  </span>
-                ))}
+                .map(([cat, n]) => {
+                  const hasTpl = hasTemplateForCategory(cat);
+                  return (
+                    <span
+                      key={cat}
+                      title={
+                        hasTpl
+                          ? `Эталон загружен — файл соберётся на его основе (${n} тов.)`
+                          : `Эталона нет — файл сгенерируется автоматически (${n} тов.)`
+                      }
+                      style={{
+                        padding: '0.2rem 0.6rem',
+                        borderRadius: 999,
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        background: hasTpl ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                        color: hasTpl ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)',
+                        border: `1px solid ${hasTpl ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)'}`,
+                      }}
+                    >
+                      {hasTpl ? '✅' : '❌'} {cat} · {n}
+                    </span>
+                  );
+                })}
             </div>
             {missingTemplates.length > 0 && (
               <div className="alert alert-error" style={{ marginTop: '0.6rem', marginBottom: 0 }}>
                 <div>
-                  ❌ Нет эталонов для категорий: {missingTemplates.join(', ')}. Выгрузка по ним
-                  соберётся из спека и может отличаться от шаблона кабинета Ozon.
+                  ❌ Для «{currentPlatformMeta.name}» не загружен эталонный шаблон ({missingTemplates.join(', ')}). Выгрузка соберётся по встроенному шаблону и может отличаться от кабинета площадки.
                   {onOpenTemplates && (
                     <>
                       {' '}
@@ -438,7 +463,7 @@ const ExportModal = ({
                     }}
                   >
                     <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
-                      #{it.product_id} {it.product_name}
+                      #{it.product_id} {it.product_name || it.name}
                     </div>
                     {errors.length > 0 && (
                       <div style={{ color: 'var(--danger, #ef4444)', fontSize: '0.85rem' }}>

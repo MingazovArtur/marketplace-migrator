@@ -8,6 +8,9 @@ const PLATFORMS = [
   { id: 'wildberries', name: 'Wildberries', color: '#cb11ab' },
   { id: 'yandex', name: 'Яндекс Маркет', color: '#fc3f1d' },
   { id: 'magnit', name: 'Магнит Маркет', color: '#e31235' },
+  { id: 'megamarket', name: 'Мегамаркет', color: '#8b3ffd' },
+  { id: 'holodilnik', name: 'Холодильник.ру', color: '#0072bc' },
+  { id: 'aliexpress', name: 'AliExpress', color: '#ff4747' },
 ];
 
 function CategoryMapping() {

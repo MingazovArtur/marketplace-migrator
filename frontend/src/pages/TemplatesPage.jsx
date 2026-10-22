@@ -8,6 +8,9 @@ const PLATFORM_OPTIONS = [
   { id: 'ozon', name: 'Ozon', color: '#005bff', badge: 'Ozon' },
   { id: 'wildberries', name: 'Wildberries', color: '#cb11ab', badge: 'WB' },
   { id: 'magnit', name: 'Магнит Маркет', color: '#e31235', badge: 'ММ' },
+  { id: 'megamarket', name: 'Мегамаркет', color: '#8b3ffd', badge: 'СММ' },
+  { id: 'holodilnik', name: 'Холодильник.ру', color: '#0072bc', badge: 'ХЛ' },
+  { id: 'aliexpress', name: 'AliExpress', color: '#ff4747', badge: 'AE' },
 ];
 
 const PLATFORM_INSTRUCTIONS = {
@@ -31,6 +34,21 @@ const PLATFORM_INSTRUCTIONS = {
   magnit: [
     'В кабинете Магнит Маркет перейдите в раздел управления ассортиментом и скачайте XLSX-шаблон.',
     'Загрузите файл ниже, выбрав площадку «Магнит Маркет».',
+  ],
+  megamarket: [
+    'В личном кабинете Мегамаркета перейдите в раздел «Товары и цены → Создание карточек товаров» и нажмите «Создать несколько».',
+    'Выберите нужную категорию товаров и нажмите «Скачать шаблон» (.xlsx).',
+    'Загрузите скачанный шаблон ниже, выбрав площадку «Мегамаркет» — при выгрузке система сохранит всю структуру и автоматически заполнит обязательные колонки.',
+  ],
+  holodilnik: [
+    'В личном кабинете поставщика Холодильник.ру перейдите в раздел загрузки прайс-листов и каталога.',
+    'Скачайте эталонный XLSX-шаблон карточек товаров.',
+    'Загрузите файл ниже, выбрав площадку «Холодильник.ру».',
+  ],
+  aliexpress: [
+    'В личном кабинете AliExpress выберите в главном меню «Товары → Массовые операции Excel» и нажмите «Загрузить».',
+    'В поисковом поле формы «Загрузка товаров» введите категорию, выберите её из списка и нажмите «Скачать».',
+    'Загрузите полученный .xlsx файл ниже, выбрав площадку «AliExpress» — система сохранит метаданные шаблона, развернёт вариации (SPU/SKU) и заполнит блок «Произвольные характеристики продавца».',
   ],
 };
 
@@ -96,7 +114,7 @@ const TemplatesPage = ({ onNotify }) => {
 
   useEffect(() => {
     loadSpecNames(selectedPlatform);
-    if (selectedPlatform === 'yandex') {
+    if (selectedPlatform !== 'ozon') {
       setCategoryName(UNIVERSAL_LABEL);
     }
   }, [selectedPlatform, loadSpecNames]);
@@ -108,7 +126,9 @@ const TemplatesPage = ({ onNotify }) => {
 
     // Если имя файла вида ozon_Родитель_Тип.xlsx — подсказываем категорию автоматически
     const base = picked.name.replace(/\.xlsx$/i, '');
-    const m = base.match(/^(ozon|yandex|wb|wildberries|magnit)[_-](.+)$/i);
+    const m = base.match(
+      /^(ozon|yandex|wb|wildberries|magnit|megamarket|holodilnik|aliexpress)[_-](.+)$/i
+    );
     if (m && m[2]) {
       const parts = m[2].split('_').filter(Boolean);
       if (parts.length >= 2 && selectedPlatform === 'ozon') {
@@ -170,7 +190,7 @@ const TemplatesPage = ({ onNotify }) => {
         <div>
           <h1 className="header-title">Шаблоны площадок</h1>
           <p className="header-subtitle">
-            Эталонные XLSX-шаблоны Яндекс Маркета, Ozon, Wildberries и Магнит Маркета: выгрузка 1:1 с кабинетом площадки
+            Эталонные XLSX-шаблоны Яндекс Маркета, Ozon, Wildberries, Магнит Маркета, Мегамаркета, Холодильник.ру и AliExpress: выгрузка 1:1 с кабинетом площадки
           </p>
         </div>
         <div className="header-actions">
@@ -202,7 +222,7 @@ const TemplatesPage = ({ onNotify }) => {
                   style={{
                     backgroundColor: selectedPlatform === p.id ? p.color : 'var(--bg-tertiary)',
                     color: selectedPlatform === p.id ? '#fff' : 'var(--text-muted)',
-                    fontSize: '1rem',
+                    fontSize: '0.9rem',
                   }}
                 >
                   {p.badge}

@@ -1,14 +1,13 @@
 """
 Мультиплатформенное хранилище и заполнение ЭТАЛОННЫХ шаблонов площадок
-(Ozon, Яндекс Маркет, Wildberries, Магнит Маркет, Мегамаркет, Poizon,
-Холодильник.ру, Страна.маркет, UDS).
+(Ozon, Яндекс Маркет, Wildberries, Магнит Маркет, Мегамаркет,
+Холодильник.ру, AliExpress).
 
 Пользователь скачивает официальный XLSX-шаблон в кабинете площадки и загружает
 его в разделе «Шаблоны». При выгрузке мы открываем этот файл как КАРКАС:
 все листы («Инструкция», «Список товаров», «Шаблон», скрытые словари), шапка,
 стили, выпадающие списки и метаданные остаются 100% оригинальными — мы только
-удаляем строку-пример (например, «Дрель Makita» в Яндексе) и записываем товары
-в соответствующие столбцы.
+удаляем строку-пример и записываем товары в соответствующие столбцы.
 
 ✅ Если для площадки загружен хотя бы один шаблон (например, «Универсальный»),
    он автоматически используется для выгрузки всех товаров на эту площадку.
@@ -37,7 +36,8 @@ MODEL_SYNONYMS = [
     "названиемодели",
     "названиемоделидляобъединенияводнукарточку",
     "модель",
-    "model",
+    "модельsellerspuid",
+    "sellerspuid",
 ]
 MARKING_SYNONYMS = ["нуженкодмаркировки", "кодмаркировки", "маркировка"]
 
@@ -81,14 +81,32 @@ def _strip_html(text: str) -> str:
     return re.sub(r"[ \t]+", " ", cleaned).strip()
 
 
-def _generate_ean13(product: dict) -> str:
-    """Генерирует валидный 13-значный штрихкод EAN-13 по стандарту GS1."""
+def _generate_ean13(product: dict, prefix: str = "460") -> str:
+    """
+    Генерирует валидный 13-значный штрихкод GTIN / EAN-13 по стандарту GS1.
+    Префикс 460 подходит для всех российских маркетплейсов (включая Мегамаркет,
+    который отклоняет штрихкоды, начинающиеся с 2).
+    """
     pid = int(product.get("id") or 1)
-    base12 = f"200{pid:09d}"[:12]
+    base12 = f"{prefix}{pid:09d}"[:12]
     odd_sum = sum(int(base12[i]) for i in range(0, 12, 2))
     even_sum = sum(int(base12[i]) for i in range(1, 12, 2))
     check_digit = (10 - ((odd_sum + even_sum * 3) % 10)) % 10
     return f"{base12}{check_digit}"
+
+
+def _format_comma_decimal(val: float | int | None) -> str | None:
+    """Форматирует число с запятой и максимум 2 знаками после запятой (правило Мегамаркета)."""
+    if val is None:
+        return None
+    try:
+        num = round(float(val), 2)
+        if num <= 0:
+            return None
+        s = f"{num:.2f}".rstrip("0").rstrip(".")
+        return s.replace(".", ",")
+    except (TypeError, ValueError):
+        return None
 
 
 def _guess_category(product: dict) -> str:
@@ -105,7 +123,7 @@ def _guess_category(product: dict) -> str:
         (["плать", "сарафан"], "Платья и сарафаны"),
         (["брюк", "джинс", "штаны"], "Брюки"),
         (["куртк", "пуховик", "ветровк", "пальто"], "Верхняя одежда"),
-        (["толстовк", "худи", "свитшот", "джемпер", "свитер"], "Толстовки, свитшоты и худи"),
+        (["толстовк", "худи", "свитшот", "джемпер", "свитер"], "Толстовки, свитшот и худи"),
         (["носки", "гольф", "колготк"], "Носки, чулки и колготки"),
         (["кроссовк", "кеды"], "Кроссовки и кеды"),
         (["смартфон", "телефон"], "Мобильные телефоны"),
@@ -179,13 +197,22 @@ def _find_data_sheet(wb):
         "Товары",
         "Офферы",
         "Шаблон Поставщика",
-        "Products",
         "Assortment",
         "Каталог",
     ):
         if candidate in wb.sheetnames:
             return wb[candidate]
-    skip_words = ("инструкция", "описание полей", "справочник", "видео", "документация", "правила", "readme", "help")
+    skip_words = (
+        "инструкция",
+        "описание полей",
+        "справочник",
+        "видео",
+        "документация",
+        "правила",
+        "требования к изображениям",
+        "readme",
+        "help",
+    )
     for name in wb.sheetnames:
         if not any(w in name.lower() for w in skip_words):
             return wb[name]
@@ -193,22 +220,29 @@ def _find_data_sheet(wb):
 
 
 def _find_header_row(ws) -> int | None:
-    """Ищет строку заголовков (по колонкам «Артикул», «Ваш SKU», «Seller SKU», «Код товара продавца», «Наименование»)."""
+    """
+    Ищет строку заголовков по ключевым колонкам площадок:
+    - Ozon / WB / Магнит / Холодильник: «Артикул», «Ваш SKU *», «Артикул продавца»
+    - Мегамаркет: «Код товара продавца», «Основной штрихкод (GTIN)»
+    - AliExpress: «Модель (seller SPU ID)*», «Артикул/Штрихкод (seller SKU ID)*»
+    """
     header_markers = {
         "артикул",
         "вашsku",
-        "sellerskuid",
-        "sellersku",
         "артикулпродавца",
         "артикулsku",
         "кодтоварапродавца",
         "кодтоварапродавцаofferid",
+        "основнойштрихкодgtin",
+        "модельsellerspuid",
+        "артикулштрихкодsellerskuid",
+        "sellerskuid",
+        "sellerspuid",
         "offerid",
         "sku",
         "наименование",
         "наименованиетовара",
         "названиетовара",
-        "producttitle",
     }
     for row in range(1, 12):
         for cell in ws[row]:
@@ -221,23 +255,25 @@ def _find_header_row(ws) -> int | None:
 
 def _detect_data_start_row(ws, header_row: int, platform: str) -> int:
     """
-    Определяет строку, с которой начинаются товары (и откуда нужно удалить примеры площадки):
-    - В Яндекс Маркете: строка 2 — заголовки, строка 3 — подсказки, строка 4 — пример («Дрель Makita»).
-      Значит, данные начинаются с 4-й строки (header_row + 2).
-    - В Ozon: строка 2 — заголовки, строка 3 — «Обязательное поле», строка 4 — подсказки,
-      данные с 5-й строки (header_row + 3).
+    Определяет строку, с которой начинаются данные товаров:
+    - AliExpress: строка 1 — блоки, строка 2 — подсказки, строка 3 — заголовки (`header_row = 3`),
+      данные начинаются со строки 4 (`header_row + 1`).
+    - Мегамаркет: если заголовки в 1-й строке — данные со 2-й строки (`header_row + 1`).
+    - Яндекс Маркет: строка 2 — заголовки, строка 3 — подсказки, строка 4 — данные (`header_row + 2`).
+    - Ozon: строка 2 — заголовки, строка 3 — «Обязательное поле», строка 4 — подсказки, строка 5 — данные (`header_row + 3`).
     """
+    if platform == "aliexpress":
+        return header_row + 1
+
     if platform == "yandex":
         return header_row + 2
 
-    # Проверяем, есть ли в строке header_row + 1 маркеры Ozon («Обязательное поле» / «Рекомендуем»)
     row_plus_1_text = " ".join(
         str(c.value).lower() for c in ws[header_row + 1] if c.value is not None
     )
     if "обязательное поле" in row_plus_1_text or "рекомендуем к заполнению" in row_plus_1_text:
         return header_row + 3
 
-    # Проверяем, является ли строка header_row + 1 длинной строкой подсказок (как в Яндексе или Мегамаркете)
     if any(
         m in row_plus_1_text
         for m in (
@@ -246,11 +282,15 @@ def _detect_data_start_row(ws, header_row: int, platform: str) -> int:
             "заполняется автоматически",
             "обязательный параметр",
             "необязательный параметр",
+            "уникальный код товара",
         )
     ):
         return header_row + 2
 
-    return header_row + 1 if header_row == 1 else 5
+    if platform == "megamarket":
+        return header_row + 1
+
+    return header_row + 1 if header_row in (1, 3) else 5
 
 
 def _count_columns(data: bytes) -> int | None:
@@ -274,7 +314,7 @@ def _resolve_template_meta(category_name: str | None, platform: str = "ozon") ->
     """
     Ищет подходящий эталонный шаблон для площадки:
       1. Точное совпадение (platform, category_name).
-      2. Совпадение по конечному типу категории (например, «Одежда / Футболки» -> «Футболки»).
+      2. Совпадение по конечному типу категории («Одежда / Футболки» -> «Футболки»).
       3. Универсальный шаблон площадки («Универсальный», «Общий», «Все категории»).
       4. Фолбэк: первый доступный шаблон этой площадки.
     """
@@ -282,7 +322,6 @@ def _resolve_template_meta(category_name: str | None, platform: str = "ozon") ->
     cat = (category_name or "").strip()
     idx = _load_index()
 
-    # Собираем все существующие на диске шаблоны этой площадки
     platform_templates: list[dict] = []
     for meta in idx.values():
         if meta.get("platform") == pl and (TEMPLATES_DIR / meta["file"]).exists():
@@ -291,25 +330,21 @@ def _resolve_template_meta(category_name: str | None, platform: str = "ozon") ->
     if not platform_templates:
         return None
 
-    # 1. Точное совпадение имени категории
     if cat:
         for m in platform_templates:
             if m["category_name"].lower() == cat.lower():
                 return m
 
-        # 2. Совпадение по последней части пути («Родитель / Тип»)
         cat_leaf = cat.split("/")[-1].strip().lower()
         for m in platform_templates:
             m_leaf = m["category_name"].split("/")[-1].strip().lower()
             if cat_leaf and m_leaf == cat_leaf:
                 return m
 
-    # 3. Универсальный шаблон площадки
     for m in platform_templates:
         if m["category_name"].strip().lower() in UNIVERSAL_NAMES:
             return m
 
-    # 4. Фолбэк: используем первый загруженный шаблон этой площадки
     return platform_templates[0]
 
 
@@ -422,14 +457,14 @@ def validate_template_bytes(data: bytes, platform: str = "ozon") -> str | None:
         if header_row is None:
             return (
                 "В файле не найдена строка заголовков (ожидается колонка «Артикул», "
-                "«Ваш SKU *», «Код товара продавца», «Seller SKU» или «Наименование»)"
+                "«Ваш SKU *», «Код товара продавца», «Модель (seller SPU ID)*» или «Наименование»)"
             )
         return None
     finally:
         wb.close()
 
 
-# ==================== Значения строки товара (Все 9 площадок) ====================
+# ==================== Значения строки товара (Все 7 площадок) ====================
 
 
 def _row_values(
@@ -439,8 +474,8 @@ def _row_values(
     platform: str = "ozon",
 ) -> dict[str, object]:
     """
-    Формирует словарь значений строки товара для любой из 9 поддерживаемых площадок.
-    Ключи — нормализованные имена колонок (без звёздочек, знаков препинания и пробелов).
+    Формирует словарь значений строки товара для любой из 7 поддерживаемых площадок:
+    Ozon, Wildberries, Яндекс Маркет, Магнит Маркет, Мегамаркет, Холодильник.ру, AliExpress.
     """
     photos = [str(u).strip() for u in (product.get("photos") or []) if str(u).strip()]
     attr_map = {
@@ -449,12 +484,22 @@ def _row_values(
         if a.get("name")
     }
 
-    article = (
+    raw_article = (
         product.get("_article")
         or product.get("sku")
         or product.get("external_id")
         or f"ID{product.get('id')}"
     )
+    if platform == "megamarket":
+        # В Мегамаркете запрещены символы # и % в Коде товара продавца
+        article = re.sub(r"[#%]+", "_", str(raw_article)).strip()
+    elif platform == "aliexpress":
+        # В AliExpress Артикул (seller SKU ID) — не более 50 символов
+        article = str(raw_article).strip()[:50]
+    else:
+        article = str(raw_article).strip()
+
+    spu_id = str(product.get("_spu_id") or article)[:50]
     clean_desc = _strip_html(product.get("description") or "") or product.get("name")
 
     # Бренд
@@ -467,23 +512,28 @@ def _row_values(
     if not raw_brand or raw_brand.lower() in (
         "отсутствует бренд",
         "без бренда",
+        "нет бренда",
         "noname",
         "no name",
     ):
-        brand_val = "NoBrand" if platform == "poizon" else "Нет бренда"
+        if platform == "aliexpress":
+            brand_val = "NONE"
+        elif platform == "megamarket":
+            brand_val = "Без бренда"
+        else:
+            brand_val = "Нет бренда"
     else:
         brand_val = raw_brand
 
-    # Штрихкод (автогенерация EAN-13 при отсутствии)
+    # Штрихкоды (для Мегамаркета основной штрихкод GTIN не может начинаться с 2)
     raw_bc = product.get("barcode") or attr_map.get("штрихкод") or ""
     bc_parts = [p.strip() for p in re.split(r"[;,]", str(raw_bc)) if p.strip()]
     if not bc_parts and platform in (
         "yandex",
         "wildberries",
         "megamarket",
-        "poizon",
         "holodilnik",
-        "strana",
+        "aliexpress",
     ):
         for v in product.get("variants") or []:
             v_sku = str(v.get("sku") or "").strip()
@@ -491,10 +541,14 @@ def _row_values(
                 bc_parts = [v_sku]
                 break
         if not bc_parts:
-            bc_parts = [_generate_ean13(product)]
+            bc_parts = [_generate_ean13(product, prefix="460")]
+
+    if platform == "megamarket" and bc_parts and bc_parts[0].startswith("2"):
+        bc_parts[0] = _generate_ean13(product, prefix="460")
 
     barcode_semi = ";".join(bc_parts) if bc_parts else None
     barcode_comma = ", ".join(bc_parts) if bc_parts else None
+    main_gtin = bc_parts[0] if bc_parts else _generate_ean13(product, prefix="460")
 
     # Вес и габариты (в граммах/мм и в кг/см)
     wg = product.get("package_weight_grams") or product.get("weight_grams")
@@ -502,7 +556,14 @@ def _row_values(
     w_mm = product.get("package_width_mm")
     h_mm = product.get("package_height_mm")
 
-    weight_kg = round(float(wg) / 1000.0, 3) if wg else None
+    # Для AliExpress и Мегамаркета вес и габариты не могут быть равны 0
+    if platform in ("aliexpress", "megamarket"):
+        wg = wg or 500
+        l_mm = l_mm or 200
+        w_mm = w_mm or 150
+        h_mm = h_mm or 100
+
+    weight_kg = round(float(wg) / 1000.0, 2) if wg else None
     length_cm = round(float(l_mm) / 10.0, 2) if l_mm else None
     width_cm = round(float(w_mm) / 10.0, 2) if w_mm else None
     height_cm = round(float(h_mm) / 10.0, 2) if h_mm else None
@@ -516,7 +577,23 @@ def _row_values(
     units = product.get("units_per_item")
     stock_val = product.get("stock") if product.get("stock") is not None else 10
     cat_val = _guess_category(product)
-    vat_val = VAT_LABELS.get(str(product.get("vat_rate") or ""), product.get("vat_rate") or "Не облагается")
+    vat_val = VAT_LABELS.get(
+        str(product.get("vat_rate") or ""), product.get("vat_rate") or "Не облагается"
+    )
+
+    # Вариационные поля (Цвет / Размер для AliExpress и мультикарточек)
+    var_color = (
+        product.get("_variant_color")
+        or attr_map.get("цвет")
+        or attr_map.get("цветтовара")
+        or "Разноцветный"
+    )
+    var_size = (
+        product.get("_variant_size")
+        or attr_map.get("размер")
+        or attr_map.get("размеродежды")
+        or ""
+    )
 
     # Сборка колонки «Характеристики товара» для Яндекс Маркета (Имя|Значение;Имя|Значение)
     skip_ym_attrs = {
@@ -548,26 +625,19 @@ def _row_values(
         "артикул": article,
         "артикулпродавца": article,
         "артикулsku": article,
-        "кодтоварапродавца": article,
-        "кодтоварапродавцаofferid": article,
-        "offerid": article,
-        "sellersku": article,
-        "sellerskuid": article,
         "вашsku": article,
+        "offerid": article,
         "названиетовара": product.get("name"),
         "название": product.get("name"),
         "наименование": product.get("name"),
         "наименованиетовара": product.get("name"),
-        "producttitle": product.get("name"),
-        "title": product.get("name"),
         "предельнаяценабезакцийруб": product.get("price"),
         "зачёркнутаяценаруб": product.get("strike_price"),
         "зачеркнутаяценаруб": product.get("strike_price"),
         "ндс": vat_val,
         "штрихкодсерийныйномерean": barcode_semi,
         "штрихкодbarcode": barcode_semi,
-        "штрихкодean13": barcode_semi,
-        "barcodeean": barcode_semi,
+        "штрихкодean13": main_gtin,
         "barcode": barcode_semi,
         "тнвэдкодыеаэс": okpd,
         "весвупаковкег": wg,
@@ -577,44 +647,98 @@ def _row_values(
         "ссылканаглавноефото": photos[0] if photos else None,
         "ссылкинадополнительныефото": " ".join(photos[1:15]) if len(photos) > 1 else None,
         "аннотация": clean_desc,
-        # --- Яндекс Маркет / Мегамаркет / Холодильник / Страна / UDS / Poizon ---
+        # --- Мегамаркет (точные поля из документации и скриншота) ---
+        "кодтоварапродавца": article,
+        "кодтоварапродавцаofferid": article,
+        "основнойштрихкодgtin": main_gtin,
+        "штрихкод2": bc_parts[1] if len(bc_parts) > 1 else None,
+        "штрихкод3": bc_parts[2] if len(bc_parts) > 2 else None,
+        "штрихкод4": bc_parts[3] if len(bc_parts) > 3 else None,
+        "штрихкод5": bc_parts[4] if len(bc_parts) > 4 else None,
+        "ссылканаpdfинструкцию": attr_map.get("ссылканаpdfинструкцию") or None,
+        "ссылканасертификат": attr_map.get("ссылканасертификат") or None,
+        "названиетоварапоформулетиптоварабрендмодельартикул": product.get("name"),
+        "urlосновногофото": photos[0] if photos else None,
+        "urlфото2": photos[1] if len(photos) > 1 else None,
+        "urlфото3": photos[2] if len(photos) > 2 else None,
+        "urlфото4": photos[3] if len(photos) > 3 else None,
+        "urlфото5": photos[4] if len(photos) > 4 else None,
+        "urlфото6": photos[5] if len(photos) > 5 else None,
+        "urlфото7": photos[6] if len(photos) > 6 else None,
+        "urlфото8": photos[7] if len(photos) > 7 else None,
+        "urlфото9": photos[8] if len(photos) > 8 else None,
+        "urlфото10": photos[9] if len(photos) > 9 else None,
+        # --- AliExpress (точные поля из документации и скриншотов) ---
+        "модельsellerspuid": spu_id,
+        "sellerspuid": spu_id,
+        "артикулштрихкодsellerskuid": article,
+        "артикулsellerskuid": article,
+        "sellerskuid": article,
+        "штрихкодean": main_gtin,
+        "gtin": main_gtin,
+        "главноефото": photos[0] if photos else None,
+        "фотоsku": product.get("_variant_photo") or (photos[0] if photos else None),
+        "цвет": var_color,
+        "размер": var_size,
+        "доставкаиз": "Российская Федерация",
+        "названиецветавсистемепродавца": var_color,
+        "названиеразмеравсистемепродавца": var_size,
+        "вессупаковкой": weight_kg,
+        "длинаупаковки": int(round(length_cm)) if length_cm else None,
+        "ширинаупаковки": int(round(width_cm)) if width_cm else None,
+        "высотаупаковки": int(round(height_cm)) if height_cm else None,
+        # --- Яндекс Маркет / Холодильник.ру / Магнит ---
         "ссылканаизображение": ", ".join(photos[:30]) if photos else None,
-        "ссылканафото": "; ".join(photos[:15]) if platform != "yandex" else (", ".join(photos[:30]) if photos else None),
+        "ссылканафото": "; ".join(photos[:15])
+        if platform != "yandex"
+        else (", ".join(photos[:30]) if photos else None),
         "ссылкинафото": "; ".join(photos[:15]) if photos else None,
         "фотоurl": "; ".join(photos[:10]) if photos else None,
         "urlкартинки": photos[0] if photos else None,
-        "imageurls": "; ".join(photos[:12]) if photos else None,
         "описаниетовара": clean_desc[:6000] if clean_desc else None,
         "описание": clean_desc[:6000] if clean_desc else None,
-        "description": clean_desc[:3000] if clean_desc else None,
         "категориянамаркете": cat_val,
         "категория": cat_val,
         "предмет": cat_val,
         "предметкатегория": cat_val,
-        "category": cat_val,
         "бренд": brand_val,
         "производитель": brand_val,
         "производительбренд": brand_val,
-        "brand": brand_val,
-        "штрихкод": barcode_comma if platform == "yandex" else barcode_semi,
+        "штрихкод": barcode_comma
+        if platform == "yandex"
+        else (main_gtin if platform == "megamarket" else barcode_semi),
         "баркод": barcode_comma if platform == "yandex" else barcode_semi,
         "странапроизводства": attr_map.get("странапроизводства")
         or attr_map.get("странаизготовитель")
         or "Россия",
         "артикулпроизводителя": article,
-        "вескг": weight_kg,
-        "вессупаковкойкг": weight_kg,
-        "длинасм": length_cm,
-        "ширинасм": width_cm,
-        "высотасм": height_cm,
+        "вескг": _format_comma_decimal(weight_kg) if platform == "megamarket" else weight_kg,
+        "весвупаковкекг": _format_comma_decimal(weight_kg)
+        if platform == "megamarket"
+        else weight_kg,
+        "вессупаковкойкг": _format_comma_decimal(weight_kg)
+        if platform == "megamarket"
+        else weight_kg,
+        "длинасм": _format_comma_decimal(length_cm) if platform == "megamarket" else length_cm,
+        "длинаупаковкисм": _format_comma_decimal(length_cm)
+        if platform == "megamarket"
+        else length_cm,
+        "ширинасм": _format_comma_decimal(width_cm) if platform == "megamarket" else width_cm,
+        "ширинаупаковкисм": _format_comma_decimal(width_cm)
+        if platform == "megamarket"
+        else width_cm,
+        "высотасм": _format_comma_decimal(height_cm) if platform == "megamarket" else height_cm,
+        "высотаупаковкисм": _format_comma_decimal(height_cm)
+        if platform == "megamarket"
+        else height_cm,
         "габаритысупаковкойсм": dims_slash_cm,
-        "товардоставляетсявнесколькихупаковках": int(units) if units and int(units) > 1 else None,
+        "товардоставляетсявнесколькихупаковках": int(units)
+        if units and int(units) > 1
+        else None,
         "цена": product.get("price"),
         "ценаруб": product.get("price"),
         "ценасучетомскидок": product.get("price"),
-        "price": product.get("price"),
         "остаток": stock_val,
-        "stock": stock_val,
         "зачёркнутаяцена": product.get("strike_price"),
         "зачеркнутаяцена": product.get("strike_price"),
         "ценадоскидки": product.get("strike_price"),
@@ -633,20 +757,40 @@ def _row_values(
         values.setdefault(b, brand_val)
     if not any(values.get(m) for m in MODEL_SYNONYMS):
         for m in MODEL_SYNONYMS:
-            values[m] = product.get("name")
+            values[m] = spu_id if platform == "aliexpress" else product.get("name")
     if not any(values.get(m) for m in MARKING_SYNONYMS):
         values[MARKING_SYNONYMS[0]] = "Нет"
     if not values.get("количествовупаковке") and not values.get("количествовупаковкешт"):
         if units:
             values["количествовупаковке"] = units
 
-    # Приведение значений к регистру словаря площадки
+    # Приведение значений к регистру словаря площадки и очистка разделителей
     for key, val in list(values.items()):
         if val in (None, "") or isinstance(val, (int, float)):
             continue
         s = str(val)
-        if platform == "ozon" and (";" in s or "," in s) and key not in ("аннотация", "описание"):
-            s = _normalize_multi(s)
+        if (
+            platform in ("ozon", "megamarket")
+            and (";" in s or "," in s)
+            and key
+            not in (
+                "аннотация",
+                "описание",
+                "описаниетовара",
+                "вескг",
+                "весвупаковкекг",
+                "вессупаковкойкг",
+                "длинасм",
+                "длинаупаковкисм",
+                "ширинасм",
+                "ширинаупаковкисм",
+                "высотасм",
+                "высотаупаковкисм",
+            )
+        ):
+            s = "; ".join(p.strip() for p in re.split(r"[;,]", s) if p.strip())
+            if platform == "ozon":
+                s = _normalize_multi(s)
         fix = enum_fix.get(key)
         if fix:
             s = fix.get(s.strip().lower(), s)
@@ -663,6 +807,60 @@ def _build_enum_fix(spec: dict | None) -> dict[str, dict[str, str]]:
     return fix
 
 
+def _expand_products_for_platform(products: list, platform: str) -> list[dict]:
+    """
+    Для AliExpress и Мегамаркета: если у товара заданы вариации (`variants`),
+    разворачивает их в отдельные строки с единым SPU ID (`_spu_id` / `Модель`)
+    и индивидуальным SKU ID (`_article`), цветом и размером.
+    """
+    expanded: list[dict] = []
+    seen: dict[str, int] = {}
+
+    for p in products:
+        base_sku = str(p.get("sku") or p.get("external_id") or f"ID{p.get('id')}").strip()
+        seen[base_sku] = seen.get(base_sku, 0) + 1
+        spu_id = base_sku if seen[base_sku] == 1 else f"{base_sku}_{seen[base_sku]}"
+
+        variants = p.get("variants") or []
+        if platform == "aliexpress" and len(variants) > 0:
+            for idx, v in enumerate(variants, start=1):
+                clone = dict(p)
+                clone["_spu_id"] = spu_id
+                v_sku = str(v.get("sku") or f"{spu_id}-{idx}").strip()
+                clone["_article"] = v_sku
+                clone["_variant_color"] = v.get("color") or ""
+                clone["_variant_size"] = v.get("size") or v.get("name") or ""
+                clone["_variant_photo"] = v.get("photo") or ""
+                if v.get("price"):
+                    clone["price"] = v["price"]
+                if v.get("stock") is not None:
+                    clone["stock"] = v["stock"]
+                expanded.append(clone)
+        else:
+            clone = dict(p)
+            clone["_spu_id"] = spu_id
+            clone["_article"] = spu_id
+            expanded.append(clone)
+
+    return expanded
+
+
+def _detect_aliexpress_custom_attr_cols(ws, header_row: int) -> list[int]:
+    """
+    Находит до 5 столбцов блока «Произвольные характеристики продавца» в шаблоне AliExpress
+    (по тексту «Добавьте произвольную характеристику» в строке подсказок header_row - 1).
+    """
+    custom_cols: list[int] = []
+    if header_row < 2:
+        return custom_cols
+    hint_row = header_row - 1
+    for col in range(1, ws.max_column + 1):
+        hint_val = str(ws.cell(row=hint_row, column=col).value or "").lower()
+        if "произвольную характеристику" in hint_val:
+            custom_cols.append(col)
+    return custom_cols[:5]
+
+
 # ==================== Заполнение эталона ====================
 
 
@@ -674,7 +872,7 @@ def fill_official_template(
 ) -> bytes:
     """
     Открывает эталонный файл площадки (Ozon / Яндекс Маркет / WB / Магнит /
-    Мегамаркет / Poizon / Холодильник.ру / Страна.маркет / UDS),
+    Мегамаркет / Холодильник.ру / AliExpress),
     удаляет демонстрационные строки-примеры и заполняет нашими товарами.
     """
     pl = (platform or "ozon").lower().strip()
@@ -687,28 +885,51 @@ def fill_official_template(
     wb = load_workbook(io.BytesIO(path.read_bytes()))
     ws = _find_data_sheet(wb)
 
-    header_row = _find_header_row(ws) or 2
+    header_row = _find_header_row(ws) or (3 if pl == "aliexpress" else 2)
     data_start_row = _detect_data_start_row(ws, header_row, pl)
+
+    # Для AliExpress определяем 5 колонок «Произвольные характеристики продавца»
+    ae_custom_cols = _detect_aliexpress_custom_attr_cols(ws, header_row) if pl == "aliexpress" else []
 
     # Сопоставляем нормализованные заголовки с номерами столбцов
     headers: dict[str, int] = {}
     for col in range(1, ws.max_column + 1):
+        if col in ae_custom_cols:
+            continue
         h = ws.cell(row=header_row, column=col).value
         if h:
             norm_h = _norm(str(h).rstrip("*").strip())
             if norm_h and norm_h not in headers:
                 headers[norm_h] = col
 
-    # Зачищаем примеры («Дрель Makita» и т.д.) / старые данные ниже шапки
+    # Зачищаем примеры («Дрель Makita», демо-свитера SW01 и т.д.) ниже шапки
     if ws.max_row >= data_start_row:
         ws.delete_rows(data_start_row, ws.max_row - data_start_row + 1)
 
-    # Уникализация артикулов
-    seen: dict[str, int] = {}
-    for p in products:
-        base = p.get("sku") or p.get("external_id") or f"ID{p.get('id')}"
-        seen[base] = seen.get(base, 0) + 1
-        p["_article"] = base if seen[base] == 1 else f"{base}_{seen[base]}"
+    rows_to_write = _expand_products_for_platform(products, pl)
+
+    # Если это AliExpress и есть колонки произвольных характеристик продавца —
+    # выбираем до 5 дополнительных атрибутов, которых ещё нет среди стандартных колонок шаблона,
+    # и записываем их названия в header_row (строку 3), как требует документация AliExpress.
+    ae_custom_attr_names: list[tuple[int, str, str]] = []
+    if ae_custom_cols and rows_to_write:
+        skip_norms = set(headers.keys()) | {"бренд", "цвет", "размер", "модель", "тип"}
+        collected: list[tuple[str, str]] = []
+        seen_norms: set[str] = set()
+        for p in rows_to_write:
+            for a in p.get("attributes") or []:
+                aname = (a.get("name") or "").strip()
+                anorm = _norm(aname)
+                if aname and anorm and anorm not in skip_norms and anorm not in seen_norms:
+                    seen_norms.add(anorm)
+                    collected.append((aname, anorm))
+                    if len(collected) >= len(ae_custom_cols):
+                        break
+            if len(collected) >= len(ae_custom_cols):
+                break
+        for col_idx, (orig_name, norm_key) in zip(ae_custom_cols, collected):
+            ws.cell(row=header_row, column=col_idx, value=orig_name)
+            ae_custom_attr_names.append((col_idx, orig_name, norm_key))
 
     enum_fix = _build_enum_fix(spec)
 
@@ -720,22 +941,21 @@ def fill_official_template(
         "предельнаяценабезакцийруб",
         "зачёркнутаяценаруб",
         "зачеркнутаяценаруб",
-        "вескг",
-        "вессупаковкойкг",
-        "длинасм",
-        "ширинасм",
-        "высотасм",
+        "вессупаковкой",
+        "длинаупаковки",
+        "ширинаупаковки",
+        "высотаупаковки",
         "цена",
         "ценаруб",
         "ценасучетомскидок",
-        "price",
         "остаток",
-        "stock",
         "зачёркнутаяцена",
         "зачеркнутаяцена",
     }
+    if pl != "megamarket":
+        numeric_keys |= {"вескг", "весвупаковкекг", "вессупаковкойкг", "длинасм", "ширинасм", "высотасм"}
 
-    for i, product in enumerate(products, start=1):
+    for i, product in enumerate(rows_to_write, start=1):
         values = _row_values(product, i, enum_fix, platform=pl)
         r = data_start_row + i - 1
         for key, col in headers.items():
@@ -750,9 +970,15 @@ def fill_official_template(
                     pass
             ws.cell(row=r, column=col, value=val)
 
+        # Заполняем значения произвольных характеристик продавца в шаблоне AliExpress
+        for col_idx, _orig_name, norm_key in ae_custom_attr_names:
+            cval = values.get(norm_key)
+            if cval not in (None, ""):
+                ws.cell(row=r, column=col_idx, value=str(cval))
+
     buf = io.BytesIO()
     wb.save(buf)
     logger.info(
-        f"✅ Эталон [{pl}] ({path.name}): заполнено товаров: {len(products)} (со строки {data_start_row})"
+        f"✅ Эталон [{pl}] ({path.name}): заполнено строк: {len(rows_to_write)} (со строки {data_start_row})"
     )
     return buf.getvalue()

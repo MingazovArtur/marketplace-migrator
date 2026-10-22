@@ -11,14 +11,14 @@ logger = logging.getLogger(__name__)
 VALIDATION_RULES = {
     "wildberries": {"name_max": 100, "desc_max": 1000, "photos_min": 1, "photos_max": 30},
     "ozon": {"name_max": 255, "desc_max": 3000, "photos_min": 1, "photos_max": 15},
-    "yandex": {"name_max": 255, "desc_max": 500, "photos_min": 1, "photos_max": 10},
+    "yandex": {"name_max": 255, "desc_max": 6000, "photos_min": 1, "photos_max": 30},
     "magnit": {"name_max": 255, "desc_max": 500, "photos_min": 1, "photos_max": 10},
-    "megamarket": {"name_max": 200, "desc_max": 2000, "photos_min": 1, "photos_max": 10},
-    "poizon": {"name_max": 150, "desc_max": 1000, "photos_min": 1, "photos_max": 12},
-    "holodilnik": {"name_max": 255, "desc_max": 2000, "photos_min": 1, "photos_max": 10},
-    "strana": {"name_max": 255, "desc_max": 1500, "photos_min": 1, "photos_max": 10},
-    "uds": {"name_max": 100, "desc_max": 500, "photos_min": 1, "photos_max": 5},
+    "megamarket": {"name_max": 200, "desc_max": 3000, "photos_min": 1, "photos_max": 10},
+    "holodilnik": {"name_max": 255, "desc_max": 3000, "photos_min": 1, "photos_max": 10},
+    "aliexpress": {"name_max": 255, "desc_max": 5000, "photos_min": 1, "photos_max": 15},
 }
+
+FORBIDDEN_PHOTO_HOSTS = ("disk.yandex.", "yadi.sk", "drive.google.", "dropbox.com")
 
 
 def validate_product(product: dict, platform: str) -> list[dict]:
@@ -40,14 +40,24 @@ def validate_product(product: dict, platform: str) -> list[dict]:
         )
 
     # Цена
-    price = product.get("price") or 0
+    price = float(product.get("price") or 0)
     if price <= 0:
         issues.append({"field": "price", "level": "error", "message": "Цена не задана (0 ₽)"})
 
     # Фото
-    photos = product.get("photos") or []
+    photos = [str(u).strip() for u in (product.get("photos") or []) if str(u).strip()]
     if len(photos) < rules["photos_min"]:
-        issues.append({"field": "photos", "level": "warning", "message": "Нет ни одного фото"})
+        # Для Мегамаркета и AliExpress отсутствие главного фото блокирует загрузку шаблона
+        lvl = "error" if platform in ("megamarket", "aliexpress") else "warning"
+        issues.append(
+            {
+                "field": "photos",
+                "level": lvl,
+                "message": "Не указан URL основного фото"
+                if lvl == "error"
+                else "Нет ни одного фото",
+            }
+        )
     elif len(photos) > rules["photos_max"]:
         issues.append(
             {
@@ -56,6 +66,68 @@ def validate_product(product: dict, platform: str) -> list[dict]:
                 "message": f"Фото {len(photos)} (лимит {rules['photos_max']}) — лишние отброшены",
             }
         )
+
+    # Проверка запрещённых облачных ссылок для Мегамаркета и AliExpress
+    if photos and platform in ("megamarket", "aliexpress"):
+        bad_urls = [
+            u
+            for u in photos
+            if any(host in u.lower() for host in FORBIDDEN_PHOTO_HOSTS)
+            or (platform == "aliexpress" and "cloud.mail.ru" in u.lower())
+        ]
+        if bad_urls:
+            issues.append(
+                {
+                    "field": "photos",
+                    "level": "warning",
+                    "message": (
+                        f"Ссылки на закрытые облачные хранилища (Яндекс.Диск / Google Drive / Dropbox) "
+                        f"отклоняются площадкой {platform}. Используйте прямые HTTPS-ссылки на .jpg/.png."
+                    ),
+                }
+            )
+
+    # Специфичные проверки Мегамаркета по документации
+    if platform == "megamarket":
+        sku = str(product.get("sku") or product.get("external_id") or "")
+        if "#" in sku or "%" in sku:
+            issues.append(
+                {
+                    "field": "sku",
+                    "level": "warning",
+                    "message": "В «Коде товара продавца» Мегамаркета запрещены символы # и % (будут очищены автоматически)",
+                }
+            )
+        barcode = str(product.get("barcode") or "").strip()
+        if barcode.startswith("2"):
+            issues.append(
+                {
+                    "field": "barcode",
+                    "level": "warning",
+                    "message": "Штрихкод начинается с «2» (внутренний) — Мегамаркет требует GTIN (префикс 460–469) или запрос штрихкода в ЛК",
+                }
+            )
+
+    # Специфичные проверки AliExpress по документации
+    if platform == "aliexpress":
+        sku = str(product.get("sku") or product.get("external_id") or "")
+        if len(sku) > 50:
+            issues.append(
+                {
+                    "field": "sku",
+                    "level": "warning",
+                    "message": "Артикул (seller SKU ID) длиннее 50 символов — будет обрезан до 50 знаков",
+                }
+            )
+        wg = product.get("package_weight_grams") or product.get("weight_grams") or 0
+        if float(wg) <= 0:
+            issues.append(
+                {
+                    "field": "weight",
+                    "level": "warning",
+                    "message": "Вес не указан — для AliExpress вес и габариты не могут быть равны 0 (будет подставлен дефолт)",
+                }
+            )
 
     # Описание
     if not (product.get("description") or "").strip():

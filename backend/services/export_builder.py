@@ -8,6 +8,7 @@ import logging
 import re
 
 import pandas as pd
+from openpyxl.utils import get_column_letter
 
 from services.export_validator import VALIDATION_RULES
 
@@ -39,6 +40,24 @@ def _photos_str(p: dict, limit: int = 10) -> str:
 
 def _rules(platform: str) -> dict:
     return VALIDATION_RULES.get(platform, VALIDATION_RULES["ozon"])
+
+
+def _generate_gtin_ean13(product: dict, prefix: str = "460") -> str:
+    """
+    Генерирует валидный 13-значный штрихкод GTIN / EAN-13 по стандарту GS1.
+    Для Мегамаркета используется префикс 460 (так как коды на 2 отклоняются).
+    """
+    pid = int(product.get("id") or 1)
+    base12 = f"{prefix}{pid:09d}"[:12]
+    odd_sum = sum(int(base12[i]) for i in range(0, 12, 2))
+    even_sum = sum(int(base12[i]) for i in range(1, 12, 2))
+    check_digit = (10 - ((odd_sum + even_sum * 3) % 10)) % 10
+    return f"{base12}{check_digit}"
+
+
+def _clean_megamarket_sku(sku: str) -> str:
+    """В Коде товара продавца на Мегамаркете не должно быть символов # и %."""
+    return re.sub(r"[#%]+", "_", str(sku or "")).strip()
 
 
 def _magnit_row(p: dict) -> dict:
@@ -92,75 +111,117 @@ def _yandex_row(p: dict) -> dict:
 
 def _megamarket_row(p: dict) -> dict:
     r = _rules("megamarket")
+    raw_sku = p.get("sku") or p.get("external_id") or f"SMM-{p['id']}"
+    sku = _clean_megamarket_sku(raw_sku)
+
+    raw_bc = str(p.get("barcode") or "").strip()
+    bc_parts = [b.strip() for b in re.split(r"[;,]", raw_bc) if b.strip()]
+    main_gtin = (
+        bc_parts[0]
+        if (bc_parts and not bc_parts[0].startswith("2"))
+        else _generate_gtin_ean13(p, prefix="460")
+    )
+    second_bc = bc_parts[1] if len(bc_parts) > 1 else ""
+
+    photos = [str(u).strip() for u in (p.get("photos") or []) if str(u).strip()]
+    wg = p.get("package_weight_grams") or p.get("weight_grams") or 500
+    l_mm = p.get("package_length_mm") or 200
+    w_mm = p.get("package_width_mm") or 150
+    h_mm = p.get("package_height_mm") or 100
+
+    # Десятичные дроби на Мегамаркете пишутся через запятую (не более 2 знаков после запятой)
+    weight_str = f"{round(float(wg) / 1000.0, 2):.2f}".rstrip("0").rstrip(".").replace(".", ",")
+    length_str = f"{round(float(l_mm) / 10.0, 2):.2f}".rstrip("0").rstrip(".").replace(".", ",")
+    width_str = f"{round(float(w_mm) / 10.0, 2):.2f}".rstrip("0").rstrip(".").replace(".", ",")
+    height_str = f"{round(float(h_mm) / 10.0, 2):.2f}".rstrip("0").rstrip(".").replace(".", ",")
+
     return {
-        "Код товара продавца (offerId)": p.get("sku") or f"SMM-{p['id']}",
-        "Название товара": _limit(p["name"], r["name_max"]),
-        "Бренд": p.get("brand") or "Нет бренда",
-        "Штрихкод (Barcode)": p.get("barcode") or "",
-        "Категория": p.get("mapped_category") or p.get("category") or "",
-        "Цена, руб": p["price"],
+        "Код товара продавца": sku,
+        "Основной штрихкод (GTIN)": main_gtin,
+        "Штрихкод 2": second_bc,
+        "Ссылка на pdf-инструкцию": "",
+        "Ссылка на сертификат": "",
+        "Название товара по формуле: Тип товара+Бренд+Модель/Артикул": _limit(
+            p["name"], r["name_max"]
+        ),
+        "Описание товара": _limit(_clean_html(p.get("description") or p["name"]), r["desc_max"]),
+        "Бренд": p.get("brand") or "Без бренда",
+        "Модель": p.get("name", "")[:50],
+        "Артикул производителя": sku,
         "НДС": p.get("vat_rate") or "Не облагается",
-        "Остаток": p.get("stock") if p.get("stock") is not None else 10,
-        "Ссылка на фото": _photos_str(p, r["photos_max"]),
-        "Описание": _limit(_clean_html(p.get("description")), r["desc_max"]),
-    }
-
-
-def _poizon_row(p: dict) -> dict:
-    r = _rules("poizon")
-    return {
-        "Seller SKU": p.get("sku") or f"PZ-{p['id']}",
-        "Product Title": _limit(p["name"], r["name_max"]),
-        "Brand": p.get("brand") or "NoBrand",
-        "Category": p.get("mapped_category") or p.get("category") or "",
-        "Barcode / EAN": p.get("barcode") or "",
-        "Price": p["price"],
-        "Stock": p.get("stock") if p.get("stock") is not None else 10,
-        "Image URLs": _photos_str(p, r["photos_max"]),
-        "Description": _limit(_clean_html(p.get("description")), r["desc_max"]),
+        "Цена": p["price"],
+        "Вес, кг": weight_str,
+        "Длина, см": length_str,
+        "Ширина, см": width_str,
+        "Высота, см": height_str,
+        "URL основного фото": photos[0] if photos else "",
+        "URL фото 2": photos[1] if len(photos) > 1 else "",
     }
 
 
 def _holodilnik_row(p: dict) -> dict:
     r = _rules("holodilnik")
+    wg = p.get("package_weight_grams") or p.get("weight_grams") or 500
+    l_mm = p.get("package_length_mm") or 200
+    w_mm = p.get("package_width_mm") or 150
+    h_mm = p.get("package_height_mm") or 100
+    dims_cm = f"{round(float(l_mm)/10, 1)}x{round(float(w_mm)/10, 1)}x{round(float(h_mm)/10, 1)}"
+
     return {
         "Артикул": p.get("sku") or f"HL-{p['id']}",
         "Наименование товара": _limit(p["name"], r["name_max"]),
         "Производитель (Бренд)": p.get("brand") or "Нет бренда",
         "Категория": p.get("mapped_category") or p.get("category") or "",
-        "Штрихкод (EAN-13)": p.get("barcode") or "",
+        "Штрихкод (EAN-13)": p.get("barcode") or _generate_gtin_ean13(p, prefix="460"),
         "Цена, руб.": p["price"],
         "Остаток": p.get("stock") if p.get("stock") is not None else 10,
+        "Вес в упаковке, кг": round(float(wg) / 1000.0, 2),
+        "Габариты (ДхШхВ), см": dims_cm,
         "Ссылки на фото": _photos_str(p, r["photos_max"]),
         "Описание": _limit(_clean_html(p.get("description")), r["desc_max"]),
     }
 
 
-def _strana_row(p: dict) -> dict:
-    r = _rules("strana")
-    return {
-        "Артикул продавца": p.get("sku") or f"SM-{p['id']}",
-        "Наименование": _limit(p["name"], r["name_max"]),
-        "Бренд": p.get("brand") or "Нет бренда",
-        "Категория": p.get("mapped_category") or p.get("category") or "",
-        "Штрихкод": p.get("barcode") or "",
-        "Цена, руб": p["price"],
-        "Остаток": p.get("stock") if p.get("stock") is not None else 10,
-        "Ссылка на фото": _photos_str(p, r["photos_max"]),
-        "Описание": _limit(_clean_html(p.get("description")), r["desc_max"]),
+def _aliexpress_row(p: dict) -> dict:
+    r = _rules("aliexpress")
+    raw_sku = str(p.get("sku") or p.get("external_id") or f"AE-{p['id']}")[:50]
+    photos = [str(u).strip() for u in (p.get("photos") or []) if str(u).strip()]
+
+    attr_map = {
+        re.sub(r"[^a-zа-я0-9]", "", (a.get("name") or "").lower()): a.get("value")
+        for a in (p.get("attributes") or [])
+        if a.get("name")
     }
+    variants = p.get("variants") or []
+    first_var = variants[0] if variants else {}
+    color_val = first_var.get("color") or attr_map.get("цвет") or "Разноцветный"
+    size_val = first_var.get("size") or attr_map.get("размер") or ""
 
+    wg = p.get("package_weight_grams") or p.get("weight_grams") or 500
+    l_mm = p.get("package_length_mm") or 200
+    w_mm = p.get("package_width_mm") or 150
+    h_mm = p.get("package_height_mm") or 100
 
-def _uds_row(p: dict) -> dict:
-    r = _rules("uds")
     return {
-        "Артикул (SKU)": p.get("sku") or f"UDS-{p['id']}",
-        "Название товара": _limit(p["name"], r["name_max"]),
-        "Категория": p.get("mapped_category") or p.get("category") or "Товары",
-        "Цена": p["price"],
-        "Остаток": p.get("stock") if p.get("stock") is not None else 10,
-        "Фото (URL)": _photos_str(p, r["photos_max"]),
-        "Описание": _limit(_clean_html(p.get("description")), r["desc_max"]),
+        "Модель (seller SPU ID)*": raw_sku,
+        "Артикул/Штрихкод (seller SKU ID)*": raw_sku,
+        "Штрихкод / EAN": p.get("barcode") or _generate_gtin_ean13(p, prefix="460"),
+        "Наименование товара*": _limit(p["name"], r["name_max"]),
+        "Описание*": _limit(_clean_html(p.get("description") or p["name"]), r["desc_max"]),
+        "Бренд*": p.get("brand") or "NONE",
+        "Главное фото*": photos[0] if photos else "",
+        "Фото SKU": photos[0] if photos else "",
+        "Цвет*": color_val,
+        "Доставка из*": "Российская Федерация",
+        "Размер": size_val,
+        "Название цвета в системе продавца": color_val,
+        "Название размера в системе продавца": size_val,
+        "Цена*": p["price"],
+        "Остаток*": p.get("stock") if p.get("stock") is not None else 10,
+        "Вес с упаковкой*": round(max(float(wg), 100.0) / 1000.0, 2),
+        "Длина упаковки*": max(int(round(float(l_mm) / 10.0)), 1),
+        "Ширина упаковки*": max(int(round(float(w_mm) / 10.0)), 1),
+        "Высота упаковки*": max(int(round(float(h_mm) / 10.0)), 1),
     }
 
 
@@ -170,10 +231,8 @@ EXPORT_FORMATS = {
     "wildberries": {"sheet": "Товары", "row_mapper": _wb_row},
     "yandex": {"sheet": "Товары", "row_mapper": _yandex_row},
     "megamarket": {"sheet": "Товары", "row_mapper": _megamarket_row},
-    "poizon": {"sheet": "Products", "row_mapper": _poizon_row},
     "holodilnik": {"sheet": "Товары", "row_mapper": _holodilnik_row},
-    "strana": {"sheet": "Товары", "row_mapper": _strana_row},
-    "uds": {"sheet": "Товары", "row_mapper": _uds_row},
+    "aliexpress": {"sheet": "Шаблон", "row_mapper": _aliexpress_row},
 }
 
 
@@ -199,8 +258,9 @@ def build_upload_file(products: list, platform: str) -> io.BytesIO:
         sheet_name = fmt.get("sheet", "Товары")
         df.to_excel(writer, index=False, sheet_name=sheet_name)
         ws = writer.sheets[sheet_name]
-        for i, col in enumerate(df.columns):
-            ws.column_dimensions[chr(65 + i)].width = max(15, min(45, len(str(col)) + 10))
+        for i, col in enumerate(df.columns, start=1):
+            col_letter = get_column_letter(i)
+            ws.column_dimensions[col_letter].width = max(15, min(45, len(str(col)) + 10))
 
     output.seek(0)
     logger.info(f"📤 Сформирован файл выгрузки для {platform}: {len(rows)} товаров")

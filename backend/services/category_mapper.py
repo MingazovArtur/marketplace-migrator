@@ -2,6 +2,20 @@ import json
 from pathlib import Path
 
 
+def _stem_ru(word: str) -> str:
+    """Простой стемминг русских окончаний для сопоставления единственного/множественного числа."""
+    w = word.lower().strip()
+    if len(w) <= 3:
+        return w
+    for suffix in ("ами", "ями", "ев", "ов", "ей", "ам", "ям", "ах", "ях", "ую", "юю", "ые", "ие", "ой", "ий", "ый"):
+        if w.endswith(suffix) and len(w) - len(suffix) >= 3:
+            return w[: -len(suffix)]
+    for suffix in ("а", "я", "ы", "и", "е", "о", "у", "ю", "ь"):
+        if w.endswith(suffix) and len(w) - len(suffix) >= 3:
+            return w[: -len(suffix)]
+    return w
+
+
 class CategoryMapper:
     """Универсальный маппинг категорий между любыми маркетплейсами"""
 
@@ -18,7 +32,9 @@ class CategoryMapper:
         if not text:
             return None
         text_low = str(text).lower().strip()
-        tokens = set(re.findall(r"[a-zа-яё0-9]+", text_low))
+        raw_tokens = re.findall(r"[a-zа-яё0-9]+", text_low)
+        tokens = set(raw_tokens)
+        stemmed_tokens = {_stem_ru(t) for t in raw_tokens if len(t) >= 3}
 
         db = SessionLocal()
         try:
@@ -37,13 +53,33 @@ class CategoryMapper:
             if low == text_low:
                 return name  # точное совпадение
             type_part = low.split("/")[-1].strip()  # «футболка» из «Одежда / Футболка»
-            score = 0
-            if type_part and type_part in text_low:
-                score += 100 + len(type_part)
             parent_part = low.split("/")[0].strip()
+            score = 0
+
+            if type_part and type_part in text_low:
+                score += 120 + len(type_part)
+            else:
+                # Проверяем совпадение по основе слова (например, «футболка» <-> «футболки»)
+                type_words = [w for w in re.findall(r"[a-zа-яё0-9]+", type_part) if len(w) >= 3]
+                type_stems = {_stem_ru(w) for w in type_words}
+                common_stems = type_stems & stemmed_tokens
+                if common_stems:
+                    score += 100 + 15 * len(common_stems)
+
             if parent_part and parent_part in text_low:
                 score += 50
-            score += 10 * len(tokens & set(re.findall(r"[a-zа-яё0-9]+", low)))
+            else:
+                parent_stems = {
+                    _stem_ru(w)
+                    for w in re.findall(r"[a-zа-яё0-9]+", parent_part)
+                    if len(w) >= 3
+                }
+                if parent_stems & stemmed_tokens:
+                    score += 30
+
+            name_tokens = set(re.findall(r"[a-zа-яё0-9]+", low))
+            score += 10 * len(tokens & name_tokens)
+
             if score > best_score:
                 best_name, best_score = name, score
 
@@ -104,13 +140,17 @@ class CategoryMapper:
                     return {"id": int(wb_id), "name": wb_name}
             return {"id": 1, "name": "Товары для дома"}
 
-        # === МАППИНГ НА ЯНДЕКС МАРКЕТ / МЕГАМАРКЕТ / СТРАНА.МАРКЕТ / MAGNIT / UDS ===
-        if target_platform in ("yandex", "megamarket", "strana", "magnit", "uds"):
+        # === МАППИНГ НА ЯНДЕКС МАРКЕТ / МЕГАМАРКЕТ / МАГНИТ МАРКЕТ / ALIEXPRESS ===
+        if target_platform in ("yandex", "megamarket", "magnit", "aliexpress"):
             rules = [
                 (["уборка", "швабра", "ведро"], "90636", "Товары для дома"),
                 (["посуда", "миск", "салатник", "кружк", "тарелк"], "90634", "Посуда"),
                 (["электрон", "аудио", "наушник", "смартфон", "телефон"], "90630", "Электроника"),
-                (["одежд", "футболк", "брюк", "плать", "куртк", "худи"], "90632", "Одежда"),
+                (
+                    ["одежд", "футболк", "брюк", "плать", "куртк", "худи", "свитер"],
+                    "90632",
+                    "Одежда",
+                ),
                 (["кроссовк", "кеды", "обув", "ботинк"], "90640", "Обувь"),
                 (["книг", "журнал"], "90638", "Книги"),
                 (["игрушк", "детск"], "90633", "Детские товары"),
@@ -125,29 +165,43 @@ class CategoryMapper:
                     return {"id": y_id, "name": y_name}
             return {"id": "90636", "name": "Товары для дома"}
 
-        # === МАППИНГ НА POIZON ===
-        if target_platform == "poizon":
-            rules = [
-                (["кроссовк", "кеды", "sneaker", "ботинк", "обув"], "PZ-101", "Обувь / Кроссовки"),
-                (["одежд", "футболк", "худи", "толстовк", "куртк", "брюк"], "PZ-102", "Одежда / Streetwear"),
-                (["сумк", "рюкзак", "часы", "очки", "аксессуар"], "PZ-103", "Аксессуары"),
-                (["парфюм", "косметик", "красот"], "PZ-104", "Красота и уход"),
-                (["электрон", "наушник", "консоль", "гаджет"], "PZ-105", "Электроника"),
-            ]
-            for keywords, p_id, p_name in rules:
-                if any(kw in source_lower for kw in keywords):
-                    return {"id": p_id, "name": p_name}
-            return {"id": "PZ-100", "name": "Одежда и обувь"}
-
         # === МАППИНГ НА ХОЛОДИЛЬНИК.РУ ===
         if target_platform == "holodilnik":
             rules = [
-                (["холодильник", "морозильн", "плит", "стиральн", "посудомоечн"], "HL-1", "Крупная бытовая техника"),
-                (["чайник", "блендер", "миксер", "кофемашин", "микроволнов", "пылесос", "утюг"], "HL-2", "Мелкая бытовая техника"),
+                (
+                    ["холодильник", "морозильн", "плит", "стиральн", "посудомоечн"],
+                    "HL-1",
+                    "Крупная бытовая техника",
+                ),
+                (
+                    [
+                        "чайник",
+                        "блендер",
+                        "миксер",
+                        "кофемашин",
+                        "микроволнов",
+                        "пылесос",
+                        "утюг",
+                    ],
+                    "HL-2",
+                    "Мелкая бытовая техника",
+                ),
                 (["телевизор", "аудио", "наушник", "колонк"], "HL-3", "ТВ и Аудио"),
-                (["смартфон", "телефон", "ноутбук", "планшет", "компьютер"], "HL-4", "Смартфоны и гаджеты"),
-                (["кондиционер", "обогреватель", "вентилятор", "водонагреватель"], "HL-5", "Климатическая техника"),
-                (["посуда", "сковород", "кастрюл", "миск", "нож"], "HL-6", "Посуда и кухонные аксессуары"),
+                (
+                    ["смартфон", "телефон", "ноутбук", "планшет", "компьютер"],
+                    "HL-4",
+                    "Смартфоны и гаджеты",
+                ),
+                (
+                    ["кондиционер", "обогреватель", "вентилятор", "водонагреватель"],
+                    "HL-5",
+                    "Климатическая техника",
+                ),
+                (
+                    ["посуда", "сковород", "кастрюл", "миск", "нож"],
+                    "HL-6",
+                    "Посуда и кухонные аксессуары",
+                ),
             ]
             for keywords, h_id, h_name in rules:
                 if any(kw in source_lower for kw in keywords):

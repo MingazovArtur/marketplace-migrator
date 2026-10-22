@@ -3,17 +3,21 @@
 
 ✅ Изменения:
   - добавлен GET /specs/{platform}/names — лёгкий список имён (для datalist)
-  - порядок маршрутов: /names объявлен ДО /{category_id} (иначе "names" ловится как id)
+  - порядок маршрутов: /names объявлен ДО /{category_id:path} (иначе "names" ловится как id)
   - детализация: key-source теперь отдаёт also `hint` — что делать если ключа нет
   - ИНТЕГРАЦИЯ КЭША: /specs/{platform}/names и /categories/{platform} используют Redis
   - /categories/{platform}/refresh и /category-mapping принимают как JSON body, так и query-параметры
+  - /{category_id:path} корректно принимает названия со слэшами («Родитель / Тип») и ищет по category_id ИЛИ category_name
+  - добавлены DELETE /specs/{platform} и DELETE /specs/{platform}/{category_id:path} для администратора
 """
 
 import logging
+from urllib.parse import unquote
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import or_
 
 from core.auth import get_current_user
 from core.config import settings
@@ -43,6 +47,14 @@ class SaveMappingPayload(BaseModel):
     source_category_id: str | None = None
     target_platform: str | None = None
     target_category_id: str | None = None
+
+
+def _require_admin(user: User) -> None:
+    if getattr(user, "role", None) != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Только администратор может удалять спецификации площадок",
+        )
 
 
 # ===========================================================================
@@ -156,7 +168,7 @@ def spec_key_source(platform: str, current_user: User = Depends(get_current_user
     return {"platform": platform, "has_server_key": has_server_key, "hint": hint}
 
 
-# ========== ВАЖНО: порядок маршрутов — /names ДО /{category_id} ==========
+# ========== ВАЖНО: порядок маршрутов — /names ДО /{category_id:path} ==========
 
 
 @router.get("/specs/{platform}/names")
@@ -216,22 +228,116 @@ def list_specs(platform: str, current_user: User = Depends(get_current_user)):
         db.close()
 
 
-@router.get("/specs/{platform}/{category_id}")
-def get_spec(platform: str, category_id: str, current_user: User = Depends(get_current_user)):
-    """Спек одной категории по её category_id."""
+@router.delete("/specs/{platform}")
+def delete_all_platform_specs(
+    platform: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Удалить ВСЕ спецификации указанной площадки (только для администратора)."""
+    _require_admin(current_user)
+    db = SessionLocal()
+    try:
+        deleted = (
+            db.query(PlatformCategorySpec)
+            .filter(PlatformCategorySpec.platform == platform)
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+        cache_service.delete_pattern(f"specs:{platform}:*")
+        logger.warning(
+            f"🗑 ADMIN DELETE ALL SPECS: user={current_user.id} platform={platform} deleted={deleted}"
+        )
+        return {
+            "success": True,
+            "platform": platform,
+            "deleted": deleted,
+            "message": f"Удалено спецификаций ({platform}): {deleted}",
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Ошибка удаления всех спеков {platform}: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка удаления спеков: {e}")
+    finally:
+        db.close()
+
+
+@router.delete("/specs/{platform}/{category_id:path}")
+def delete_single_spec(
+    platform: str,
+    category_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Удалить спецификацию одной категории по её ID или имени (только для администратора)."""
+    _require_admin(current_user)
+    decoded_id = unquote(category_id).strip()
     db = SessionLocal()
     try:
         row = (
             db.query(PlatformCategorySpec)
             .filter(
                 PlatformCategorySpec.platform == platform,
-                PlatformCategorySpec.category_id == category_id,
+                or_(
+                    PlatformCategorySpec.category_id == decoded_id,
+                    PlatformCategorySpec.category_name == decoded_id,
+                ),
+            )
+            .first()
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Спецификация «{decoded_id}» не найдена")
+
+        cat_name = row.category_name
+        db.delete(row)
+        db.commit()
+        cache_service.delete_pattern(f"specs:{platform}:*")
+        logger.info(
+            f"🗑 ADMIN DELETE SPEC: user={current_user.id} platform={platform} category='{cat_name}'"
+        )
+        return {
+            "success": True,
+            "platform": platform,
+            "category_name": cat_name,
+            "message": f"Спецификация «{cat_name}» удалена",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Ошибка удаления спека {platform}/{decoded_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка удаления спека: {e}")
+    finally:
+        db.close()
+
+
+@router.get("/specs/{platform}/{category_id:path}")
+def get_spec(
+    platform: str,
+    category_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Спек одной категории по её category_id ИЛИ category_name.
+    Использует :path, чтобы корректно обрабатывать названия со слэшами
+    (например, «3D-печать и сканирование / 3D-принтер»).
+    """
+    decoded_id = unquote(category_id).strip()
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(PlatformCategorySpec)
+            .filter(
+                PlatformCategorySpec.platform == platform,
+                or_(
+                    PlatformCategorySpec.category_id == decoded_id,
+                    PlatformCategorySpec.category_name == decoded_id,
+                ),
             )
             .first()
         )
         if not row:
             raise HTTPException(
-                status_code=404, detail="Спека не найдена. Сначала обновите через /refresh"
+                status_code=404,
+                detail=f"Спека «{decoded_id}» не найдена. Сначала обновите через «Загрузить спеки»",
             )
         return PlatformCategorySpecResponse.model_validate(row)
     finally:
