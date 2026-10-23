@@ -319,14 +319,12 @@ const ICONS = {
     </g>
   ),
 
-  /* ---------- Разное (без вложенных <svg>) ---------- */
+  /* ---------- Разное ---------- */
   book: (
-    <>
-      <g stroke="currentColor">
-        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-      </g>
-    </>
+    <g stroke="currentColor">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </g>
   ),
   warning: (
     <>
@@ -465,6 +463,7 @@ export const TagIcon = (p) => <Icon name="tag" {...p} />;
 export const VariantsIcon = (p) => <Icon name="variants" {...p} />;
 export const ReportIcon = (p) => <Icon name="report" {...p} />;
 export const EditIcon = (p) => <Icon name="edit" {...p} />;
+export const PencilIcon = (p) => <Icon name="edit" {...p} />;
 export const RefreshIcon = (p) => <Icon name="refresh" {...p} />;
 export const SearchIcon = (p) => <Icon name="search" {...p} />;
 export const LogoIcon = (p) => <Icon name="logo" {...p} />;

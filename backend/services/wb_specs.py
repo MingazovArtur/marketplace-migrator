@@ -1,19 +1,20 @@
 """
-Загрузчик спецификаций Wildberries через Content API v2.
+Загрузчик спецификаций Wildberries через Content API v2[cite: 12].
 
-Эндпоинты:
-- GET  /content/v2/object/parent/all            → все предметы (subjects)
-- POST /content/v2/object/characteristics/list  → характеристики предмета
-- GET  /content/v2/directory/{directoryID}      → значения словаря
+Эндпоинты[cite: 12]:
+- GET  /content/v2/object/parent/all            → все предметы (subjects)[cite: 12]
+- POST /content/v2/object/characteristics/list  → характеристики предмета[cite: 12]
+- GET  /content/v2/directory/{directoryID}      → значения словаря[cite: 12]
 
-Авторизация: сырой токен в заголовке Authorization (без схемы).
-Документация: https://dev.wildberries.ru/docs/openapi/item-management
+Авторизация: сырой токен в заголовке Authorization (без схемы)[cite: 12].
+Документация: https://dev.wildberries.ru/docs/openapi/item-management[cite: 12]
 """
 
 import asyncio
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime
 
 import httpx
@@ -25,12 +26,13 @@ logger = logging.getLogger(__name__)
 
 WB_API_BASE = "https://content-api.wildberries.ru"
 
-# Пауза между запросами характеристик — бережём rate-limit WB
+# Пауза между запросами характеристик — бережём rate-limit WB[cite: 12]
 WB_REQUEST_DELAY = 0.2
+PROGRESS_EVERY = 5
 
 
 def _wb_headers(token: str) -> dict:
-    """WB принимает сырой токен без схемы Bearer/OAuth."""
+    """WB принимает сырой токен без схемы Bearer/OAuth[cite: 12]."""
     return {
         "Authorization": token,
         "Accept": "application/json",
@@ -42,7 +44,7 @@ def _wb_headers(token: str) -> dict:
 
 
 async def fetch_wb_subjects(client: httpx.AsyncClient, token: str) -> list[dict]:
-    """Список всех предметов Wildberries."""
+    """Список всех предметов Wildberries[cite: 12]."""
     resp = await client.get(
         f"{WB_API_BASE}/content/v2/object/parent/all",
         headers=_wb_headers(token),
@@ -71,7 +73,7 @@ async def fetch_wb_subjects(client: httpx.AsyncClient, token: str) -> list[dict]
 async def fetch_wb_characteristics(
     client: httpx.AsyncClient, token: str, object_id: str
 ) -> list[dict]:
-    """Характеристики конкретного предмета."""
+    """Характеристики конкретного предмета[cite: 12]."""
     resp = await client.post(
         f"{WB_API_BASE}/content/v2/object/characteristics/list",
         headers=_wb_headers(token),
@@ -118,7 +120,7 @@ async def fetch_wb_characteristics(
 async def fetch_wb_directory(
     client: httpx.AsyncClient, token: str, directory_id: int, limit: int = 1000
 ) -> list[str] | None:
-    """Значения словаря WB (цвета, размеры и т.д.)."""
+    """Значения словаря WB (цвета, размеры и т.д.)[cite: 12]."""
     try:
         resp = await client.get(
             f"{WB_API_BASE}/content/v2/directory/{directory_id}",
@@ -138,7 +140,7 @@ async def fetch_wb_directory(
 
 
 def _map_wb_type(ch: dict, directory_id: int) -> str:
-    """Эвристика типов WB: словарь → select, единицы измерения → number, иначе text."""
+    """Эвристика типов WB: словарь → select, единицы измерения → number, иначе text[cite: 12]."""
     raw = (ch.get("type") or ch.get("valueType") or "").lower()
     if raw in ("number", "integer", "decimal", "float"):
         return "number"
@@ -166,23 +168,28 @@ async def refresh_wildberries_specs(
     user_id: int,
     token: str,
     category_ids: list[str] | None = None,
+    progress_cb: Callable | None = None,
 ) -> dict:
-    """Подтягивает предметы + характеристики, сохраняет как PlatformCategorySpec."""
+    """Подтягивает предметы + характеристики, сохраняет как PlatformCategorySpec[cite: 12]."""
     async with httpx.AsyncClient(timeout=60) as client:
         subjects = await fetch_wb_subjects(client, token)
 
         if category_ids:
             subjects = [s for s in subjects if s["id"] in category_ids]
 
+        total = len(subjects)
         fetched = 0
         errors = []
 
-        for s in subjects:
+        if progress_cb:
+            progress_cb({"total": total, "fetched": 0, "errors": 0})
+
+        for idx, s in enumerate(subjects, start=1):
             try:
                 attrs = await fetch_wb_characteristics(client, token, s["id"])
 
                 spec_content = {
-                    # WB Excel-выгрузка из редактора карточек — один лист
+                    # WB Excel-выгрузка из редактора карточек — один лист[cite: 12]
                     "sheets": ["Товары"],
                     "required_fields": [a["name"] for a in attrs if a["required"]],
                     "attributes": attrs,
@@ -203,7 +210,10 @@ async def refresh_wildberries_specs(
                 errors.append({"category_id": s["id"], "error": str(e)})
                 logger.warning(f"WB: ошибка загрузки характеристик предмета {s['id']}: {e}")
 
-            await asyncio.sleep(WB_REQUEST_DELAY)  # бережём rate-limit
+            if progress_cb and (idx % PROGRESS_EVERY == 0 or idx == total):
+                progress_cb({"total": total, "fetched": fetched, "errors": len(errors)})
+
+            await asyncio.sleep(WB_REQUEST_DELAY)  # бережём rate-limit[cite: 12]
 
     return {
         "platform": "wildberries",
