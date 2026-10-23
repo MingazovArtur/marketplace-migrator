@@ -643,7 +643,7 @@ export const api = {
     return res.json();
   },
 
-  /* ==================== Эталонные шаблоны площадок (Ozon, Яндекс Маркет, WB, Магнит) ==================== */
+  /* ==================== Эталонные шаблоны площадок ==================== */
 
   uploadOzonTemplate: async (categoryName, file, platform = 'ozon') => {
     const fd = new FormData();
@@ -763,6 +763,24 @@ export const api = {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка получения спека'));
+    return res.json();
+  },
+
+  deleteSpec: async (platform, categoryId) => {
+    const res = await fetch(`${API_URL}/specs/${enc(platform)}/${enc(categoryId)}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка удаления спека'));
+    return res.json();
+  },
+
+  deleteAllSpecs: async (platform) => {
+    const res = await fetch(`${API_URL}/specs/${enc(platform)}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка очистки спецификаций'));
     return res.json();
   },
 

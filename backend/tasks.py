@@ -1,15 +1,17 @@
 """
 Celery задачи для фоновой миграции товаров, загрузки спеков площадок и тяжёлого XLSX-экспорта.
 
-✅ v5:
+✅ v6:
   - Добавлена изолированная задача generate_xlsx_export_task для очереди xlsx_export.
   - Сохранены все существующие задачи (миграции, скачивание фото, загрузка спеков).
+  - Улучшен поиск категории по спекам (_match_spec_by_text со стеммингом единственного/множественного числа).
+  - Добавлен фолбэк _pick_target_category для площадок с эталонным шаблоном и площадок без загруженных спеков.
 """
 
 import logging
 import os
-import time
 import re as _re
+import time
 from pathlib import Path
 
 from celery_app import celery_app
@@ -19,6 +21,7 @@ from services import cache_service, defaults_service
 from services.category_mapper import CategoryMapper
 from services.category_service import category_service
 from services.platform_utils import detect_platform
+from services.template_filler import has_official_template
 from services.xlsx_generator import generate_export
 
 logger = logging.getLogger(__name__)
@@ -68,6 +71,37 @@ def _norm_name(s):
     return _re.sub(r"[^a-zа-я0-9]", "", (s or "").lower())
 
 
+def _stem_ru(word: str) -> str:
+    """Стемминг русских окончаний для сопоставления единственного и множественного числа."""
+    w = (word or "").lower().strip()
+    if len(w) <= 3:
+        return w
+    for suffix in (
+        "ами",
+        "ями",
+        "ев",
+        "ов",
+        "ей",
+        "ам",
+        "ям",
+        "ах",
+        "ях",
+        "ую",
+        "юю",
+        "ые",
+        "ие",
+        "ой",
+        "ий",
+        "ый",
+    ):
+        if w.endswith(suffix) and len(w) - len(suffix) >= 3:
+            return w[: -len(suffix)]
+    for suffix in ("а", "я", "ы", "и", "е", "о", "у", "ю", "ь"):
+        if w.endswith(suffix) and len(w) - len(suffix) >= 3:
+            return w[: -len(suffix)]
+    return w
+
+
 # ---------------------------------------------------------------------------
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
@@ -93,6 +127,23 @@ def _base_source(source_value: str) -> str:
     if not source_value:
         return "неизвестно"
     return str(source_value).split(" → ")[0].strip()
+
+
+def _platform_has_any_specs(platform: str) -> bool:
+    """Проверяет, загружена ли хотя бы одна спецификация для данной площадки в БД."""
+    from database.models import PlatformCategorySpec
+    from database.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        return (
+            db.query(PlatformCategorySpec.id)
+            .filter(PlatformCategorySpec.platform == platform)
+            .first()
+            is not None
+        )
+    finally:
+        db.close()
 
 
 def _spec_name_exists(platform: str, name) -> bool:
@@ -121,8 +172,9 @@ def _match_spec_by_text(text, platform: str):
     """
     Умный поиск спека по тексту товара/категории.
     Ищет ТОЧНОЕ имя из platform_category_specs, где:
-      1) ТИП (часть после '/') полностью входит в текст — самый высокий приоритет (score ≥ 100);
-      2) ТИП начинается с введённой подстроки (≥4 символов) — префикс-матчинг (score ≥ 50).
+      1) ТИП (часть после '/') полностью входит в текст — самый высокий приоритет (score ≥ 120);
+      2) Основа слова ТИПА совпадает с основой слова из текста товара («Футболка» <-> «Футболки») (score ≥ 100);
+      3) ТИП начинается с введённой подстроки (≥4 символов) — префикс-матчинг (score ≥ 60).
     Берёт самый длинный совпавший тип (более специфичный).
     """
     if not text:
@@ -133,6 +185,10 @@ def _match_spec_by_text(text, platform: str):
     low = str(text).lower().strip()
     if not low:
         return None
+
+    text_words = [w for w in _re.findall(r"[a-zа-яё0-9]+", low) if len(w) >= 3]
+    text_stems = {_stem_ru(w) for w in text_words}
+
     db = SessionLocal()
     try:
         names = [
@@ -146,14 +202,22 @@ def _match_spec_by_text(text, platform: str):
 
     best, best_score = None, 0
     for name in names:
-        type_part = name.lower().split("/")[-1].strip()
-        if not type_part or len(type_part) < 4:
+        low_name = name.lower()
+        type_part = low_name.split("/")[-1].strip()
+        if not type_part or len(type_part) < 3:
             continue
         score = 0
         if type_part in low:
-            score = 100 + len(type_part)
+            score = 120 + len(type_part)
         elif len(low) >= 4 and type_part.startswith(low):
-            score = 50 + len(type_part)
+            score = 60 + len(type_part)
+        else:
+            type_words = [w for w in _re.findall(r"[a-zа-яё0-9]+", type_part) if len(w) >= 3]
+            type_stems = {_stem_ru(w) for w in type_words}
+            common = type_stems & text_stems
+            if common:
+                score = 100 + 15 * len(common)
+
         if score > best_score:
             best, best_score = name, score
     return best
@@ -177,17 +241,19 @@ def _pick_target_category(product: dict, edited_category, target_platform: str, 
     mapping = category_service.get_mapping_for_product(
         source_platform, product.get("category"), target_platform, user_id
     )
-    if mapping and mapping.get("is_manual"):
-        name = mapping.get("target_category_name")
-        if _spec_name_exists(target_platform, name):
-            return name, "ручной маппинг"
-        logger.warning(f"⚠️ Ручной маппинг указывает на '{name}', но её нет в спеках — игнорирую")
+    manual_name = (
+        mapping.get("target_category_name") if (mapping and mapping.get("is_manual")) else None
+    )
+    if manual_name:
+        if _spec_name_exists(target_platform, manual_name):
+            return manual_name, "ручной маппинг"
+        logger.warning(f"⚠️ Ручной маппинг указывает на '{manual_name}', но её нет в спеках — игнорирую")
 
     # 4) Авто-маппинг + проверка
     category_name = product.get("category")
     map_text = (
         category_name
-        if category_name and category_name != "Не указана"
+        if category_name and category_name not in ("Не указана", "Без категории", "—")
         else (product.get("name") or "Дом и сад")
     )
     auto_map = category_mapper.auto_map_by_text(map_text, target_platform)
@@ -200,11 +266,29 @@ def _pick_target_category(product: dict, edited_category, target_platform: str, 
         )
 
     # 5) Поиск типа товара по спекам
-    spec_name = _match_spec_by_text(map_text, target_platform) or _match_spec_by_text(
-        product.get("name"), target_platform
+    spec_name = (
+        _match_spec_by_text(map_text, target_platform)
+        or _match_spec_by_text(product.get("name"), target_platform)
+        or category_mapper.auto_map_to_spec(map_text, target_platform)
+        or category_mapper.auto_map_to_spec(product.get("name"), target_platform)
     )
     if spec_name:
         return spec_name, "поиск по спекам"
+
+    # 6) Фолбэк для площадок с загруженным эталонным шаблоном (например, Яндекс Маркет)
+    #    или площадок, где спеки в БД не загружены:
+    has_tpl = has_official_template(edited_category or existing or "", platform=target_platform)
+    has_specs_in_db = _platform_has_any_specs(target_platform)
+    if has_tpl or not has_specs_in_db or target_platform != "ozon":
+        fallback_cat = (
+            (str(edited_category).strip() if edited_category else None)
+            or manual_name
+            or (existing if existing and existing not in ("Не указана", "—") else None)
+            or (category_name if category_name and category_name not in ("Не указана", "—") else None)
+            or auto_name
+            or "Товары для дома"
+        )
+        return fallback_cat, "эталонный шаблон / авто-категория"
 
     return None, "не найдено"
 
@@ -435,6 +519,7 @@ def migrate_product_task(
             logger.error(f"Товар {product_id} не найден или не принадлежит пользователю {user_id}")
             return {"status": "error", "message": "Товар не найден или не принадлежит вам"}
 
+        previous_mapped_category = product.get("mapped_category")
         repo.update(product_id, {"status": "processing", "error_message": None}, user_id=user_id)
 
         old_price = _safe_float(product.get("price"))
@@ -458,7 +543,9 @@ def migrate_product_task(
             logger.info(f"🩹 Товар {product_id}: дефолты дописали поля {list(upd)}")
 
         original_price = _safe_float(
-            edited_data.get("price") if (edited_data and edited_data.get("price") is not None) else product.get("price")
+            edited_data.get("price")
+            if (edited_data and edited_data.get("price") is not None)
+            else product.get("price")
         )
         price_multiplier = _safe_float(PRICE_RULES.get(target_platform, 1.0), default=1.0)
         final_price = round(original_price * price_multiplier, 2)
@@ -479,7 +566,11 @@ def migrate_product_task(
             logger.warning(f"⚠️ Товар {product_id}: миграция отклонена — цена 0")
             return {"status": "error", "message": error_msg, "product_id": product_id}
 
-        final_name = edited_data.get("name") if (edited_data and edited_data.get("name")) else product.get("name")
+        final_name = (
+            edited_data.get("name")
+            if (edited_data and edited_data.get("name"))
+            else product.get("name")
+        )
         base_source = _base_source(product.get("source"))
         new_source = f"{base_source} → {PLATFORM_CONFIG[target_platform]['name']}"
 
@@ -496,7 +587,7 @@ def migrate_product_task(
                     "status": "error",
                     "name": final_name,
                     "price": final_price,
-                    "mapped_category": None,
+                    "mapped_category": previous_mapped_category,
                     "error_message": error_msg,
                 },
                 user_id=user_id,
@@ -639,6 +730,7 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
                 )
                 continue
 
+            previous_mapped_category = product.get("mapped_category")
             old_price = _safe_float(product.get("price"))
             old_category = product.get("category")
             source_platform = detect_platform(product.get("source"))
@@ -680,7 +772,7 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
                     {
                         "status": "error",
                         "price": final_price,
-                        "mapped_category": None,
+                        "mapped_category": previous_mapped_category,
                         "error_message": error_msg,
                     },
                     user_id=user_id,
@@ -989,7 +1081,9 @@ def generate_xlsx_export_task(
     """
     t0 = time.perf_counter()
     total = len(products)
-    logger.info(f"📊 Старт фоновой генерации XLSX для платформы '{platform}' (товаров: {total}, user={user_id})")
+    logger.info(
+        f"📊 Старт фоновой генерации XLSX для платформы '{platform}' (товаров: {total}, user={user_id})"
+    )
 
     self.update_state(
         state="PROGRESS",
@@ -998,14 +1092,16 @@ def generate_xlsx_export_task(
 
     try:
         data, filename = generate_export(products, specs_by_category, platform)
-        
+
         # Сохранение файла на общий том /app/media/exports
         file_path = EXPORTS_DIR / f"{self.request.id}_{filename}"
         with open(file_path, "wb") as f:
             f.write(data)
 
         duration_ms = int((time.perf_counter() - t0) * 1000)
-        logger.info(f"✅ XLSX успешно сгенерирован в Celery: {filename} ({len(data)} байт, {duration_ms} мс)")
+        logger.info(
+            f"✅ XLSX успешно сгенерирован в Celery: {filename} ({len(data)} байт, {duration_ms} мс)"
+        )
 
         return {
             "status": "completed",

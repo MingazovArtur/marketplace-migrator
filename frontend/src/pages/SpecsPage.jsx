@@ -40,8 +40,9 @@ const formatDate = (iso) =>
       })
     : '—';
 
-const SpecsPage = () => {
+const SpecsPage = ({ user, onNotify }) => {
   const [platform, setPlatform] = useState('ozon');
+  const [isAdmin, setIsAdmin] = useState(user?.role === 'admin');
 
   // ✅ Лёгкий список — только имена категорий (быстро грузится)
   const [categoryNames, setCategoryNames] = useState([]);
@@ -58,9 +59,37 @@ const SpecsPage = () => {
   const [specLoading, setSpecLoading] = useState(false);
   const [specError, setSpecError] = useState('');
 
+  // ✅ Состояние удаления спеков (для администратора)
+  const [deletingKey, setDeletingKey] = useState(null);
+  const [clearingAll, setClearingAll] = useState(false);
+
   // ✅ Состояние прогресса для фоновой загрузки Ozon
   const [progress, setProgress] = useState(null);
   const pollingRef = useRef(null);
+
+  useEffect(() => {
+    if (user?.role) {
+      setIsAdmin(user.role === 'admin');
+      return;
+    }
+    let cancelled = false;
+    api
+      .getCurrentUser()
+      .then((me) => {
+        if (!cancelled) setIsAdmin(me?.role === 'admin');
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  const notify = useCallback(
+    (msg) => {
+      if (onNotify) onNotify(msg);
+    },
+    [onNotify]
+  );
 
   // =====================================================================
   // ✅ ЛЁГКАЯ загрузка: только имена категорий (быстро, ~100 КБ)
@@ -112,6 +141,54 @@ const SpecsPage = () => {
     },
     [platform]
   );
+
+  // =====================================================================
+  // ✅ Удаление одной спеки или всех спеков площадки (только для админа)
+  // =====================================================================
+  const handleDeleteOne = async (cat) => {
+    const key = cat.category_id || cat.category_name;
+    if (!key) return;
+    if (!window.confirm(`Удалить спецификацию «${cat.category_name}»?`)) return;
+
+    setDeletingKey(key);
+    setError('');
+    try {
+      await api.deleteSpec(platform, key);
+      setCategoryNames((prev) =>
+        prev.filter((item) => (item.category_id || item.category_name) !== key)
+      );
+      notify(`✅ Спецификация «${cat.category_name}» удалена`);
+    } catch (e) {
+      setError(e.message);
+      notify(`❌ ${e.message}`);
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    const platformTitle = PLATFORMS.find((p) => p.id === platform)?.name || platform;
+    if (
+      !window.confirm(
+        `Вы уверены, что хотите удалить ВСЕ спецификации (${categoryNames.length} шт.) для площадки «${platformTitle}»?`
+      )
+    ) {
+      return;
+    }
+
+    setClearingAll(true);
+    setError('');
+    try {
+      const res = await api.deleteAllSpecs(platform);
+      setCategoryNames([]);
+      notify(`✅ ${res.message || `Все спецификации ${platformTitle} удалены`}`);
+    } catch (e) {
+      setError(e.message);
+      notify(`❌ ${e.message}`);
+    } finally {
+      setClearingAll(false);
+    }
+  };
 
   // ✅ Остановка polling при размонтировании
   useEffect(() => {
@@ -219,6 +296,18 @@ const SpecsPage = () => {
           <Button variant="secondary" onClick={load} disabled={loading}>
             <Icon name="refresh" size={16} /> Обновить
           </Button>
+          {isAdmin && categoryNames.length > 0 && (
+            <Button
+              variant="outline"
+              onClick={handleDeleteAll}
+              disabled={loading || clearingAll}
+              loading={clearingAll}
+              style={{ color: 'var(--accent-danger)', borderColor: 'var(--accent-danger)' }}
+              title="Удалить все загруженные спецификации текущей площадки"
+            >
+              <Icon name="trash" size={16} /> Очистить все ({categoryNames.length})
+            </Button>
+          )}
           <Button onClick={() => setShowRefreshModal(true)}>
             <Icon name="key" size={16} /> Загрузить спеки
           </Button>
@@ -285,9 +374,11 @@ const SpecsPage = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {visibleNames.map((cat, idx) => {
               const st = getStaleness(cat.fetched_at);
+              const itemKey = cat.category_id || cat.category_name;
+              const isDeleting = deletingKey === itemKey;
               return (
                 <div
-                  key={cat.category_id || cat.category_name || idx}
+                  key={itemKey || idx}
                   className="card spec-card"
                   style={{ padding: '0.75rem 1.25rem' }}
                 >
@@ -321,14 +412,27 @@ const SpecsPage = () => {
                       )}
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                       <Button
                         variant="secondary"
                         size="small"
-                        onClick={() => openSpecDetail(cat.category_id || cat.category_name)}
+                        onClick={() => openSpecDetail(itemKey)}
                       >
                         <Icon name="tag" size={15} /> Атрибуты
                       </Button>
+                      {isAdmin && (
+                        <Button
+                          variant="outline"
+                          size="small"
+                          onClick={() => handleDeleteOne(cat)}
+                          disabled={isDeleting}
+                          loading={isDeleting}
+                          title={`Удалить спецификацию «${cat.category_name}»`}
+                          style={{ color: 'var(--accent-danger)' }}
+                        >
+                          <Icon name="trash" size={15} />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
