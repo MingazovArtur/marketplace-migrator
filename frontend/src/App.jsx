@@ -40,7 +40,15 @@ function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
   const [authTab, setAuthTab] = useState(null);
   const [message, setMessage] = useState('');
-  const [currentView, setCurrentView] = useState('products');
+  
+  // ✅ Сохранение текущей вкладки в localStorage с фоллбэком на 'products'
+  const [currentView, setCurrentView] = useState(() => {
+    return localStorage.getItem('marketplace_active_view') || 'products';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('marketplace_active_view', currentView);
+  }, [currentView]);
 
   // Триггер синхронизации обоих списков товаров (App + ProductsPage)
   const [refreshKey, setRefreshKey] = useState(0);
@@ -376,7 +384,7 @@ function App() {
       case 'history':
         return <HistoryView />;
       case 'specs':
-        return <SpecsPage />;
+        return <SpecsPage user={user} onNotify={setMessage} />;
       case 'templates':
         return <TemplatesPage onNotify={setMessage} />;
       case 'products':

@@ -220,17 +220,17 @@ const ProductsPage = ({
     try {
       if (deleteMode === 'all') {
         const r = await api.deleteAllProducts();
-        setMessage(`🗑 Удалено товаров: ${r.deleted}`);
+        setMessage(`Удалено товаров: ${r.deleted}`);
         setSelected([]);
       } else if (deleteMode === 'bulk') {
         const r = await api.bulkDeleteProducts(selected);
         setMessage(
-          `🗑 Удалено: ${r.deleted}${r.skipped ? `, пропущено (чужие): ${r.skipped}` : ''}`
+          `Удалено: ${r.deleted}${r.skipped ? `, пропущено (чужие): ${r.skipped}` : ''}`
         );
         setSelected([]);
       } else {
         await api.deleteProduct(deleteTargetId);
-        setMessage('🗑 Товар удалён');
+        setMessage('Товар удалён');
         setSelected((prev) => prev.filter((id) => id !== deleteTargetId));
       }
       setDeleteMode(null);
@@ -250,7 +250,7 @@ const ProductsPage = ({
     setBulkLoading(true);
     try {
       const r = await api.bulkUpdateProducts({ product_ids: selected, ...payload });
-      setMessage(`✏️ Обновлено товаров: ${r.updated}`);
+      setMessage(`Обновлено товаров: ${r.updated}`);
       setShowBulkUpdate(false);
       setSelected([]);
       await load();
@@ -270,7 +270,7 @@ const ProductsPage = ({
         .map(([k, v]) => `${GAP_LABELS[k] || k}: ${v}`)
         .join(', ');
       setMessage(
-        `🩹 Дозаполнено товаров: ${r.updated} из ${r.total}` + (summary ? ` (${summary})` : '')
+        `Дозаполнено товаров: ${r.updated} из ${r.total}` + (summary ? ` (${summary})` : '')
       );
       if (mode === 'selected') setSelected([]);
       await loadGaps();
@@ -427,7 +427,7 @@ const ProductsPage = ({
               )}
             </div>
             <Button size="small" onClick={() => handleApplyDefaults('all')} loading={applyLoading}>
-              🩹 Заполнить пропуски из дефолтов (все товары)
+              <Icon name="edit" size={15} /> Заполнить пропуски из дефолтов (все товары)
             </Button>
           </div>
           <p style={{ margin: '0.4rem 0 0', fontSize: '0.85rem', opacity: 0.9 }}>
@@ -515,7 +515,9 @@ const ProductsPage = ({
       )}
       {message && (
         <div className="alert alert-success">
-          <div>{message}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <Icon name="check" size={16} /> {message}
+          </div>
         </div>
       )}
 
@@ -988,7 +990,9 @@ const BulkUpdateModal = ({ count, loading, onSubmit, onClose }) => {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">Массовое обновление ({count})</h2>
+          <h2 className="modal-title">
+            <Icon name="edit" size={20} /> Массовое обновление ({count})
+          </h2>
           <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
             <Icon name="close" size={16} />
           </button>
@@ -1040,7 +1044,7 @@ const BulkUpdateModal = ({ count, loading, onSubmit, onClose }) => {
             disabled={loading || !canSubmit}
             loading={loading}
           >
-            Применить
+            <Icon name="edit" size={16} /> Применить
           </Button>
         </div>
       </div>

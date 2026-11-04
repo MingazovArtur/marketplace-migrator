@@ -1,11 +1,12 @@
 """
 Celery задачи для фоновой миграции товаров, загрузки спеков площадок и тяжёлого XLSX-экспорта.
 
-✅ v6:
+✅ v7:
   - Добавлена изолированная задача generate_xlsx_export_task для очереди xlsx_export.
   - Сохранены все существующие задачи (миграции, скачивание фото, загрузка спеков).
   - Улучшен поиск категории по спекам (_match_spec_by_text со стеммингом единственного/множественного числа).
   - Добавлен фолбэк _pick_target_category для площадок с эталонным шаблоном и площадок без загруженных спеков.
+  - Единый формат фоновой загрузки спеков (refresh_specs_task) с прогресс-баром для Ozon, Яндекс Маркета и Wildberries.
 """
 
 import logging
@@ -175,7 +176,6 @@ def _match_spec_by_text(text, platform: str):
       1) ТИП (часть после '/') полностью входит в текст — самый высокий приоритет (score ≥ 120);
       2) Основа слова ТИПА совпадает с основой слова из текста товара («Футболка» <-> «Футболки») (score ≥ 100);
       3) ТИП начинается с введённой подстроки (≥4 символов) — префикс-матчинг (score ≥ 60).
-    Берёт самый длинный совпавший тип (более специфичный).
     """
     if not text:
         return None
@@ -448,6 +448,17 @@ def get_progress(task_id: str) -> dict:
         if result.state == "SUCCESS":
             r = result.result or {}
             if isinstance(r, dict):
+                if r.get("status") == "error":
+                    return {
+                        "status": "failed",
+                        "total": r.get("total", 0),
+                        "done": r.get("done", 0),
+                        "success": r.get("success", 0),
+                        "errors": r.get("errors", 1),
+                        "percent": 0,
+                        "error": r.get("message") or "Ошибка загрузки спеков",
+                        "error_details": r.get("error_details", []),
+                    }
                 total = r.get("total") or (r.get("fetched", 0) + r.get("errors", 0))
                 success = r.get("success") or r.get("fetched", 0)
                 errors = r.get("errors", 0)
@@ -952,16 +963,25 @@ def download_photos_task(self, product_id: int, user_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Фоновая загрузка спеков площадок
+# Фоновая загрузка спеков площадок (Ozon, Яндекс Маркет, Wildberries)
 # ---------------------------------------------------------------------------
 
 
 @celery_app.task(bind=True, name="tasks.refresh_specs_task")
-def refresh_specs_task(self, user_id: int, platform: str, raw_api_key: str, category_ids=None):
-    """Фоновая загрузка спеков категорий площадки через её API."""
+def refresh_specs_task(
+    self,
+    user_id: int,
+    platform: str,
+    raw_api_key: str,
+    category_ids=None,
+    business_id=None,
+):
+    """Единая фоновая загрузка спеков категорий площадки через её API с прогресс-баром."""
     import asyncio
 
     from services.ozon_specs import refresh_ozon_specs
+    from services.wb_specs import refresh_wildberries_specs
+    from services.yandex_specs import refresh_yandex_specs
 
     t0 = time.perf_counter()
     logger.info(f"🚀 Старт загрузки спеков {platform} для пользователя {user_id}")
@@ -994,6 +1014,25 @@ def refresh_specs_task(self, user_id: int, platform: str, raw_api_key: str, cate
                 refresh_ozon_specs(
                     user_id=user_id,
                     raw_api_key=raw_api_key,
+                    category_ids=category_ids,
+                    progress_cb=progress_cb,
+                )
+            )
+        elif platform == "yandex":
+            result = asyncio.run(
+                refresh_yandex_specs(
+                    user_id=user_id,
+                    token=raw_api_key,
+                    business_id=business_id,
+                    category_ids=category_ids,
+                    progress_cb=progress_cb,
+                )
+            )
+        elif platform == "wildberries":
+            result = asyncio.run(
+                refresh_wildberries_specs(
+                    user_id=user_id,
+                    token=raw_api_key,
                     category_ids=category_ids,
                     progress_cb=progress_cb,
                 )
