@@ -62,3 +62,23 @@
        │  PostgreSQL   │           │     Redis     │           │      Celery      │
        │ (основная БД) │           │ (кэш / брокер)│           │ (фоновые задачи) │
        └───────────────┘           └───────────────┘           └──────────────────┘
+---
+
+## 4. Разработка (инженерные основы)
+
+Тесты, линтеры, CI, pre-commit, структура пакетов и гигиена репозитория —
+в **[docs/engineering.md](docs/engineering.md)**.
+
+Быстрый старт:
+
+```bash
+cd backend
+pip install -r requirements.txt -r requirements-dev.txt
+make test    # pytest — не требует БД/Redis
+make lint    # CI-гейт (ruff, критические правила)
+```
+
+CI (GitHub Actions) на каждый push/PR: линт+тесты backend, линт+сборка
+frontend, сборка Docker-образов. Пакетная структура: `tasks/`,
+`database/repository/`, `services/xlsx_generator/` (публичные API импортов
+сохранены).

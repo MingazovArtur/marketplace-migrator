@@ -23,6 +23,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import pandas as pd
+import redis
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy import select
@@ -30,7 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from celery_app import celery_app
-from core.auth import get_current_user
+from core.auth import get_current_admin_user, get_current_user
+from core.config import settings
 from core.platforms import Platform
 from core.rate_limit import limiter
 from database.models import PlatformCategorySpec, Product, User
@@ -50,6 +52,51 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 # Порог количества товаров, начиная с которого сборка XLSX автоматически уходит в очередь xlsx_export
 CELERY_XLSX_THRESHOLD = int(os.getenv("CELERY_XLSX_THRESHOLD", "30"))
 CELERY_XLSX_TIMEOUT_SEC = int(os.getenv("CELERY_XLSX_TIMEOUT_SEC", "180"))
+
+# --- IDOR-защита фоновых задач экспорта (было В-2 код-ревью) ---
+# Реестр владельцев task_id: без него любой авторизованный пользователь
+# мог скачать чужой XLSX/ZIP, зная/подобрав task_id.
+_redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
+EXPORT_TASK_TTL_SEC = 24 * 3600  # ключ живёт столько же, сколько файл в /media/exports
+
+
+def _register_export_task_owner(task_id: str, user_id: int) -> None:
+    """Привязка задачи к владельцу (вызывается сразу после apply_async)."""
+    try:
+        _redis.setex(f"export_task_owner:{task_id}", EXPORT_TASK_TTL_SEC, str(user_id))
+    except Exception as e:
+        # Не критично: fallback-проверка по user_id в результате задачи
+        logger.warning(f"Не удалось записать владельца задачи {task_id}: {e}")
+
+
+def _assert_export_task_owner(task_id: str, current_user: User) -> None:
+    """
+    Задача экспорта должна принадлежать current_user (админ — исключение).
+    Чужая задача выглядит как несуществующая (404, без раскрытия факта).
+    """
+    if getattr(current_user, "role", None) == "admin":
+        return
+
+    owner = None
+    try:
+        owner = _redis.get(f"export_task_owner:{task_id}")
+    except Exception as e:
+        logger.warning(f"Redis недоступен при проверке владельца задачи {task_id}: {e}")
+
+    if owner is not None:
+        if str(owner) == str(current_user.id):
+            return
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+
+    # Ключа нет (Redis чистился или задача создана до этого патча):
+    # для завершённых задач проверяем user_id, который воркер кладёт в результат.
+    res = celery_app.AsyncResult(task_id)
+    if res.ready() and res.successful() and isinstance(res.result, dict):
+        owner_id = res.result.get("user_id")
+        if owner_id is not None and str(owner_id) == str(current_user.id):
+            return
+
+    raise HTTPException(status_code=404, detail="Задача не найдена")
 
 
 def _safe_disposition(filename: str) -> str:
@@ -236,10 +283,15 @@ async def upload_official_template(
     category_name: str = Form("Универсальный (все категории)"),
     platform: str = Form("ozon"),
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """Приём эталонного XLSX-шаблона для любой площадки (Ozon, Яндекс Маркет, WB, Магнит)."""
+    """
+    Приём эталонного XLSX-шаблона для любой площадки (Ozon, Яндекс Маркет, WB, Магнит).
+
+    Только для администраторов (было В-2 код-ревью): эталон влияет на
+    экспорт ВСЕХ пользователей — перезаписывать его рядовым пользователям нельзя.
+    """
     pl = (platform or "ozon").lower().strip()
     cat = await _normalize_category_name(db, category_name, pl)
 
@@ -322,9 +374,10 @@ async def download_official_template(
 async def delete_official_template(
     category_name: str = "Универсальный (все категории)",
     platform: str = Query("ozon"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_async_db),
 ):
+    """Удаление эталона — только админ (было В-2 код-ревью: мог любой пользователь)."""
     pl = (platform or "ozon").lower().strip()
     cat = await _normalize_category_name(db, category_name, pl)
     deleted = template_filler.delete_official_template(cat, platform=pl)
@@ -734,6 +787,8 @@ async def start_async_xlsx_export(
         args=[product_dicts, specs_by_category, platform, current_user.id],
         queue="xlsx_export",
     )
+    # IDOR-защита (В-2): привязываем task_id к владельцу
+    _register_export_task_owner(task.id, current_user.id)
     return {
         "task_id": task.id,
         "status": "pending",
@@ -747,7 +802,8 @@ async def get_export_task_status(
     task_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Статус фоновой задачи генерации XLSX."""
+    """Статус фоновой задачи генерации XLSX (только владелец задачи или админ)."""
+    _assert_export_task_owner(task_id, current_user)
     return get_progress(task_id)
 
 
@@ -756,7 +812,13 @@ async def download_export_task_file(
     task_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Скачивание готового XLSX/ZIP файла, сгенерированного воркером очереди xlsx_export."""
+    """
+    Скачивание готового XLSX/ZIP файла, сгенерированного воркером очереди xlsx_export.
+    Только владелец задачи или админ (было В-2 код-ревью: IDOR — любой
+    авторизованный пользователь мог скачать чужой файл по task_id).
+    """
+    _assert_export_task_owner(task_id, current_user)
+
     res = celery_app.AsyncResult(task_id)
     if not res.ready():
         raise HTTPException(status_code=409, detail="Файл ещё формируется")

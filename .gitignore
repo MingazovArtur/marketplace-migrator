@@ -85,3 +85,20 @@ backup_*.sql
 *.bak
 settings.json
 project_export.txt
+
+# === E-8 (неделя 4): тестовые артефакты и runtime-данные не попадают в git ===
+# Корневые curl-пейлоады и сэмплы (login.json/bulk.json/migrate.json, *.xlsx)
+/login.json
+/bulk.json
+/migrate.json
+/package.json
+/package-lock.json
+/*.xlsx
+/init_test.sql
+
+# Runtime-данные backend: мок-фото, скачанные фото, экспорт-файлы, локальная БД
+backend/photos/
+backend/media/
+backend/data/*.xlsx
+backend/*.xlsx
+backend/*.db

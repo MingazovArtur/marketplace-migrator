@@ -16,7 +16,6 @@ const BulkEditModal = ({ isOpen, onClose, selectedIds, onSubmit, loading }) => {
 
   const handleSubmit = () => {
     if (!applyPrice && !applyBrand && !applyCategory) {
-      // eslint-disable-next-line no-alert
       alert('Отметьте хотя бы одно поле для обновления');
       return;
     }

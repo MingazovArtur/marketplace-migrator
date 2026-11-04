@@ -22,6 +22,7 @@ from sqlalchemy import or_
 
 from core.auth import get_current_user
 from core.config import settings
+from core.crypto import encrypt_str
 from database.models import CategoryMapping, PlatformCategorySpec, User
 from database.session import SessionLocal
 from models.schemas import (
@@ -102,7 +103,9 @@ async def refresh_specs(
         task = refresh_specs_task.delay(
             user_id=current_user.id,
             platform=platform,
-            raw_api_key=raw_key,
+            # В-4 (неделя 2): ключ шифруется перед публикацией в Redis —
+            # в брокере не остаётся plaintext API-ключей (decrypt — в воркере)
+            raw_api_key=encrypt_str(raw_key),
             category_ids=payload.category_ids,
             business_id=business_id or None,
         )

@@ -17,7 +17,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import get_current_user
@@ -212,24 +212,23 @@ async def bulk_delete_products(
     """
     Массовое удаление товаров.
     Пользователь удаляет только свои; админ — любые.
-    ORM-cascade удаляет атрибуты и варианты вместе с товаром.
+
+    P-5 (неделя 3): один bulk DELETE вместо ORM-цикла (было: SELECT всех
+    товаров в память + db.delete() по одному — N+1 запросов и O(N) памяти).
+    Атрибуты и варианты сносит FK-каскад на стороне БД (ondelete=CASCADE).
     """
     if not payload.product_ids or len(payload.product_ids) == 0:
         raise HTTPException(status_code=400, detail="Не указаны товары для удаления")
 
     try:
-        stmt = select(ProductORM).where(ProductORM.id.in_(payload.product_ids))
+        stmt = delete(ProductORM).where(ProductORM.id.in_(payload.product_ids))
         if current_user.role != "admin":
             stmt = stmt.where(ProductORM.user_id == current_user.id)
 
         res = await db.execute(stmt)
-        products = res.scalars().all()
-
-        for p in products:
-            await db.delete(p)
         await db.commit()
 
-        deleted = len(products)
+        deleted = res.rowcount
         skipped = len(payload.product_ids) - deleted
 
         logger.warning(
@@ -268,6 +267,10 @@ async def delete_all_products(
     """
     Удалить ВСЕ товары: пользователь — свои, админ — все в системе.
     Требует явного подтверждения confirm=true (UI спрашивает слово «УДАЛИТЬ»).
+
+    P-5 (неделя 3): один bulk DELETE вместо загрузки ВСЕХ товаров в память
+    и db.delete() по одному (у пользователя с 10 000 карточек это 10 000
+    ORM-объектов + 10 000 DELETE-запросов).
     """
     if not payload.confirm:
         raise HTTPException(
@@ -276,20 +279,25 @@ async def delete_all_products(
         )
 
     try:
-        stmt = select(ProductORM)
-        if current_user.role != "admin":
-            stmt = stmt.where(ProductORM.user_id == current_user.id)
+        user_cond = (
+            None if current_user.role == "admin" else ProductORM.user_id == current_user.id
+        )
 
-        res = await db.execute(stmt)
-        products = res.scalars().all()
+        count_stmt = select(func.count(ProductORM.id))
+        del_stmt = delete(ProductORM)
+        if user_cond is not None:
+            count_stmt = count_stmt.where(user_cond)
+            del_stmt = del_stmt.where(user_cond)
 
-        for p in products:
-            await db.delete(p)
+        total = (await db.execute(count_stmt)).scalar() or 0
+        res = await db.execute(del_stmt)
         await db.commit()
+
+        deleted = res.rowcount
 
         logger.warning(
             f"🗑 DELETE ALL: user={current_user.id} role={current_user.role} "
-            f"deleted={len(products)}"
+            f"deleted={deleted}"
         )
         try:
             stats_repo.record(
@@ -297,15 +305,15 @@ async def delete_all_products(
                 operation="delete_all",
                 platform=None,
                 status="success",
-                total_items=len(products),
-                success_items=len(products),
+                total_items=deleted,
+                success_items=deleted,
                 failed_items=0,
                 duration_ms=0,
             )
         except Exception:
             pass
 
-        return {"success": True, "deleted": len(products)}
+        return {"success": True, "deleted": deleted}
     except HTTPException:
         raise
     except Exception as e:

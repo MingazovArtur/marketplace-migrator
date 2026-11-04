@@ -12,8 +12,13 @@ Rate-limits (на идентификатор: user_id или IP):
   - /import/preview : 30/min
   - /import (key/yml): 10/min, 100/day
   - /import/file    : 10/min, 100/day
+
+B-1 (неделя 2): CPU-тяжёлый парсинг (openpyxl) и цикл записи в БД
+выносятся из async-роута в threadpool (asyncio.to_thread) —
+больше не блокируют event loop на весь импорт.
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -34,8 +39,7 @@ from core.auth import get_current_user
 from core.platforms import PLATFORM_CONFIG
 from core.rate_limit import limiter
 from database.models import User
-from database.repository import attr_repo, op_log, repo, stats_repo, variant_repo
-from models.schemas import ProductCreate
+from database.repository import op_log, repo, stats_repo
 from parsers import parse_file, preview_file
 from parsers.yml_parser import YmlParser
 
@@ -43,6 +47,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Import"])
 
 MAX_IMPORT_FILE_SIZE = 15 * 1024 * 1024  # 15 МБ
+
+
+def _persist_imported_products(
+    user_id: int, source_label: str, mode: str, products_data: list
+) -> tuple[int, int]:
+    """
+    Синхронная запись распарсенных товаров в БД (create/upsert + варианты + атрибуты).
+    Вызывается через asyncio.to_thread из async-роута — синхронные repo-вызовы
+    не блокируют event loop (B-1). Возвращает (imported, updated).
+
+    P-2 (неделя 3): запись переведена на repo.bulk_import — одна сессия на весь
+    импорт, один commit на чанк (200 товаров), совпадения для upsert выбираются
+    одним запросом на чанк. Было: 4 сессии и 2-4 commit'а на каждый товар,
+    импорт 500 карточек = ~2000 сессий и ~1500 commit'ов.
+    """
+    return repo.bulk_import(
+        user_id=user_id,
+        source_label=source_label,
+        mode=mode,
+        products_data=products_data,
+    )
 
 
 class ImportRequest(BaseModel):
@@ -119,7 +144,9 @@ async def preview_import(
         contents = await file.read()
         if len(contents) > MAX_IMPORT_FILE_SIZE:
             raise HTTPException(status_code=400, detail="Файл слишком большой (максимум 15 МБ)")
-        preview_data = preview_file(contents, platform, file_type, max_rows=10)
+        preview_data = await asyncio.to_thread(
+            preview_file, contents, platform, file_type, max_rows=10
+        )
         return {"success": True, "preview": preview_data}
     except HTTPException:
         raise
@@ -169,43 +196,39 @@ async def import_products(
         else:
             platform = "ozon"
 
+        # P-2: мок-товары идут через общий пакетный путь bulk_import
         mock_products = [
-            ProductCreate(
-                name="Швабра с отжимом и ведром, самоочищающаяся, 2 насадки, 10 л",
-                source=f"{PLATFORM_CONFIG[platform]['name']} (тест)",
-                price=899.0,
-                status="pending",
-                description="<p>Удобная швабра с ведром для быстрой уборки.</p>",
-                photos_count=3,
-                category="Дом и сад > Уборка > Швабры",
-                user_id=current_user.id,
-            ),
-            ProductCreate(
-                name="Смартфон Xiaomi Redmi Note 12 4/128GB",
-                source=f"{PLATFORM_CONFIG[platform]['name']} (тест)",
-                price=12990.0,
-                status="pending",
-                description="Отличный смартфон с хорошей камерой.",
-                photos_count=5,
-                category="Электроника > Смартфоны",
-                user_id=current_user.id,
-            ),
-            ProductCreate(
-                name="Чай черный байкальский, 100 пакетиков",
-                source=f"{PLATFORM_CONFIG[platform]['name']} (тест)",
-                price=250.0,
-                status="pending",
-                description="Натуральный черный чай.",
-                photos_count=1,
-                category="Продукты питания > Чай и кофе > Чай",
-                user_id=current_user.id,
-            ),
+            {
+                "name": "Швабра с отжимом и ведром, самоочищающаяся, 2 насадки, 10 л",
+                "price": 899.0,
+                "description": "<p>Удобная швабра с ведром для быстрой уборки.</p>",
+                "category": "Дом и сад > Уборка > Швабры",
+                "photos": [
+                    f"https://mock.local/{platform}/mop/{i}.jpg" for i in range(1, 4)
+                ],
+            },
+            {
+                "name": "Смартфон Xiaomi Redmi Note 12 4/128GB",
+                "price": 12990.0,
+                "description": "Отличный смартфон с хорошей камерой.",
+                "category": "Электроника > Смартфоны",
+                "photos": [
+                    f"https://mock.local/{platform}/phone/{i}.jpg" for i in range(1, 6)
+                ],
+            },
+            {
+                "name": "Чай черный байкальский, 100 пакетиков",
+                "price": 250.0,
+                "description": "Натуральный черный чай.",
+                "category": "Продукты питания > Чай и кофе > Чай",
+                "photos": ["https://mock.local/market/tea/1.jpg"],
+            },
         ]
 
-        imported_count = 0
-        for p in mock_products:
-            repo.add(p)
-            imported_count += 1
+        source_label = f"{PLATFORM_CONFIG[platform]['name']} (тест)"
+        imported_count, _ = await asyncio.to_thread(
+            _persist_imported_products, current_user.id, source_label, "create", mock_products
+        )
 
         duration_ms = int((time.perf_counter() - t0) * 1000)
         op_log.log_file_operation(
@@ -278,30 +301,36 @@ async def import_products(
         if not yml_products:
             raise HTTPException(status_code=400, detail="Не найдено товаров в YML-фиде")
 
-        imported_count = 0
+        # P-2: пакетная запись через общий bulk-путь (одна сессия, чанк-коммиты)
+        yml_rows = []
         for p_data in yml_products:
             photos = p_data.get("photos") or []
-            product_obj = ProductCreate(
-                name=p_data.get("name", "Без названия"),
-                source="Яндекс Маркет (YML)",
-                price=float(p_data.get("price", 0)),
-                status="pending",
-                description=p_data.get("description", ""),
-                photos=photos,
-                photos_count=len(photos),
-                category=p_data.get("category", "Не указана"),
-                sku=p_data.get("offer_id") or p_data.get("sku"),
-                external_id=p_data.get("external_id"),
-                brand=p_data.get("vendor") or p_data.get("brand"),
-                user_id=current_user.id,
-            )
-            created = repo.add(product_obj)
             params = p_data.get("params") or {}
-            if created and isinstance(params, dict) and params:
-                attrs = [{"name": k, "value": str(v)} for k, v in params.items() if k and v]
-                if attrs:
-                    attr_repo.set_attributes(created["id"], attrs)
-            imported_count += 1
+            yml_rows.append(
+                {
+                    "name": p_data.get("name", "Без названия"),
+                    "price": float(p_data.get("price", 0)),
+                    "description": p_data.get("description", ""),
+                    "photos": photos,
+                    "category": p_data.get("category", "Не указана"),
+                    "sku": p_data.get("offer_id") or p_data.get("sku"),
+                    "external_id": p_data.get("external_id"),
+                    "brand": p_data.get("vendor") or p_data.get("brand"),
+                    "attributes": (
+                        [{"name": k, "value": str(v)} for k, v in params.items() if k and v]
+                        if isinstance(params, dict)
+                        else []
+                    ),
+                }
+            )
+
+        imported_count, _ = await asyncio.to_thread(
+            _persist_imported_products,
+            current_user.id,
+            "Яндекс Маркет (YML)",
+            "create",
+            yml_rows,
+        )
 
         duration_ms = int((time.perf_counter() - t0) * 1000)
         op_log.log_file_operation(
@@ -359,31 +388,36 @@ async def import_products(
                 detail=f"В кабинете Яндекс Маркета (businessId={business_id}) не найдено товаров",
             )
 
-        imported_count = 0
+        # P-2: пакетная запись через общий bulk-путь
+        ym_rows = []
         for p_data in ym_offers:
             photos = p_data.get("photos") or []
-            product_obj = ProductCreate(
-                name=p_data.get("name", "Без названия"),
-                source="Яндекс Маркет (API)",
-                price=float(p_data.get("price") or 0),
-                status="pending",
-                description=p_data.get("description", ""),
-                photos=photos,
-                photos_count=len(photos),
-                category=p_data.get("category", "Не указана"),
-                sku=p_data.get("sku"),
-                external_id=p_data.get("external_id"),
-                brand=p_data.get("brand"),
-                barcode=p_data.get("barcode"),
-                package_weight_grams=p_data.get("package_weight_grams"),
-                package_length_mm=p_data.get("package_length_mm"),
-                package_width_mm=p_data.get("package_width_mm"),
-                package_height_mm=p_data.get("package_height_mm"),
-                okpd_code=p_data.get("okpd_code"),
-                user_id=current_user.id,
+            ym_rows.append(
+                {
+                    "name": p_data.get("name", "Без названия"),
+                    "price": float(p_data.get("price") or 0),
+                    "description": p_data.get("description", ""),
+                    "photos": photos,
+                    "category": p_data.get("category", "Не указана"),
+                    "sku": p_data.get("sku"),
+                    "external_id": p_data.get("external_id"),
+                    "brand": p_data.get("brand"),
+                    "barcode": p_data.get("barcode"),
+                    "package_weight_grams": p_data.get("package_weight_grams"),
+                    "package_length_mm": p_data.get("package_length_mm"),
+                    "package_width_mm": p_data.get("package_width_mm"),
+                    "package_height_mm": p_data.get("package_height_mm"),
+                    "okpd_code": p_data.get("okpd_code"),
+                }
             )
-            repo.add(product_obj)
-            imported_count += 1
+
+        imported_count, _ = await asyncio.to_thread(
+            _persist_imported_products,
+            current_user.id,
+            "Яндекс Маркет (API)",
+            "create",
+            ym_rows,
+        )
 
         duration_ms = int((time.perf_counter() - t0) * 1000)
         op_log.log_file_operation(
@@ -466,7 +500,8 @@ async def import_from_file(
         contents = await file.read()
         if len(contents) > MAX_IMPORT_FILE_SIZE:
             raise HTTPException(status_code=400, detail="Файл слишком большой (максимум 15 МБ)")
-        result = parse_file(contents, platform, file_type)
+        # openpyxl — CPU-bound, выносим в threadpool, чтобы не блокировать event loop (B-1)
+        result = await asyncio.to_thread(parse_file, contents, platform, file_type)
     except HTTPException:
         raise
     except ValueError as e:
@@ -521,63 +556,12 @@ async def import_from_file(
         )
 
     # ---------- Запись в БД ----------
+    # Синхронные repo-записи вынесены в threadpool: event loop не блокируется
+    # на время записи сотен товаров (B-1, неделя 2)
     source_label = _source_label(platform)
-    imported = 0
-    updated = 0
-
-    for p_data in products_data:
-        okpd_val = p_data.get("okpd_code") or p_data.get("tn_ved") or p_data.get("okpd2") or None
-        payload_dict = dict(
-            name=p_data.get("name"),
-            source=source_label,
-            price=p_data.get("price", 0),
-            status="pending",
-            description=p_data.get("description", ""),
-            photos_count=len(p_data.get("photos", [])),
-            category=p_data.get("category", "Не указана"),
-            sku=p_data.get("sku"),
-            external_id=p_data.get("external_id"),
-            brand=p_data.get("brand"),
-            photos=p_data.get("photos", []),
-            sku_count=p_data.get("sku_count", 1),
-            barcode=p_data.get("barcode") or None,
-            weight_grams=p_data.get("weight_grams"),
-            package_weight_grams=p_data.get("package_weight_grams"),
-            package_width_mm=p_data.get("package_width_mm"),
-            package_height_mm=p_data.get("package_height_mm"),
-            package_length_mm=p_data.get("package_length_mm"),
-            vat_rate=p_data.get("vat_rate") or None,
-            okpd_code=okpd_val,
-            units_per_item=p_data.get("units_per_item", 1),
-        )
-        variants = p_data.get("variants") or []
-        attributes = p_data.get("attributes") or []
-
-        existing = None
-        if mode == "upsert":
-            existing = repo.find_by_external(
-                user_id=current_user.id,
-                source=source_label,
-                external_id=p_data.get("external_id"),
-                sku=p_data.get("sku"),
-            )
-
-        if existing:
-            repo.update(existing["id"], payload_dict, user_id=current_user.id)
-            if variants:
-                variant_repo.set_variants(existing["id"], variants)
-            if attributes:
-                attr_repo.set_attributes(existing["id"], attributes)
-            updated += 1
-        else:
-            product_obj = ProductCreate(user_id=current_user.id, **payload_dict)
-            created = repo.add(product_obj)
-            if created:
-                if variants:
-                    variant_repo.set_variants(created["id"], variants)
-                if attributes:
-                    attr_repo.set_attributes(created["id"], attributes)
-            imported += 1
+    imported, updated = await asyncio.to_thread(
+        _persist_imported_products, current_user.id, source_label, mode, products_data
+    )
 
     logger.info(
         f"✅ Импорт завершён: создано {imported}, обновлено {updated}, ошибок {len(errors)}",

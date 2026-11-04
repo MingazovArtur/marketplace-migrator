@@ -9,6 +9,7 @@ Email-сервис: отправка писем с HTML-шаблонами.
   - reset: случайный token_urlsafe(32), в БД только SHA-256 hash, TTL 1h
 """
 
+import asyncio
 import hashlib
 import logging
 import secrets
@@ -163,7 +164,9 @@ async def send_verification_email(user: User) -> bool:
 
 async def send_password_reset_email(user: User) -> bool:
     """Письмо сброса пароля (ссылка с одноразовым токеном)."""
-    raw_token, _ = generate_reset_token(user)
+    # generate_reset_token пишет в БД синхронно (SessionLocal) —
+    # выносим в threadpool, чтобы не блокировать event loop (B-1, неделя 2)
+    raw_token, _ = await asyncio.to_thread(generate_reset_token, user)
     reset_url = f"{settings.PUBLIC_URL}/#/reset-password?token={raw_token}"
 
     html = _render(

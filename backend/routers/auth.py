@@ -1,5 +1,10 @@
 """
 Роутер аутентификации (регистрация, вход, профиль)
+
+B-1 (неделя 2): register/login/logout — sync def. FastAPI выполняет такие
+роуты в threadpool, поэтому bcrypt (~100-300 мс CPU) и синхронные запросы к БД
+больше НЕ блокируют event loop. Асинхронность внутри не используется
+(кроме background-задачи — Starlette умеет await async-колбэки и из sync-роут).
 """
 
 import logging
@@ -30,7 +35,7 @@ security = HTTPBearer()
 # ============================================================
 @limiter.limit("10/day")
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(
+def register(
     payload: UserCreate,
     request: Request,
     background_tasks: BackgroundTasks,  # ← добавлено
@@ -130,7 +135,7 @@ async def register(
 # ============================================================
 @limiter.limit("5/minute")
 @router.post("/login", response_model=Token)
-async def login(payload: UserLogin, request: Request):
+def login(payload: UserLogin, request: Request):
     """Вход: возвращает JWT-токен с логированием"""
     db = SessionLocal()
     try:
@@ -166,7 +171,7 @@ async def login(payload: UserLogin, request: Request):
 # ============================================================
 @limiter.limit("10/minute")
 @router.post("/logout")
-async def logout(request: Request, current_user: User = Depends(get_current_user)):
+def logout(request: Request, current_user: User = Depends(get_current_user)):
     """Выход с логированием"""
     ip = get_client_ip(request)
     ua = request.headers.get("user-agent")

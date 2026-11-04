@@ -1,6 +1,11 @@
 """
 Медиа-сервис: скачивание фото товаров в локальное хранилище.
 Копии хранятся в /app/media/products/{product_id}/ и доступны по /media/...
+
+Безопасность (было 🔴 K-2 из код-ревью):
+  каждый URL перед загрузкой проходит SSRF-валидацию (core.ssrf),
+  включая каждый переход редиректа — скачивание с внутренних адресов
+  (169.254.169.254, localhost, db, redis, приватные сети) заблокировано.
 """
 
 import hashlib
@@ -9,6 +14,8 @@ import os
 from pathlib import Path
 
 import requests
+
+from core.ssrf import assert_safe_url, safe_get
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +52,14 @@ def download_single_photo(
     """
     Скачивает одно фото в MEDIA_ROOT/products/{product_id}/.
     Возвращает относительный путь 'products/{product_id}/{filename}' или None при ошибке.
+
+    Перед запросом URL проверяется на SSRF; редиректы валидируются
+    на каждом переходе (safe_get, allow_redirects=False).
     """
+    url = (url or "").strip()
+    if not url:
+        return None
+
     dest = MEDIA_ROOT / "products" / str(product_id)
     dest.mkdir(parents=True, exist_ok=True)
 
@@ -59,8 +73,11 @@ def download_single_photo(
     if own_session:
         sess.headers.update(DOWNLOAD_HEADERS)
 
+    resp = None
     try:
-        resp = sess.get(url, timeout=TIMEOUT, stream=True)
+        # SSRF-защита: только публичные http/https, редиректы валидируются
+        assert_safe_url(url)
+        resp = safe_get(url, session=sess, timeout=TIMEOUT, stream=True)
         resp.raise_for_status()
 
         content_type = (resp.headers.get("Content-Type") or "").lower()
@@ -85,10 +102,19 @@ def download_single_photo(
 
         logger.info(f"📥 Фото скачано: {url} ({size} байт)")
         return f"products/{product_id}/{path.name}"
+    except ValueError as e:
+        # Внутри ValueError — и SSRF-блок, и «не изображение»/«файл повреждён»
+        logger.warning(f"⚠️ Скачивание фото отклонено {url}: {e}")
+        return None
     except Exception as e:
         logger.warning(f"⚠️ Не удалось скачать фото {url}: {e}")
         return None
     finally:
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:
+                pass
         if own_session:
             sess.close()
 
@@ -97,11 +123,17 @@ def download_photos(product_id: int, urls: list[str]) -> list[str]:
     """
     Скачивает список фото в MEDIA_ROOT/products/{product_id}/.
     Возвращает список сохранённых относительных путей.
+
+    Собственные /media/products/ URL пропускаем: фото уже локальные,
+    а SSRF-защита корректно блокирует их скачивание «из самого себя»
+    (в dev они выглядят как http://localhost:8000/media/...).
     """
     saved = []
     with requests.Session() as session:
         session.headers.update(DOWNLOAD_HEADERS)
         for url in urls:
+            if "/media/products/" in str(url):
+                continue
             rel_path = download_single_photo(product_id, url, session=session)
             if rel_path:
                 saved.append(rel_path)

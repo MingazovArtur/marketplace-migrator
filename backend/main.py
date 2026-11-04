@@ -46,7 +46,18 @@ from routers.migrate_router import router as migrate_router
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Marketplace Migrator API", version="3.4")
+# Было В-6 из код-ревью: /docs, /redoc и /openapi.json были доступны в проде
+# и раскрывали полную карту API (в т.ч. внутренние эндпоинты).
+# В production полностью отключаем; в dev оставляем.
+_IS_PRODUCTION = getattr(settings, "ENVIRONMENT", "development") == "production"
+
+app = FastAPI(
+    title="Marketplace Migrator API",
+    version="3.4",
+    docs_url=None if _IS_PRODUCTION else "/docs",
+    redoc_url=None if _IS_PRODUCTION else "/redoc",
+    openapi_url=None if _IS_PRODUCTION else "/openapi.json",
+)
 
 # ============================================================
 # 0. Централизованная обработка ошибок
@@ -187,7 +198,7 @@ def root():
     return {
         "message": "Marketplace Migrator API v3.4 (Rate-limited)",
         "platforms": Platform.all_values(),
-        "docs": "/docs",
+        "docs": "/docs" if not _IS_PRODUCTION else "disabled",
     }
 
 

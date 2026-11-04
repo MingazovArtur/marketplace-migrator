@@ -1,0 +1,4 @@
+# Зависимости разработки/CI (в прод-образ не ставятся)
+# Установка: pip install -r requirements.txt -r requirements-dev.txt
+# (ruff и black уже входят в requirements.txt)
+pytest>=8.0.0

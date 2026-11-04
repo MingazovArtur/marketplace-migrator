@@ -6,6 +6,7 @@ Rate limiting на уровне приложения.
 - X-RateLimit заголовки в ответах
 """
 
+import ipaddress
 import logging
 
 import redis
@@ -21,14 +22,49 @@ logger = logging.getLogger(__name__)
 _redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
+def _valid_ip(value: str) -> str | None:
+    """Возвращает значение, если это корректный IP, иначе None (анти-мусор в ключах Redis)."""
+    try:
+        ipaddress.ip_address(value)
+        return value
+    except ValueError:
+        return None
+
+
 def get_client_ip(request: Request) -> str:
-    """Реальный IP за nginx (X-Forwarded-For)."""
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
+    """
+    Реальный IP клиента за nginx.
+
+    Было 🔴 K-3 из код-ревью: брался ПЕРВЫЙ элемент X-Forwarded-For —
+    его полностью контролирует клиент (`X-Forwarded-For: 1.2.3.4`), что
+    позволяло обходить rate-limit и баны.
+
+    Теперь:
+      1) X-Real-IP — его проставляет наш nginx (`proxy_set_header X-Real-IP
+         $remote_addr`), значение от клиента перезаписывается — доверяем;
+      2) X-Forwarded-For — берём ПОСЛЕДНИЙ (правый) элемент: именно его
+         добавил наш nginx ($proxy_add_x_forwarded_for), левую часть
+         (поддельные адреса) клиент мог вписать сам;
+      3) request.client.host — прямое соединение (dev без прокси).
+
+    Остаётся важным: порт бэкенда (8000) не должен быть доступен из
+    интернета напрямую, минуя nginx, — иначе заголовки можно подделать.
+    """
     xri = request.headers.get("x-real-ip")
     if xri:
-        return xri.strip()
+        ip = _valid_ip(xri.strip())
+        if ip:
+            return ip
+
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        # Правый элемент — добавлен нашим nginx (клиентские подделки всегда левее)
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            ip = _valid_ip(parts[-1])
+            if ip:
+                return ip
+
     return request.client.host if request.client else "127.0.0.1"
 
 

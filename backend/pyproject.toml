@@ -14,9 +14,16 @@ extend-exclude = '''
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Полный набор для локальной проверки (pre-commit / make lint-full):
 # E: pycodestyle errors, F: pyflakes, I: isort, UP: pyupgrade, B: flake8-bugbear
+# (см. также backend/Makefile и docs/engineering.md — план постепенного ужесточения)
+[tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 ignore = ["E501"] # Длину строки контролирует Black
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["core", "database", "routers", "services", "parsers", "models", "tasks"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

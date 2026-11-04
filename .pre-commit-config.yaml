@@ -1,0 +1,53 @@
+# Pre-commit хуки: установка — pip install pre-commit && pre-commit install
+# Запуск на всех файлах: pre-commit run --all-files
+# Детали и текущий долг по стилю: docs/engineering.md
+repos:
+  # Гигиена файлов (авто-фикс)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^frontend/dist/
+      - id: end-of-file-fixer
+        exclude: ^frontend/dist/
+      - id: check-yaml
+      - id: check-json
+        exclude: ^frontend/package-lock.json
+      - id: check-merge-conflict
+      # Страховка от повторного попадания тяжёлых бинарников в git
+      # (715KB xlsx-сэмплы уже приходилось вычищать — см. docs/engineering.md)
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+
+  # Python: ruff из requirements.txt (версия проекта, без расхождений с CI)
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff (auto-fix)
+        entry: ruff check --fix --exit-zero
+        language: system
+        types: [python]
+        pass_filenames: true
+
+      - id: black
+        name: black (auto-format)
+        entry: black
+        language: system
+        types: [python]
+
+  # Frontend: eslint + prettier из node_modules проекта
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint (auto-fix)
+        entry: bash -c 'cd frontend && npx eslint --fix --ext .js,.jsx src'
+        language: system
+        files: ^frontend/src/.*\.(js|jsx)$
+        pass_filenames: false
+
+      - id: prettier
+        name: prettier (auto-format)
+        entry: bash -c 'cd frontend && npx prettier --write "src/**/*.{js,jsx,css,json}"'
+        language: system
+        files: ^frontend/src/.*\.(js|jsx|css|json)$
+        pass_filenames: false

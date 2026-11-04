@@ -20,6 +20,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, relationship
 
+# P-1 (неделя 3): денежные поля хранятся как NUMERIC(12,2).
+# FLOAT двоичный — цены типа 19.99 копятся с ошибкой (sum → 199.89999999999998).
+# 12,2 покрывает суммы до 9 999 999 999.99 ₽; БД считает/суммирует точно.
+MONEY = Numeric(12, 2)
+
 Base = declarative_base()
 
 
@@ -84,7 +89,7 @@ class CategoryMapping(Base):
     source_category_id = Column(String, nullable=False)
     target_platform = Column(String, nullable=False)
     target_category_id = Column(String, nullable=False)
-    confidence = Column(Float, default=1.0)
+    confidence = Column(Float, default=1.0)  # не деньги: 0..1 — Float корректен
     is_manual = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -102,7 +107,7 @@ class Product(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     source = Column(String, nullable=False)
-    price = Column(Float, nullable=False)
+    price = Column(MONEY, nullable=False)  # P-1: было Float
     status = Column(String, default="pending", index=True)  # ← index=True
     description = Column(String, default="")
     photos_count = Column(Integer, default=0)
@@ -173,7 +178,7 @@ class ProductVariant(Base):
     sku = Column(String, nullable=False, index=True)  # ШК/артикул варианта
     size = Column(String, nullable=True)  # "92", "XL"
     color = Column(String, nullable=True)  # "Розовый"
-    price = Column(Float, nullable=True)
+    price = Column(MONEY, nullable=True)  # P-1: было Float
     stock = Column(Integer, nullable=True)
     external_id = Column(String, nullable=True)  # ID варианта на площадке
     sort_order = Column(Integer, default=0)
@@ -215,8 +220,8 @@ class MigrationLog(Base):
     product_name = Column(String, nullable=True)
     source_platform = Column(String, nullable=True)
     target_platform = Column(String, nullable=False)
-    old_price = Column(Float, nullable=True)
-    new_price = Column(Float, nullable=True)
+    old_price = Column(MONEY, nullable=True)  # P-1: было Float
+    new_price = Column(MONEY, nullable=True)  # P-1: было Float
     old_category = Column(String, nullable=True)
     new_category = Column(String, nullable=True)
     status = Column(String, default="success")  # success | error

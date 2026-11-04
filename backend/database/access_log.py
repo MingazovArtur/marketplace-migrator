@@ -1,5 +1,6 @@
 """Журнал доступа. Автономный модуль: не ломает auth, если БД недоступна."""
 
+import ipaddress
 import logging
 
 from sqlalchemy import create_engine
@@ -13,14 +14,41 @@ _engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 _Session = sessionmaker(bind=_engine)
 
 
+def _valid_ip(value: str) -> str | None:
+    """Возвращает значение, если это корректный IP, иначе None."""
+    try:
+        ipaddress.ip_address(value)
+        return value
+    except ValueError:
+        return None
+
+
 def get_client_ip(request) -> str:
-    """Реальный IP клиента за nginx (X-Forwarded-For / X-Real-IP)."""
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
+    """
+    Реальный IP клиента за nginx.
+
+    Было (K-3, дубликат дыры из core.rate_limit): брался ПЕРВЫЙ элемент
+    X-Forwarded-For — его контролирует клиент, что позволяло писать в журнал
+    доступа поддельные IP. Логика синхронизирована с core.rate_limit:
+
+      1) X-Real-IP — проставляет наш nginx, значение клиента перезаписывается;
+      2) X-Forwarded-For — только ПОСЛЕДНИЙ (правый) элемент, добавленный nginx;
+      3) request.client.host — прямое соединение (dev без прокси).
+    """
     xri = request.headers.get("x-real-ip")
     if xri:
-        return xri.strip()
+        ip = _valid_ip(xri.strip())
+        if ip:
+            return ip
+
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            ip = _valid_ip(parts[-1])
+            if ip:
+                return ip
+
     return request.client.host if request.client else "unknown"
 
 
