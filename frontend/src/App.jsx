@@ -31,6 +31,7 @@ import EmptyState from './components/common/EmptyState';
 import OnboardingTour from './components/onboarding/OnboardingTour';
 import LogisticsModal from './components/products/LogisticsModal';
 import SpecsPage from './pages/SpecsPage';
+import SpecsMonitorPage from './pages/SpecsMonitorPage';
 import ProductsPage from './pages/ProductsPage';
 import TemplatesPage from './pages/TemplatesPage';
 
@@ -384,7 +385,9 @@ function App() {
       case 'history':
         return <HistoryView />;
       case 'specs':
-        return <SpecsPage user={user} onNotify={setMessage} />;
+        return <SpecsPage user={user} onNotify={setMessage} onOpenMonitor={() => setCurrentView('specs-monitor')} />;
+      case 'specs-monitor':
+        return <SpecsMonitorPage user={user} />;
       case 'templates':
         return <TemplatesPage onNotify={setMessage} />;
       case 'products':
@@ -442,6 +445,7 @@ function App() {
           setCurrentView={setCurrentView}
           theme={theme}
           setTheme={setTheme}
+          isAdmin={user?.role === 'admin'}
         />
         <main className="main-content" data-onboarding="welcome">
           <Alert message={message} onClose={() => setMessage('')} />

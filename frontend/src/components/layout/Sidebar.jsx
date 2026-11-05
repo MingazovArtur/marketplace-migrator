@@ -11,37 +11,47 @@ const NAV = [
   { id: 'history', label: 'История', icon: 'history' },
 ];
 
-const Sidebar = ({ currentView, setCurrentView, theme, setTheme }) => (
-  <aside className="sidebar">
-    <nav className="sidebar-nav">
-      {NAV.map(({ id, label, icon }) => (
-        <button
-          key={id}
-          className={`sidebar-item ${currentView === id ? 'active' : ''}`}
-          onClick={() => setCurrentView(id)}
-        >
-          <Icon name={icon} size={20} />
-          <span className="sidebar-item-text">{label}</span>
-        </button>
-      ))}
-    </nav>
+// Мониторинг загрузок спеков (очередь Celery + прогресс) — только для админа,
+// вставляется сразу после «Спецификаций»
+const ADMIN_NAV_ITEM = { id: 'specs-monitor', label: 'Мониторинг спеков', icon: 'report' };
 
-    <div className="sidebar-footer">
-      <button
-        type="button"
-        className={`theme-toggle ${theme === 'light' ? 'on' : ''}`}
-        onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-      >
-        <Icon name={theme === 'light' ? 'sun' : 'moon'} size={18} />
-        <span className="theme-toggle-text">
-          {theme === 'light' ? 'Светлая тема' : 'Тёмная тема'}
-        </span>
-        <span className="theme-toggle-switch">
-          <span className="theme-toggle-knob" />
-        </span>
-      </button>
-    </div>
-  </aside>
-);
+const Sidebar = ({ currentView, setCurrentView, theme, setTheme, isAdmin = false }) => {
+  const items = isAdmin
+    ? [...NAV.slice(0, 5), ADMIN_NAV_ITEM, ...NAV.slice(5)]
+    : NAV;
+
+  return (
+    <aside className="sidebar">
+      <nav className="sidebar-nav">
+        {items.map(({ id, label, icon }) => (
+          <button
+            key={id}
+            className={`sidebar-item ${currentView === id ? 'active' : ''}`}
+            onClick={() => setCurrentView(id)}
+          >
+            <Icon name={icon} size={20} />
+            <span className="sidebar-item-text">{label}</span>
+          </button>
+        ))}
+      </nav>
+
+      <div className="sidebar-footer">
+        <button
+          type="button"
+          className={`theme-toggle ${theme === 'light' ? 'on' : ''}`}
+          onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+        >
+          <Icon name={theme === 'light' ? 'sun' : 'moon'} size={18} />
+          <span className="theme-toggle-text">
+            {theme === 'light' ? 'Светлая тема' : 'Тёмная тема'}
+          </span>
+          <span className="theme-toggle-switch">
+            <span className="theme-toggle-knob" />
+          </span>
+        </button>
+      </div>
+    </aside>
+  );
+};
 
 export default Sidebar;

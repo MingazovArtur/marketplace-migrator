@@ -43,6 +43,19 @@ def get_progress(task_id: str) -> dict:
                         "error": r.get("message") or "Ошибка загрузки спеков",
                         "error_details": r.get("error_details", []),
                     }
+                if r.get("status") == "paused":
+                    # Загрузка остановлена админом (POST /admin/specs-tasks/{id}/pause);
+                    # продолжить можно на странице мониторинга спеков
+                    total = r.get("total", 0)
+                    return {
+                        "status": "paused",
+                        "total": total,
+                        "done": total,
+                        "success": r.get("success", 0),
+                        "errors": r.get("errors", 0),
+                        "percent": 0,
+                        "message": r.get("message") or "Загрузка поставлена на паузу администратором",
+                    }
                 total = r.get("total") or (r.get("fetched", 0) + r.get("errors", 0))
                 success = r.get("success") or r.get("fetched", 0)
                 errors = r.get("errors", 0)

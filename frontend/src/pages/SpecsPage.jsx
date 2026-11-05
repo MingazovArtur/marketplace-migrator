@@ -40,7 +40,7 @@ const formatDate = (iso) =>
       })
     : '—';
 
-const SpecsPage = ({ user, onNotify }) => {
+const SpecsPage = ({ user, onNotify, onOpenMonitor }) => {
   const [platform, setPlatform] = useState('ozon');
   const [isAdmin, setIsAdmin] = useState(user?.role === 'admin');
 
@@ -209,7 +209,7 @@ const SpecsPage = ({ user, onNotify }) => {
           const p = await api.getSpecsRefreshProgress(platform, taskId);
           setProgress(p);
 
-          if (p.status === 'completed' || p.status === 'failed') {
+          if (p.status === 'completed' || p.status === 'failed' || p.status === 'paused') {
             clearInterval(pollingRef.current);
             pollingRef.current = null;
 
@@ -218,6 +218,13 @@ const SpecsPage = ({ user, onNotify }) => {
                 `✅ Готово: ${p.success || p.done || 0} категорий загружено. Ошибок: ${p.errors || 0}.`
               );
               await load();
+            } else if (p.status === 'paused') {
+              // Загрузку остановил админ со страницы мониторинга; сделанное сохранено,
+              // продолжить можно там же без повторного ввода ключа
+              setRefreshMessage(
+                `⏸ ${p.message || 'Загрузка поставлена на паузу администратором'}. ` +
+                  'Продолжить — на странице «Мониторинг спеков» (кнопка «Возобновить»).'
+              );
             } else if (p.status === 'failed') {
               setRefreshMessage(`❌ Ошибка загрузки: ${p.error || 'неизвестная ошибка'}`);
             }
@@ -298,6 +305,11 @@ const SpecsPage = ({ user, onNotify }) => {
           </p>
         </div>
         <div className="header-actions">
+          {isAdmin && onOpenMonitor && (
+            <Button variant="outline" onClick={onOpenMonitor} title="Очередь и прогресс всех загрузок спеков">
+              <Icon name="report" size={16} /> Мониторинг загрузок
+            </Button>
+          )}
           <Button variant="secondary" onClick={load} disabled={loading}>
             <Icon name="refresh" size={16} /> Обновить
           </Button>

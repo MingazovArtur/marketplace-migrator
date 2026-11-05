@@ -80,11 +80,11 @@ services:
     pull_policy: never
     restart: unless-stopped
     command: >
-      celery -A celery_app worker 
-      --loglevel=info 
-      --concurrency=1 
-      --prefetch-multiplier=1 
-      -Q default 
+      celery -A celery_app worker
+      --loglevel=info
+      --concurrency=1
+      --prefetch-multiplier=1
+      -Q default
       -n default_worker@%h
     env_file:
       - .env
@@ -113,12 +113,12 @@ services:
     pull_policy: never
     restart: unless-stopped
     command: >
-      celery -A celery_app worker 
-      --loglevel=info 
-      --concurrency=1 
-      --prefetch-multiplier=1 
-      --max-tasks-per-child=20 
-      -Q xlsx_export 
+      celery -A celery_app worker
+      --loglevel=info
+      --concurrency=1
+      --prefetch-multiplier=1
+      --max-tasks-per-child=20
+      -Q xlsx_export
       -n xlsx_worker@%h
     env_file:
       - .env
@@ -140,6 +140,44 @@ services:
     mem_limit: 1536m
     memswap_limit: 2048m
     cpus: 1.0
+    networks: [internal]
+
+  # Отдельный воркер для долгих загрузок спеков (Ozon — 30+ минут):
+  # раньше они стояли в общей очереди и миграции «зависали на 0%».
+  # SPECS_WORKER=1 — на старте этого контейнера реестр мониторинга помечает
+  # записи убитых перезапуском задач как «прервана» (можно продолжить).
+  celery_specs:
+    image: marketplace_backend_prod:latest
+    pull_policy: never
+    restart: unless-stopped
+    command: >
+      celery -A celery_app worker
+      --loglevel=info
+      --concurrency=1
+      --prefetch-multiplier=1
+      -Q specs
+      -n specs_worker@%h
+    env_file:
+      - .env
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      SECRET_KEY: ${SECRET_KEY:-${JWT_SECRET}}
+      OZON_CLIENT_ID: ${OZON_CLIENT_ID:-}
+      OZON_API_KEY: ${OZON_API_KEY:-}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-${REDIS_URL}}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-${REDIS_URL}}
+      SPECS_WORKER: "1"
+    volumes:
+      - media:/app/media
+      - ozon_templates:/app/templates/ozon
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 2048m
+    memswap_limit: 2560m
+    cpus: 1.5
     networks: [internal]
 
   nginx:

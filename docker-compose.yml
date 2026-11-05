@@ -76,6 +76,34 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Отдельный воркер для долгих загрузок спеков (Ozon — 30+ минут):
+  # раньше они стояли в общей очереди pool=solo и миграции «зависали на 0%».
+  # SPECS_WORKER=1 — на старте этого контейнера реестр мониторинга помечает
+  # записи убитых перезапуском задач как «прервана» (можно продолжить).
+  celery_specs_worker:
+    image: marketplace_backend:latest
+    pull_policy: never
+    container_name: marketplace_celery_specs
+    command: celery -A celery_app worker --loglevel=info --pool=solo -Q specs -n specs_worker@%h
+    volumes:
+      - ./backend:/app
+      - media:/app/media
+      - ozon_templates:/app/templates/ozon
+    env_file:
+      - .env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - SPECS_WORKER=1
+    depends_on:
+      backend:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   celery_xlsx_worker:
     image: marketplace_backend:latest
     pull_policy: never

@@ -22,13 +22,21 @@ celery_app.conf.update(
     enable_utc=True,
     task_track_started=True,
     worker_prefetch_multiplier=1,
-    # Выделенные очереди: default (миграции, фото, спеки) и xlsx_export (тяжёлый openpyxl)
+    # Выделенные очереди: default (миграции, фото), specs (долгая загрузка
+    # спеков площадок — 30+ минут на Ozon) и xlsx_export (тяжёлый openpyxl).
+    # Спеки идут в отдельный воркер, чтобы миграции не стояли за ними в
+    # общей очереди pool=solo (иначе миграция «зависает на 0%» на полчаса).
     task_default_queue="default",
     task_queues=(
         Queue("default", routing_key="default"),
+        Queue("specs", routing_key="specs"),
         Queue("xlsx_export", routing_key="xlsx_export"),
     ),
     task_routes={
+        "tasks.refresh_specs_task": {
+            "queue": "specs",
+            "routing_key": "specs",
+        },
         "tasks.generate_xlsx_export_task": {
             "queue": "xlsx_export",
             "routing_key": "xlsx_export",

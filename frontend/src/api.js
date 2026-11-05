@@ -218,6 +218,17 @@ export const api = {
     return res.json();
   },
 
+  /* Точечное обновление товара — кнопка «Сохранить» в окне миграции */
+  updateProduct: async (productId, payload) => {
+    const res = await fetch(`${API_URL}/products/${enc(productId)}`, {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка сохранения товара'));
+    return res.json();
+  },
+
   /* ==================== Product details ==================== */
 
   setAttributes: async (productId, attributes) => {
@@ -815,6 +826,33 @@ export const api = {
       headers: getHeaders(),
     });
     if (!res.ok) return { status: 'unknown' };
+    return res.json();
+  },
+
+  /* Мониторинг загрузок спеков — только для админа */
+  getAdminSpecsTasks: async () => {
+    const res = await fetch(`${API_URL}/admin/specs-tasks`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка загрузки мониторинга спеков'));
+    return res.json();
+  },
+
+  /* Пауза загрузки спеков (админ): задача дообработает текущий блок и остановится */
+  pauseSpecsTask: async (taskId) => {
+    const res = await fetch(`${API_URL}/admin/specs-tasks/${enc(taskId)}/pause`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось поставить задачу на паузу'));
+    return res.json();
+  },
+
+  /* Продолжить остановленную загрузку спеков (админ): новая задача с места остановки */
+  resumeSpecsTask: async (taskId) => {
+    const res = await fetch(`${API_URL}/admin/specs-tasks/${enc(taskId)}/resume`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось возобновить загрузку'));
     return res.json();
   },
 };

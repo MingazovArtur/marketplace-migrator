@@ -54,6 +54,15 @@ class DeleteAllRequest(BaseModel):
     confirm: bool = False
 
 
+class ProductUpdateRequest(BaseModel):
+    """Точечное обновление товара — кнопка «Сохранить» в окне миграции."""
+
+    name: str | None = None
+    price: float | None = None
+    # Категория назначения (как в bulk-update пишется в mapped_category)
+    category: str | None = None
+
+
 # ==================== Хелпер: валидация категории по спекам ====================
 
 
@@ -200,6 +209,67 @@ async def bulk_update_products(
         "updated": updated,
         "updated_ids": updated_ids,
         "category_warning": category_warning,
+    }
+
+
+@router.patch("/products/{product_id}")
+async def update_product(
+    product_id: int,
+    payload: ProductUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Точечное обновление товара: название / цена / категория назначения.
+
+    Зачем: в окне «Миграция карточки» раньше была только кнопка «Мигрировать» —
+    нельзя было указать цену и просто сохранить её без запуска миграции
+    (товары из файлов часто приходят с ценой 0, и миграция блокировалась).
+    Категория, как и в bulk-update, пишется в mapped_category.
+    """
+    if payload.name is None and payload.price is None and payload.category is None:
+        raise HTTPException(status_code=400, detail="Не указаны поля для обновления")
+
+    if payload.name is not None and not payload.name.strip():
+        raise HTTPException(status_code=400, detail="Название не может быть пустым")
+
+    if payload.price is not None and not (payload.price > 0):
+        raise HTTPException(status_code=400, detail="Цена должна быть больше 0 ₽")
+
+    stmt = select(ProductORM).where(
+        ProductORM.id == product_id,
+        ProductORM.user_id == current_user.id,
+    )
+    p = (await db.execute(stmt)).scalar_one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail="Товар не найден или не принадлежит вам")
+
+    updated = []
+    if payload.name is not None and payload.name.strip() != p.name:
+        p.name = payload.name.strip()
+        updated.append("name")
+    if payload.price is not None and float(payload.price) != float(p.price or 0):
+        p.price = round(float(payload.price), 2)
+        updated.append("price")
+    if payload.category is not None:
+        new_cat = payload.category.strip() or None
+        if new_cat != p.mapped_category:
+            p.mapped_category = new_cat
+            updated.append("category")
+
+    if updated:
+        await db.commit()
+        logger.info(f"✏️ Update product {product_id}: user={current_user.id} fields={updated}")
+
+    return {
+        "success": True,
+        "updated_fields": updated,
+        "product": {
+            "id": p.id,
+            "name": p.name,
+            "price": float(p.price or 0),
+            "mapped_category": p.mapped_category,
+        },
     }
 
 

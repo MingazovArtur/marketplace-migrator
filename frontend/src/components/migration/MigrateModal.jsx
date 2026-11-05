@@ -22,6 +22,7 @@ const MigrateModal = ({
   const [autoExport, setAutoExport] = useState(true);
   const [progress, setProgress] = useState(null);
   const [localError, setLocalError] = useState('');
+  const [saveState, setSaveState] = useState('idle'); // idle | saving | saved
   const pollTimerRef = useRef(null);
 
   const loadSpecCategories = useCallback(async (pl) => {
@@ -122,6 +123,49 @@ const MigrateModal = ({
       setProgress(null);
     }
   }, [form, product, platform, autoExport, onConfirm, onSaved, onClose, pollProgress]);
+
+  // Сохранить изменения (название/цена/категория) в товаре БЕЗ запуска миграции —
+  // товары из файлов часто приходят с ценой 0, раньше её было негде сохранить,
+  // не запуская миграцию
+  const handleSave = useCallback(async () => {
+    const priceNum = Number(form.price);
+    if (!Number.isFinite(priceNum) || priceNum <= 0) {
+      setLocalError('Чтобы сохранить, укажите цену больше 0 ₽.');
+      return;
+    }
+    const name = form.name.trim() || product.name;
+    if (!name) {
+      setLocalError('Укажите название товара.');
+      return;
+    }
+
+    setLocalError('');
+    setSaveState('saving');
+    try {
+      await api.updateProduct(product.id, {
+        name,
+        price: priceNum,
+        category: form.category || null,
+      });
+      setSaveState('saved');
+      if (onNotify) {
+        onNotify(
+          `✅ Товар #${product.id}: изменения сохранены (цена ${priceNum} ₽). Можно мигрировать.`
+        );
+      }
+      if (onSaved) {
+        try {
+          await onSaved();
+        } catch (e) {
+          console.warn('refreshAll failed:', e);
+        }
+      }
+      setTimeout(() => setSaveState('idle'), 4000);
+    } catch (e) {
+      setSaveState('idle');
+      setLocalError(`Не удалось сохранить: ${e.message}`);
+    }
+  }, [form, product, onSaved, onNotify]);
 
   useEffect(() => {
     if (isOpen && product) {
@@ -349,6 +393,15 @@ const MigrateModal = ({
         <div className="modal-actions">
           <Button variant="outline" onClick={onClose} disabled={isInProgress}>
             {isCompleted || isFailed ? 'Закрыть' : 'Отмена'}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleSave}
+            disabled={isInProgress || isCompleted || saveState !== 'idle'}
+            loading={saveState === 'saving'}
+            title="Сохранить название, цену и категорию в товаре без запуска миграции"
+          >
+            <Icon name="save" size={16} /> {saveState === 'saved' ? 'Сохранено' : 'Сохранить'}
           </Button>
           <Button
             onClick={handleSubmit}

@@ -202,4 +202,5 @@ git push --force --mirror
 | Полный линт | `cd backend && make lint-full` |
 | Хуки коммита | `pre-commit run --all-files` |
 | Celery-воркер (dev) | `celery -A celery_app worker -Q default --loglevel=info` |
+| Celery-воркер (спеки) | `celery -A celery_app worker -Q specs --loglevel=info -n specs_worker@%h` (env `SPECS_WORKER=1` — включает сверку реестра на старте) |
 | Celery-воркер (xlsx) | `celery -A celery_app worker -Q xlsx_export --loglevel=info -n xlsx@%h` |

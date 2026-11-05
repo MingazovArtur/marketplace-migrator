@@ -325,10 +325,16 @@ async def refresh_yandex_specs(
     category_ids: list[str] | None = None,
     progress_cb: Callable | None = None,
     concurrency: int = CONCURRENCY,
+    skip_category_ids: list[str] | None = None,
+    pause_check: Callable[[], bool] | None = None,
+    done_keys: set | None = None,
 ) -> dict:
     """
     Загружает дерево категорий Яндекс Маркета и их характеристики,
     сохраняя в platform_category_specs.
+    При остановке админом возвращает {"paused": True, ...} —
+    skip_category_ids (ключи = category_id) пропускаются, done_keys
+    наполняется успешно сохранёнными (для продолжения после паузы).
     """
     if not token or not token.strip():
         raise ValueError("Не указан API-ключ Яндекс Маркета (формат ACMA:...)")
@@ -354,6 +360,14 @@ async def refresh_yandex_specs(
                 if leaf["id"] in wanted
                 or leaf["name"].lower() in {w.lower() for w in wanted}
             ]
+
+        # Продолжение после паузы: пропускаем уже сохранённые категории
+        if skip_category_ids:
+            skip = {str(c) for c in skip_category_ids}
+            before = len(leaves)
+            leaves = [leaf for leaf in leaves if str(leaf["id"]) not in skip]
+            if before != len(leaves):
+                logger.info(f"⏩ Яндекс: пропущено {before - len(leaves)} категорий из прошлой загрузки")
 
         total = len(leaves)
         logger.info(
@@ -398,10 +412,24 @@ async def refresh_yandex_specs(
                     progress_cb({"total": total, "fetched": fetched, "errors": errors})
 
         for i in range(0, total, DB_CHUNK):
+            # Кооперативная пауза между блоками: блок дообрабатывается и коммитится
+            if pause_check and pause_check():
+                logger.info(f"⏸ Яндекс: пауза на {done_count}/{total} — блоки до сюда сохранены")
+                return {
+                    "platform": "yandex",
+                    "paused": True,
+                    "fetched": fetched,
+                    "errors": errors,
+                    "error_details": error_details,
+                }
+
             chunk = leaves[i : i + DB_CHUNK]
             await asyncio.gather(*(work(leaf) for leaf in chunk))
+            flushed = list(buffer)
             try:
                 _flush_ym_buffer(user_id, buffer)
+                if done_keys is not None:
+                    done_keys.update(str(leaf["id"]) for leaf, _ in flushed)
             except Exception as e:
                 logger.error(f"❌ Ошибка сохранения чанка Яндекс Маркета: {e}")
                 errors += len(buffer)

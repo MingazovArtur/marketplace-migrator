@@ -496,10 +496,20 @@ async def refresh_ozon_specs(
     category_ids: list[str] | None = None,
     progress_cb: Callable | None = None,
     concurrency: int = CONCURRENCY,
+    skip_category_ids: list[str] | None = None,
+    pause_check: Callable[[], bool] | None = None,
+    done_keys: set | None = None,
 ) -> dict:
     """
     Фоновая загрузка спеков Ozon с оптимизацией памяти.
-    Возвращает {"platform", "fetched", "errors", "error_details"}.
+    Возвращает {"platform", "fetched", "errors", "error_details"};
+    при остановке админом — {"paused": True, ...}.
+
+    skip_category_ids — ключи категорий вида "{id}_{type_id}", которые уже
+    сохранены в БД (продолжение после паузы) — их пропускаем.
+    pause_check — колбэк «админ просил паузу», проверяется между блоками.
+    done_keys — сюда складываются ключи успешно сохранённых категорий
+    (передаётся из refresh_specs_task и пишется в реестр при паузе).
     """
     client_id, api_key = _parse_ozon_key(raw_api_key)
     headers = _ozon_headers(client_id, api_key)
@@ -524,6 +534,14 @@ async def refresh_ozon_specs(
         if category_ids:
             wanted = {str(c) for c in category_ids}
             leaves = [n for n in leaves if n["id"] in wanted]
+
+        # Продолжение после паузы: пропускаем уже сохранённые категории
+        if skip_category_ids:
+            skip = {str(c) for c in skip_category_ids}
+            before = len(leaves)
+            leaves = [n for n in leaves if f"{n['id']}_{n['type_id']}" not in skip]
+            if before != len(leaves):
+                logger.info(f"⏩ Ozon: пропущено {before - len(leaves)} категорий из прошлой загрузки")
 
         total = len(leaves)
         logger.info(f"🚀 Ozon: будет загружено {total} категорий (concurrency={concurrency})")
@@ -562,12 +580,27 @@ async def refresh_ozon_specs(
                     progress_cb({"total": total, "fetched": fetched, "errors": errors})
 
         for i in range(0, total, DB_CHUNK):
+            # Кооперативная пауза: проверяем флаг между блоками категорий.
+            # Текущий блок дообрабатывается и коммитится, прогресс не теряется.
+            if pause_check and pause_check():
+                logger.info(f"⏸ Ozon: пауза на {done_count}/{total} — блоки до сюда сохранены")
+                return {
+                    "platform": "ozon",
+                    "paused": True,
+                    "fetched": fetched,
+                    "errors": errors,
+                    "error_details": error_details,
+                }
+
             chunk = leaves[i : i + DB_CHUNK]
             await asyncio.gather(*(work(leaf) for leaf in chunk))
 
             # Commit чанка в БД
+            flushed = list(buffer)
             try:
                 _flush_buffer(user_id, buffer)
+                if done_keys is not None:
+                    done_keys.update(f"{leaf['id']}_{leaf['type_id']}" for leaf, _ in flushed)
             except Exception as e:
                 logger.error(f"❌ Ошибка commit чанка {i // DB_CHUNK}: {e}")
                 errors += len(buffer)
