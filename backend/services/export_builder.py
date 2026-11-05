@@ -55,11 +55,6 @@ def _generate_gtin_ean13(product: dict, prefix: str = "460") -> str:
     return f"{base12}{check_digit}"
 
 
-def _clean_megamarket_sku(sku: str) -> str:
-    """В Коде товара продавца на Мегамаркете не должно быть символов # и %."""
-    return re.sub(r"[#%]+", "_", str(sku or "")).strip()
-
-
 def _magnit_row(p: dict) -> dict:
     r = _rules("magnit")
     return {
@@ -109,56 +104,6 @@ def _yandex_row(p: dict) -> dict:
     }
 
 
-def _megamarket_row(p: dict) -> dict:
-    r = _rules("megamarket")
-    raw_sku = p.get("sku") or p.get("external_id") or f"SMM-{p['id']}"
-    sku = _clean_megamarket_sku(raw_sku)
-
-    raw_bc = str(p.get("barcode") or "").strip()
-    bc_parts = [b.strip() for b in re.split(r"[;,]", raw_bc) if b.strip()]
-    main_gtin = (
-        bc_parts[0]
-        if (bc_parts and not bc_parts[0].startswith("2"))
-        else _generate_gtin_ean13(p, prefix="460")
-    )
-    second_bc = bc_parts[1] if len(bc_parts) > 1 else ""
-
-    photos = [str(u).strip() for u in (p.get("photos") or []) if str(u).strip()]
-    wg = p.get("package_weight_grams") or p.get("weight_grams") or 500
-    l_mm = p.get("package_length_mm") or 200
-    w_mm = p.get("package_width_mm") or 150
-    h_mm = p.get("package_height_mm") or 100
-
-    # Десятичные дроби на Мегамаркете пишутся через запятую (не более 2 знаков после запятой)
-    weight_str = f"{round(float(wg) / 1000.0, 2):.2f}".rstrip("0").rstrip(".").replace(".", ",")
-    length_str = f"{round(float(l_mm) / 10.0, 2):.2f}".rstrip("0").rstrip(".").replace(".", ",")
-    width_str = f"{round(float(w_mm) / 10.0, 2):.2f}".rstrip("0").rstrip(".").replace(".", ",")
-    height_str = f"{round(float(h_mm) / 10.0, 2):.2f}".rstrip("0").rstrip(".").replace(".", ",")
-
-    return {
-        "Код товара продавца": sku,
-        "Основной штрихкод (GTIN)": main_gtin,
-        "Штрихкод 2": second_bc,
-        "Ссылка на pdf-инструкцию": "",
-        "Ссылка на сертификат": "",
-        "Название товара по формуле: Тип товара+Бренд+Модель/Артикул": _limit(
-            p["name"], r["name_max"]
-        ),
-        "Описание товара": _limit(_clean_html(p.get("description") or p["name"]), r["desc_max"]),
-        "Бренд": p.get("brand") or "Без бренда",
-        "Модель": p.get("name", "")[:50],
-        "Артикул производителя": sku,
-        "НДС": p.get("vat_rate") or "Не облагается",
-        "Цена": p["price"],
-        "Вес, кг": weight_str,
-        "Длина, см": length_str,
-        "Ширина, см": width_str,
-        "Высота, см": height_str,
-        "URL основного фото": photos[0] if photos else "",
-        "URL фото 2": photos[1] if len(photos) > 1 else "",
-    }
-
-
 def _holodilnik_row(p: dict) -> dict:
     r = _rules("holodilnik")
     wg = p.get("package_weight_grams") or p.get("weight_grams") or 500
@@ -182,62 +127,30 @@ def _holodilnik_row(p: dict) -> dict:
     }
 
 
-def _aliexpress_row(p: dict) -> dict:
-    r = _rules("aliexpress")
-    raw_sku = str(p.get("sku") or p.get("external_id") or f"AE-{p['id']}")[:50]
-    photos = [str(u).strip() for u in (p.get("photos") or []) if str(u).strip()]
-
-    attr_map = {
-        re.sub(r"[^a-zа-я0-9]", "", (a.get("name") or "").lower()): a.get("value")
-        for a in (p.get("attributes") or [])
-        if a.get("name")
-    }
-    variants = p.get("variants") or []
-    first_var = variants[0] if variants else {}
-    color_val = first_var.get("color") or attr_map.get("цвет") or "Разноцветный"
-    size_val = first_var.get("size") or attr_map.get("размер") or ""
-
-    wg = p.get("package_weight_grams") or p.get("weight_grams") or 500
-    l_mm = p.get("package_length_mm") or 200
-    w_mm = p.get("package_width_mm") or 150
-    h_mm = p.get("package_height_mm") or 100
-
-    return {
-        "Модель (seller SPU ID)*": raw_sku,
-        "Артикул/Штрихкод (seller SKU ID)*": raw_sku,
-        "Штрихкод / EAN": p.get("barcode") or _generate_gtin_ean13(p, prefix="460"),
-        "Наименование товара*": _limit(p["name"], r["name_max"]),
-        "Описание*": _limit(_clean_html(p.get("description") or p["name"]), r["desc_max"]),
-        "Бренд*": p.get("brand") or "NONE",
-        "Главное фото*": photos[0] if photos else "",
-        "Фото SKU": photos[0] if photos else "",
-        "Цвет*": color_val,
-        "Доставка из*": "Российская Федерация",
-        "Размер": size_val,
-        "Название цвета в системе продавца": color_val,
-        "Название размера в системе продавца": size_val,
-        "Цена*": p["price"],
-        "Остаток*": p.get("stock") if p.get("stock") is not None else 10,
-        "Вес с упаковкой*": round(max(float(wg), 100.0) / 1000.0, 2),
-        "Длина упаковки*": max(int(round(float(l_mm) / 10.0)), 1),
-        "Ширина упаковки*": max(int(round(float(w_mm) / 10.0)), 1),
-        "Высота упаковки*": max(int(round(float(h_mm) / 10.0)), 1),
-    }
-
-
 EXPORT_FORMATS = {
     "magnit": {"sheet": "Товары", "row_mapper": _magnit_row},
     "ozon": {"sheet": "Товары", "row_mapper": _ozon_row},
     "wildberries": {"sheet": "Товары", "row_mapper": _wb_row},
     "yandex": {"sheet": "Товары", "row_mapper": _yandex_row},
-    "megamarket": {"sheet": "Товары", "row_mapper": _megamarket_row},
     "holodilnik": {"sheet": "Товары", "row_mapper": _holodilnik_row},
-    "aliexpress": {"sheet": "Шаблон", "row_mapper": _aliexpress_row},
 }
+
+# AliExpress и Мегамаркет собираются билдерами официальной структуры
+# (services.xlsx_generator.aliexpress / megamarket) — в build_rows и build_upload_file.
 
 
 def build_rows(products: list, platform: str) -> list:
     """Строки файла выгрузки (словари) — используется и для предпросмотра."""
+    if platform == "aliexpress":
+        from services.xlsx_generator.aliexpress import aliexpress_flat_rows
+
+        return aliexpress_flat_rows(products)
+
+    if platform == "megamarket":
+        from services.xlsx_generator.megamarket import megamarket_flat_rows
+
+        return megamarket_flat_rows(products)
+
     fmt = EXPORT_FORMATS.get(platform)
     if not fmt:
         raise ValueError(f"Нет формата файла выгрузки для площадки '{platform}'")
@@ -246,6 +159,23 @@ def build_rows(products: list, platform: str) -> list:
 
 def build_upload_file(products: list, platform: str) -> io.BytesIO:
     """Собирает XLSX для загрузки в личный кабинет целевой площадки."""
+    # AliExpress и Мегамаркет: книга в структуре официального шаблона площадки
+    if platform in ("aliexpress", "megamarket"):
+        if platform == "aliexpress":
+            from services.xlsx_generator.aliexpress import build_aliexpress_workbook
+
+            wb = build_aliexpress_workbook(products)
+        else:
+            from services.xlsx_generator.megamarket import build_megamarket_workbook
+
+            wb = build_megamarket_workbook(products)
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        logger.info(f"📤 Сформирован файл выгрузки для {platform}: {len(products)} товаров")
+        return output
+
     fmt = EXPORT_FORMATS.get(platform)
     if not fmt:
         raise ValueError(f"Нет формата файла выгрузки для площадки '{platform}'")

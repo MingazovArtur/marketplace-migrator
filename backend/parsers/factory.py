@@ -31,21 +31,24 @@ class SmartMarketplaceParser(BaseFileParser):
 
     supported_formats = ["xlsx", "csv", "yml"]
 
-    SKU_KEYS = {
-        "кодтоварапродавца",
+    # Порядок важен: сначала специфичные SKU-колонки площадок, затем модель/SPU.
+    # Для AliExpress-вариаций это гарантирует Артикул (seller SKU ID) вместо
+    # Модели (seller SPU ID), одинаковой у всех вариаций.
+    SKU_KEYS = (
         "кодтоварапродавцаofferid",
+        "кодтоварапродавца",
         "артикулштрихкодsellerskuid",
         "артикулsellerskuid",
         "sellerskuid",
-        "модельsellerspuid",
-        "sellerspuid",
-        "артикул",
+        "вашsku",
         "артикулпродавца",
         "артикулsku",
-        "вашsku",
+        "артикул",
         "offerid",
+        "модельsellerspuid",
+        "sellerspuid",
         "sku",
-    }
+    )
     NAME_KEYS = {
         "названиетоварапоформулетиптоварабрендмодельартикул",
         "названиетовара",
@@ -116,7 +119,7 @@ class SmartMarketplaceParser(BaseFileParser):
 
         raw_df = xl.parse(sheet_name=sheet_name, header=None)
         header_idx = 0
-        all_markers = self.SKU_KEYS | self.NAME_KEYS
+        all_markers = set(self.SKU_KEYS) | self.NAME_KEYS
         for idx in range(min(10, len(raw_df))):
             row_norms = {_norm_col(v) for v in raw_df.iloc[idx].values if pd.notna(v)}
             if row_norms & all_markers:
@@ -228,15 +231,39 @@ class SmartMarketplaceParser(BaseFileParser):
         return result
 
 
+class MegamarketFileParser(SmartMarketplaceParser):
+    """Парсер файлов Мегамаркета (Excel-файл с ассортиментом)."""
+
+    @property
+    def platform(self) -> str:
+        return "megamarket"
+
+
+class HolodilnikFileParser(SmartMarketplaceParser):
+    """Парсер файлов Холодильник.ру."""
+
+    @property
+    def platform(self) -> str:
+        return "holodilnik"
+
+
+class AliexpressFileParser(SmartMarketplaceParser):
+    """Парсер файлов AliExpress (официальный XLSX-шаблон)."""
+
+    @property
+    def platform(self) -> str:
+        return "aliexpress"
+
+
 # Реестр парсеров (7 активных площадок)
 PARSERS = {
     "ozon": OzonFileParser,
     "magnit": MagnitFileParser,
     "wildberries": WBFileParser,
     "yandex": YandexFileParser,
-    "megamarket": SmartMarketplaceParser,
-    "holodilnik": SmartMarketplaceParser,
-    "aliexpress": SmartMarketplaceParser,
+    "megamarket": MegamarketFileParser,
+    "holodilnik": HolodilnikFileParser,
+    "aliexpress": AliexpressFileParser,
 }
 
 

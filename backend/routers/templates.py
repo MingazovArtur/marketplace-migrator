@@ -25,6 +25,18 @@ def _safe_disposition(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
 
 
+def _workbook_response(workbook, filename: str) -> StreamingResponse:
+    """Отдаёт openpyxl Workbook как скачиваемый XLSX."""
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": _safe_disposition(filename)},
+    )
+
+
 @router.get("/templates/{platform}")
 def download_template(platform: str):
     """
@@ -43,6 +55,29 @@ def download_template(platform: str):
             status_code=404,
             detail=f"Платформа '{platform}' не найдена. Доступные: {Platform.all_values()}",
         )
+
+    # AliExpress и Мегамаркет: шаблон в структуре официального XLSX площадки
+    # (AliExpress — блоки/подсказки/заголовки в 3 строках + блок произвольных
+    # характеристик + развёрнутые вариации; Мегамаркет — шапка и правила площадки).
+    if platform == "aliexpress":
+        from services.xlsx_generator.aliexpress import (
+            aliexpress_example_products,
+            build_aliexpress_workbook,
+        )
+
+        wb = build_aliexpress_workbook(aliexpress_example_products())
+        logger.info("📥 Шаблон для AliExpress скачан (структура официального шаблона)")
+        return _workbook_response(wb, f"template_{platform}.xlsx")
+
+    if platform == "megamarket":
+        from services.xlsx_generator.megamarket import (
+            build_megamarket_workbook,
+            megamarket_example_products,
+        )
+
+        wb = build_megamarket_workbook(megamarket_example_products())
+        logger.info("📥 Шаблон для Мегамаркета скачан (структура официального шаблона)")
+        return _workbook_response(wb, f"template_{platform}.xlsx")
 
     # Определяем структуру шаблона для каждой платформы
     templates = {
@@ -82,26 +117,7 @@ def download_template(platform: str):
             "Категория": "Электроника > Аудио > Наушники",
             "Производитель": "Sony",
         },
-        Platform.MEGAMARKET: {
-            "Код товара продавца": "SMM-1001",
-            "Основной штрихкод (GTIN)": "4600000010018",
-            "Штрихкод 2": "",
-            "Ссылка на pdf-инструкцию": "",
-            "Ссылка на сертификат": "",
-            "Название товара по формуле: Тип товара+Бренд+Модель/Артикул": "Кофемашина DeLonghi Magnifica ECAM22.110",
-            "Описание товара": "Автоматическая кофемашина с капучинатором и встроенной кофемолкой.",
-            "Бренд": "DeLonghi",
-            "Модель": "Magnifica ECAM22.110",
-            "Артикул производителя": "ECAM22.110.B",
-            "НДС": "Не облагается",
-            "Цена": 34990,
-            "Вес, кг": "9,5",
-            "Длина, см": "43",
-            "Ширина, см": "24",
-            "Высота, см": "35",
-            "URL основного фото": "https://example.com/coffee1.jpg",
-            "URL фото 2": "https://example.com/coffee2.jpg",
-        },
+        # AliExpress и Мегамаркет обрабатываются выше (официальная структура шаблона)
         Platform.HOLODILNIK: {
             "Артикул": "HL-BOSCH-200",
             "Наименование товара": "Холодильник двухкамерный Bosch Serie 4 VitaFresh",
@@ -114,27 +130,6 @@ def download_template(platform: str):
             "Габариты (ДхШхВ), см": "66x60x200",
             "Ссылки на фото": "https://example.com/fridge1.jpg; https://example.com/fridge2.jpg",
             "Описание": "Двухкамерный холодильник с системой NoFrost и зоной свежести VitaFresh.",
-        },
-        Platform.ALIEXPRESS: {
-            "Модель (seller SPU ID)*": "SW01",
-            "Артикул/Штрихкод (seller SKU ID)*": "32423535",
-            "Штрихкод / EAN": "4603545345012",
-            "Наименование товара*": "Свитер вязаный хлопковый оверсайз",
-            "Описание*": "Тёплый свитер из натурального хлопка, подходит для повседневной носки.",
-            "Бренд*": "NONE",
-            "Главное фото*": "https://example.com/sweater_main.jpg",
-            "Фото SKU": "https://example.com/sweater_red.jpg",
-            "Цвет*": "Красный",
-            "Доставка из*": "Российская Федерация",
-            "Размер": "S",
-            "Название цвета в системе продавца": "Алый",
-            "Название размера в системе продавца": "42",
-            "Цена*": 2490,
-            "Остаток*": 15,
-            "Вес с упаковкой*": 0.45,
-            "Длина упаковки*": 30,
-            "Ширина упаковки*": 25,
-            "Высота упаковки*": 5,
         },
     }
 

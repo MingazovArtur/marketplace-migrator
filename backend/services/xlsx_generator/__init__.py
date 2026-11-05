@@ -10,8 +10,11 @@
 E-7 (неделя 4): монолит xlsx_generator.py (1455 строк) разбит на пакет:
   - columns — константы структуры и стили
   - common — общие хелперы
-  - yandex / ozon / simple — билдеры книг по площадкам
+  - yandex / ozon / simple / aliexpress / megamarket — билдеры книг по площадкам
   - generate_export (здесь) — точка входа с приоритетом эталонных шаблонов
+
+Резервные книги AliExpress и Мегамаркета собираются в структуре официальных
+шаблонов площадок (блоки/подсказки/заголовки — aliexpress.py, шапка — megamarket.py).
 
 Публичный API сохранён: `from services.xlsx_generator import generate_export`.
 """
@@ -19,7 +22,9 @@ E-7 (неделя 4): монолит xlsx_generator.py (1455 строк) раз�
 import io
 import zipfile
 
+from services.xlsx_generator.aliexpress import build_aliexpress_workbook
 from services.xlsx_generator.common import _slug
+from services.xlsx_generator.megamarket import build_megamarket_workbook
 from services.xlsx_generator.ozon import build_ozon_workbook
 from services.xlsx_generator.simple import build_simple_workbook
 from services.xlsx_generator.yandex import build_yandex_workbook
@@ -29,6 +34,8 @@ __all__ = [
     "build_yandex_workbook",
     "build_ozon_workbook",
     "build_simple_workbook",
+    "build_aliexpress_workbook",
+    "build_megamarket_workbook",
 ]
 
 
@@ -76,11 +83,14 @@ def generate_export(products: list, specs_by_category: dict, platform: str):
             )
             continue
         spec = specs_by_category.get(cat)
-        wb = (
-            build_ozon_workbook(prods, spec)
-            if platform == "ozon"
-            else build_simple_workbook(platform, prods, spec)
-        )
+        if platform == "ozon":
+            wb = build_ozon_workbook(prods, spec)
+        elif platform == "aliexpress":
+            wb = build_aliexpress_workbook(prods, spec)
+        elif platform == "megamarket":
+            wb = build_megamarket_workbook(prods, spec)
+        else:
+            wb = build_simple_workbook(platform, prods, spec)
         buf = io.BytesIO()
         wb.save(buf)
         files.append((f"{platform}_{_slug(cat)}", buf.getvalue()))

@@ -440,6 +440,33 @@ async def export_template(
     if platform not in Platform.all_values():
         raise HTTPException(status_code=404, detail=f"Платформа '{platform}' не найдена")
 
+    # AliExpress и Мегамаркет: шаблон-пример в структуре официального XLSX площадки
+    if platform in ("aliexpress", "megamarket"):
+        if platform == "aliexpress":
+            from services.xlsx_generator.aliexpress import (
+                aliexpress_example_products,
+                build_aliexpress_workbook,
+            )
+
+            wb = build_aliexpress_workbook(aliexpress_example_products())
+        else:
+            from services.xlsx_generator.megamarket import (
+                build_megamarket_workbook,
+                megamarket_example_products,
+            )
+
+            wb = build_megamarket_workbook(megamarket_example_products())
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        filename = f"template_{platform}.xlsx"
+        return StreamingResponse(
+            output,
+            media_type=XLSX_MIME,
+            headers={"Content-Disposition": _safe_disposition(filename)},
+        )
+
     sample = {
         "id": 1,
         "name": "Футболка детская, хлопок 100%, размеры 92-128",

@@ -777,6 +777,12 @@ def _row_values(
                 "аннотация",
                 "описание",
                 "описаниетовара",
+                # Названия товаров не трогаем: запятая — часть текста
+                "названиетоварапоформулетиптоварабрендмодельартикул",
+                "названиетовара",
+                "наименованиетовара",
+                "наименование",
+                "название",
                 "вескг",
                 "весвупаковкекг",
                 "вессупаковкойкг",
@@ -831,6 +837,9 @@ def _expand_products_for_platform(products: list, platform: str) -> list[dict]:
                 clone["_variant_color"] = v.get("color") or ""
                 clone["_variant_size"] = v.get("size") or v.get("name") or ""
                 clone["_variant_photo"] = v.get("photo") or ""
+                # Уникальный штрихкод вариации (Штрихкод / EAN — уникален для SKU)
+                if v.get("barcode"):
+                    clone["barcode"] = str(v["barcode"]).strip()
                 if v.get("price"):
                     clone["price"] = v["price"]
                 if v.get("stock") is not None:
