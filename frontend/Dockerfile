@@ -1,5 +1,5 @@
 # Используем легкую версию Node.js
-FROM node:20-alpine
+FROM node:26-alpine
 
 WORKDIR /app
 
