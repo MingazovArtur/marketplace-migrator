@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # --- Окружение ---
     ENVIRONMENT: str = "development"  # development | production
 
+    # --- Куки аутентификации ---
+    # Secure-флаг: включать ТОЛЬКО после настройки HTTPS (иначе браузер не примет куку по HTTP)
+    COOKIE_SECURE: bool = False
+    COOKIE_SAMESITE: str = "lax"
+
     # --- Безопасность (секреты) ---
     SECRET_KEY: str = DEV_SECRET_FALLBACK
     JWT_SECRET: str = ""  # алиас для совместимости с .env.example и docker-compose.prod.yml

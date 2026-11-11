@@ -11,7 +11,6 @@ from pathlib import Path
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -33,6 +32,7 @@ from routers import (
     export,
     history,
     import_router,
+    media as media_router,  # ✅ /media с авторизацией (замена StaticFiles)
     photos,  # ✅ ИСПРАВЛЕНО: подключен роутер фотографий
     products,
     stats,
@@ -79,7 +79,7 @@ async def ban_check_middleware(request: Request, call_next):
 
     path = request.url.path
 
-    if path in ("/api/health", "/docs", "/openapi.json", "/redoc") or path.startswith("/media"):
+    if path in ("/api/health", "/docs", "/openapi.json", "/redoc"):
         return await call_next(request)
 
     ip = get_client_ip(request)
@@ -161,6 +161,7 @@ app.include_router(import_router.router)
 app.include_router(export.router)
 app.include_router(auth.router)
 app.include_router(email_router.router)
+app.include_router(media_router.router)
 app.include_router(categories.router)
 app.include_router(history.router)
 app.include_router(defaults_router.router)
@@ -171,7 +172,8 @@ app.include_router(tnved.router)
 # ============================================================
 MEDIA_DIR = Path(__file__).parent / "media"
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+# /media раздаёт routers/media.py с авторизацией (владелец/админ),
+# а nginx проксирует /media на backend (см. deploy/nginx/conf.d)
 
 
 # ============================================================

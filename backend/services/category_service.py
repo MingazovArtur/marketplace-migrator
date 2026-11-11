@@ -8,7 +8,7 @@
 
 import logging
 
-import requests
+import httpx
 
 from database.models import Category, CategoryMapping
 from database.session import SessionLocal
@@ -89,7 +89,7 @@ class CategoryService:
             logger.warning(f"API вернул пустой результат для {platform}, используем заглушки")
             return self.get_categories(platform)
 
-        except requests.exceptions.RequestException as e:
+        except httpx.HTTPError as e:
             logger.warning(f"Не удалось подключиться к API {platform}: {e}. Используем заглушки.")
             return self.get_categories(platform)
         except Exception as e:
@@ -211,7 +211,7 @@ class CategoryService:
         """Загрузка категорий из Ozon Seller API"""
         client_id, api_key_val = api_key.split(":") if ":" in api_key else (api_key, api_key)
 
-        response = requests.post(
+        response = httpx.post(
             "https://api-seller.ozon.ru/v1/description-category/tree",
             headers={
                 "Client-Id": client_id,
@@ -241,7 +241,7 @@ class CategoryService:
 
     def _load_wildberries_categories(self, api_key: str) -> list[dict] | None:
         """Загрузка категорий из WB Content API"""
-        response = requests.get(
+        response = httpx.get(
             "https://content.wildberries.ru/content/v2/object/all",
             headers={"Authorization": api_key},
             timeout=10,
@@ -269,7 +269,7 @@ class CategoryService:
         """Загрузка категорий из Yandex Business API"""
         token, campaign_id = api_key.split(":") if ":" in api_key else (api_key, "")
 
-        response = requests.get(
+        response = httpx.get(
             "https://api.partner.market.yandex.ru/v2/categories",
             headers={"Authorization": f"OAuth {token}"},
             params={"campaignId": campaign_id},

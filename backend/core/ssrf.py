@@ -26,7 +26,7 @@ import threading
 from contextlib import contextmanager
 from urllib.parse import urlparse
 
-import requests
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +73,8 @@ def _is_forbidden_ip(ip_obj) -> bool:
 # Обёртка прозрачна для всех остальных имён: без активного пина она
 # делегирует оригинальной функции. Для запиненного имени она возвращает
 # ТОЛЬКО валидированные IP (вызов getaddrinfo для IP-литерала не делает
-# DNS-запрос), поэтому и urllib3 v1 (socket.create_connection), и v2
-# (прямой вызов getaddrinfo) соединяются строго с проверенным адресом.
+# DNS-запрос), поэтому и httpcore (socket.create_connection в sync-бэкенде),
+# и любыеio (в async-бэкенде) соединяются строго с проверенным адресом.
 # ---------------------------------------------------------------------------
 
 _pin_lock = threading.Lock()
@@ -221,26 +221,26 @@ def assert_safe_url(url: str) -> None:
 def safe_get(
     url: str,
     *,
-    session: requests.Session | None = None,
+    session: httpx.Client | None = None,
     timeout: float = 15,
     headers: dict | None = None,
     stream: bool = True,
     max_redirects: int = MAX_REDIRECTS,
-) -> requests.Response:
+) -> httpx.Response:
     """
-    Аналог requests.get с SSRF-защитой:
+    Аналог httpx.get с SSRF-защитой:
       - исходный URL валидируется перед запросом (одно DNS-разрешение);
       - валидированные IP ПИННЯТСЯ на время запроса — защита от DNS-rebinding
         (E-4): даже если DNS «переключится» между проверкой и соединением,
         запрос уйдёт только на проверенный адрес;
-      - редиректы обрабатываются вручную (allow_redirects=False),
-        каждый переход валидируется и пиннится заново.
+      - редиректы обрабатываются вручную (follow_redirects по умолчанию
+        выключен у httpx), каждый переход валидируется и пиннится заново.
 
     Бросает ValueError, если адрес запрещён.
     Возвращает response — только НЕ редирект (вызывающий обязан обработать
     raise_for_status / закрыть response при stream=True).
     """
-    sess = session or requests.Session()
+    sess = session or httpx.Client()
     resp = None
     current_url = url
     for _ in range(max_redirects + 1):
@@ -255,13 +255,10 @@ def safe_get(
             resp.close()
 
         with _pinned_dns(hostname, ips):
-            resp = sess.get(
-                current_url,
-                timeout=timeout,
-                stream=stream,
-                allow_redirects=False,
-                headers=headers,
-            )
+            # stream=True обязателен для больших загрузок (лимит размера на лету);
+            # follow_redirects у httpx по умолчанию выключен — редиректы валидируем сами
+            req = sess.build_request("GET", current_url, headers=headers, timeout=timeout)
+            resp = sess.send(req, stream=stream)
         if resp.is_redirect:
             next_url = resp.headers.get("Location", "")
             if not next_url:

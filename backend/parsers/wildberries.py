@@ -1,11 +1,11 @@
 """
 Парсер плоских файлов (CSV/XLSX) для Wildberries и Яндекс Маркета.
 """
-import io
 import logging
 from typing import Dict, List, Optional, Any
-import pandas as pd
+
 from .base import BaseFileParser, ParseResult
+from .tables import read_csv_table, read_excel_table
 from .utils import (
     clean_value, find_column, split_photos, parse_price, parse_stock
 )
@@ -28,16 +28,8 @@ class WBFileParser(BaseFileParser):
         return self._parse_flat(file_content, file_type)
     
     def _parse_flat(self, file_content: bytes, file_type: str) -> ParseResult:
-        if file_type == "csv":
-            try:
-                df = pd.read_csv(io.BytesIO(file_content))
-            except UnicodeDecodeError:
-                try:
-                    df = pd.read_csv(io.BytesIO(file_content), encoding="windows-1251")
-                except Exception:
-                    df = pd.read_csv(io.BytesIO(file_content), encoding="utf-8", errors="replace")
-        else:
-            df = pd.read_excel(io.BytesIO(file_content))
+        # кодировки (utf-8 -> windows-1251 -> replace) — внутри read_csv_table
+        df = read_csv_table(file_content) if file_type == "csv" else read_excel_table(file_content)
         
         if df.empty:
             return ParseResult(
@@ -49,7 +41,7 @@ class WBFileParser(BaseFileParser):
                 failed=0,
             )
         
-        columns = [str(c).strip() for c in df.columns.tolist()]
+        columns = [str(c).strip() for c in list(df.columns)]
         df.columns = columns
         
         wb_mapping = {

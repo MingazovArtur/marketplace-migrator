@@ -1,6 +1,6 @@
 import logging
 
-import aiohttp
+import httpx
 
 from services.category_mapper import CategoryMapper
 
@@ -59,15 +59,15 @@ class WildberriesConnector:
         # 3. Отправляем запрос
         url = f"{self.base_url}/content/v2/cards/create"
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=self.headers, json=payload) as resp:
-                    if resp.status in (200, 201):
-                        data = await resp.json()
-                        return {"success": True, "data": data, "category": wb_category}
-                    else:
-                        error_text = await resp.text()
-                        logger.error(f"WB API error ({resp.status}): {error_text}")
-                        return {"success": False, "error": error_text}
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(url, headers=self.headers, json=payload, timeout=15)
+                if resp.status_code in (200, 201):
+                    data = resp.json()
+                    return {"success": True, "data": data, "category": wb_category}
+                else:
+                    error_text = resp.text
+                    logger.error(f"WB API error ({resp.status_code}): {error_text}")
+                    return {"success": False, "error": error_text}
         except Exception as e:
             logger.error(f"Error creating product on WB: {e}")
             return {"success": False, "error": str(e)}

@@ -1,14 +1,14 @@
 """
 Общие утилиты для парсеров: очистка данных, нормализация.
 """
+import math
 import re
 from typing import Optional, List, Any
-import pandas as pd
 
 
 def clean_value(value: Any) -> str:
     """Очищает значение от пробелов и приводит к строке. Пустые/NaN -> ''."""
-    if value is None or (isinstance(value, float) and pd.isna(value)):
+    if value is None or (isinstance(value, float) and math.isnan(value)):
         return ""
     return str(value).strip()
 

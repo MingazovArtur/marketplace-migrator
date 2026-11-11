@@ -194,7 +194,6 @@ services:
       - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
       - certs:/etc/letsencrypt:ro
       - webroot:/var/www/certbot
-      - media:/var/media:ro
     depends_on:
       backend:
         condition: service_healthy

@@ -23,12 +23,12 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable
-from datetime import datetime
 
 import httpx
 
 from database.models import PlatformCategorySpec
 from database.session import SessionLocal
+from core.time import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -416,7 +416,7 @@ def _flush_buffer(user_id: int, buffer: list[tuple[dict, dict]]) -> None:
                 existing.parent_category_id = leaf.get("parent_id")
                 existing.spec = spec
                 existing.version = version
-                existing.fetched_at = datetime.utcnow()
+                existing.fetched_at = utcnow()
             else:
                 db.add(
                     PlatformCategorySpec(

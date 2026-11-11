@@ -22,7 +22,6 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-import pandas as pd
 import redis
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -42,6 +41,7 @@ from services import template_filler
 from services.export_builder import build_rows, build_upload_file
 from services.export_validator import has_errors, validate_product, validate_products
 from services.xlsx_generator import generate_export
+from services.xlsx_io import rows_workbook, write_columns
 from tasks import generate_xlsx_export_task, get_progress
 
 logger = logging.getLogger(__name__)
@@ -478,29 +478,26 @@ async def export_template(
         "stock": 10,
     }
     rows = build_rows([sample], platform)
-    df = pd.DataFrame(rows)
+
+    wb = rows_workbook(rows, "Товары")
+    ws = wb["Товары"]
+    for i, col in enumerate(ws[1]):
+        ws.column_dimensions[chr(65 + i)].width = 30
+
+    instructions = {
+        "Инструкция": [
+            f"Шаблон выгрузки для {platform}",
+            "1. Заполняйте по одной строке на товар.",
+            "2. Не меняйте заголовки колонок и имена листов.",
+            "3. Фото указывайте прямыми ссылками через '; '.",
+            "4. Готовый файл загрузите в личном кабинете площадки.",
+        ]
+    }
+    write_columns(wb, "Инструкция", instructions)
+    wb["Инструкция"].column_dimensions["A"].width = 80
 
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Товары")
-        ws = writer.sheets["Товары"]
-        for i, col in enumerate(df.columns):
-            ws.column_dimensions[chr(65 + i)].width = 30
-
-        instructions = pd.DataFrame(
-            {
-                "Инструкция": [
-                    f"Шаблон выгрузки для {platform}",
-                    "1. Заполняйте по одной строке на товар.",
-                    "2. Не меняйте заголовки колонок и имена листов.",
-                    "3. Фото указывайте прямыми ссылками через '; '.",
-                    "4. Готовый файл загрузите в личном кабинете площадки.",
-                ]
-            }
-        )
-        instructions.to_excel(writer, index=False, sheet_name="Инструкция")
-        writer.sheets["Инструкция"].column_dimensions["A"].width = 80
-
+    wb.save(output)
     output.seek(0)
     filename = f"template_{platform}.xlsx"
     return StreamingResponse(
@@ -657,30 +654,28 @@ async def export_migration_report(
             }
         )
 
-    df = pd.DataFrame(data)
-    if df.empty:
-        df = pd.DataFrame(
-            columns=[
-                "ID",
-                "Название товара",
-                "Артикул (SKU)",
-                "Источник",
-                "Цена (₽)",
-                "Категория (источник)",
-                "Категория (назначение)",
-                "Статус",
-                "Ошибка",
-                "Дата выгрузки",
-            ]
-        )
+    df_columns = [
+        "ID",
+        "Название товара",
+        "Артикул (SKU)",
+        "Источник",
+        "Цена (₽)",
+        "Категория (источник)",
+        "Категория (назначение)",
+        "Статус",
+        "Ошибка",
+        "Дата выгрузки",
+    ]
+    if not data:
+        data = []  # пустой отчёт — только шапка (аналог pd.DataFrame(columns=...))
+
+    wb = rows_workbook(data, "Отчет миграции", columns=df_columns)
+    ws = wb["Отчет миграции"]
+    ws.column_dimensions["B"].width = 40
+    ws.column_dimensions["D"].width = 25
 
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Отчет миграции")
-        ws = writer.sheets["Отчет миграции"]
-        ws.column_dimensions["B"].width = 40
-        ws.column_dimensions["D"].width = 25
-
+    wb.save(output)
     output.seek(0)
     filename = f"migration_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
     return StreamingResponse(

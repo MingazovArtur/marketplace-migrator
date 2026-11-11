@@ -3,16 +3,14 @@
 Выбирает нужный парсер по названию площадки.
 """
 
-import io
 import logging
 import re
 from typing import Any, Dict
 
-import pandas as pd
-
 from .base import BaseFileParser, ParseResult
 from .magnit import MagnitFileParser
 from .ozon import OzonFileParser
+from .tables import ExcelBook, read_csv_table
 from .wildberries import WBFileParser
 from .yandex import YandexFileParser
 
@@ -91,11 +89,11 @@ class SmartMarketplaceParser(BaseFileParser):
         "фотоurl",
     }
 
-    def _read_best_dataframe(self, file_content: bytes, file_type: str) -> pd.DataFrame:
+    def _read_best_dataframe(self, file_content: bytes, file_type: str):
         if file_type == "csv":
-            return pd.read_csv(io.BytesIO(file_content))
+            return read_csv_table(file_content)
 
-        xl = pd.ExcelFile(io.BytesIO(file_content), engine="openpyxl")
+        xl = ExcelBook(file_content)
         skip_sheets = (
             "инструкция",
             "описание полей",
@@ -121,7 +119,7 @@ class SmartMarketplaceParser(BaseFileParser):
         header_idx = 0
         all_markers = set(self.SKU_KEYS) | self.NAME_KEYS
         for idx in range(min(10, len(raw_df))):
-            row_norms = {_norm_col(v) for v in raw_df.iloc[idx].values if pd.notna(v)}
+            row_norms = {_norm_col(v) for v in raw_df.iloc[idx].values if v is not None}
             if row_norms & all_markers:
                 header_idx = idx
                 break
@@ -133,7 +131,7 @@ class SmartMarketplaceParser(BaseFileParser):
         result = ParseResult()
         try:
             df = self._read_best_dataframe(file_content, file_type)
-            df = df.dropna(how="all")
+            df = df.dropna_all()
             result.total_rows = len(df)
 
             norm_to_col: dict[str, str] = {}
@@ -142,16 +140,16 @@ class SmartMarketplaceParser(BaseFileParser):
                 nc = _norm_col(col)
                 if not nc:
                     continue
-                norm_to_col.setdefault(nc, col)
+                norm_to_col.setdefault(nc, str(col))
                 if nc in self.PHOTO_KEYS or nc.startswith("urlфото") or nc.startswith("фото"):
-                    photo_cols.append(col)
+                    photo_cols.append(str(col))
 
             def _pick(row_data: dict, keys: set[str]) -> Any:
                 for k in keys:
                     col_name = norm_to_col.get(k)
                     if col_name is not None:
                         val = row_data.get(col_name)
-                        if pd.notna(val) and str(val).strip() != "":
+                        if val is not None and str(val).strip() != "":
                             return val
                 return None
 
@@ -188,7 +186,7 @@ class SmartMarketplaceParser(BaseFileParser):
                 photos: list[str] = []
                 for pcol in photo_cols:
                     pval = row_dict.get(pcol)
-                    if pd.notna(pval) and str(pval).strip():
+                    if pval is not None and str(pval).strip():
                         for part in re.split(r"[;,\s]+", str(pval).strip()):
                             if part.startswith("http://") or part.startswith("https://"):
                                 if part not in photos:

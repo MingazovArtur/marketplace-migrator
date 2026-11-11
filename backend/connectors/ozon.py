@@ -1,6 +1,6 @@
 import logging
 
-import aiohttp
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -36,15 +36,15 @@ class OzonConnector:
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=self.headers, json=payload) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return data.get("result", {}).get("items", [])
-                    else:
-                        error_text = await resp.text()
-                        logger.error(f"Ozon API error ({resp.status}): {error_text}")
-                        return []
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(url, headers=self.headers, json=payload, timeout=15)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data.get("result", {}).get("items", [])
+                else:
+                    error_text = resp.text
+                    logger.error(f"Ozon API error ({resp.status_code}): {error_text}")
+                    return []
         except Exception as e:
             logger.error(f"Error fetching products from Ozon: {e}")
             return []

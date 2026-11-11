@@ -10,7 +10,7 @@ import socket
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
-import requests
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -91,46 +91,45 @@ class YmlParser:
         logger.info(f"📡 Скачиваем YML-фид: {url}")
 
         try:
-            with requests.get(
-                url,
+            with httpx.Client(
                 timeout=30,
-                stream=True,
-                allow_redirects=False,  # Защита от SSRF-редиректа на внутренний IP
+                # follow_redirects по умолчанию выключен — защита от SSRF-редиректа на внутренний IP
                 headers={"User-Agent": "Mozilla/5.0 (Marketplace Migrator Bot)"},
-            ) as response:
-                if response.is_redirect or response.status_code in (301, 302, 303, 307, 308):
-                    redirect_url = response.headers.get("Location", "")
-                    if not self.validate_url(redirect_url):
-                        raise ValueError("Редирект фида ведёт на недопустимый адрес")
-                    return self.fetch_and_parse(redirect_url)
+            ) as client:
+                with client.stream("GET", url) as response:
+                    if response.is_redirect or response.status_code in (301, 302, 303, 307, 308):
+                        redirect_url = response.headers.get("Location", "")
+                        if not self.validate_url(redirect_url):
+                            raise ValueError("Редирект фида ведёт на недопустимый адрес")
+                        return self.fetch_and_parse(redirect_url)
 
-                response.raise_for_status()
+                    response.raise_for_status()
 
-                content_type = response.headers.get("Content-Type", "").lower()
-                if "xml" not in content_type and "text" not in content_type:
-                    logger.warning(
-                        f"⚠️ Нестандартный Content-Type: {content_type}, пробуем парсить"
-                    )
+                    content_type = response.headers.get("Content-Type", "").lower()
+                    if "xml" not in content_type and "text" not in content_type:
+                        logger.warning(
+                            f"⚠️ Нестандартный Content-Type: {content_type}, пробуем парсить"
+                        )
 
-                chunks = []
-                total_bytes = 0
-                for chunk in response.iter_content(chunk_size=64 * 1024):
-                    if not chunk:
-                        continue
-                    total_bytes += len(chunk)
-                    if total_bytes > MAX_YML_SIZE_BYTES:
-                        raise ValueError("Размер YML-фида превышает допустимый лимит (25 МБ)")
-                    chunks.append(chunk)
+                    chunks = []
+                    total_bytes = 0
+                    for chunk in response.iter_bytes(chunk_size=64 * 1024):
+                        if not chunk:
+                            continue
+                        total_bytes += len(chunk)
+                        if total_bytes > MAX_YML_SIZE_BYTES:
+                            raise ValueError("Размер YML-фида превышает допустимый лимит (25 МБ)")
+                        chunks.append(chunk)
 
-                content = b"".join(chunks)
+                    content = b"".join(chunks)
 
             return self._parse_xml(content, url)
 
-        except requests.exceptions.Timeout:
+        except httpx.TimeoutException:
             raise ValueError("Таймаут при загрузке фида (лимит 30 секунд)")
-        except requests.exceptions.ConnectionError:
+        except httpx.TransportError:
             raise ValueError("Не удалось подключиться к серверу. Проверьте URL.")
-        except requests.exceptions.HTTPError as e:
+        except httpx.HTTPStatusError as e:
             raise ValueError(f"HTTP ошибка {e.response.status_code}: {url}")
         except ElementTree.ParseError as e:
             raise ValueError(f"Ошибка парсинга XML: {e}")

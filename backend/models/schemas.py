@@ -54,6 +54,8 @@ class Token(BaseModel):
 
     access_token: str
     token_type: str = "bearer"
+    # CSRF-токен для cookie-сессий (double-submit); в куке csrf_token он же
+    csrf_token: str | None = None
 
 
 class TokenData(BaseModel):

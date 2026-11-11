@@ -2,7 +2,6 @@
 Модели базы данных SQLAlchemy
 """
 
-from datetime import datetime
 
 from sqlalchemy import (
     JSON,
@@ -19,6 +18,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.orm import declarative_base, relationship
+from core.time import utcnow
 
 # P-1 (неделя 3): денежные поля хранятся как NUMERIC(12,2).
 # FLOAT двоичный — цены типа 19.99 копятся с ошибкой (sum → 199.89999999999998).
@@ -39,7 +39,7 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     role = Column(String, default="user", nullable=False)  # "user" или "admin"
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     products = relationship("Product", back_populates="owner")
 
@@ -73,7 +73,7 @@ class Category(Base):
     full_path = Column(String, nullable=True)
     level = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     __table_args__ = (Index("idx_platform_category", "platform", "category_id"),)
 
@@ -91,7 +91,7 @@ class CategoryMapping(Base):
     target_category_id = Column(String, nullable=False)
     confidence = Column(Float, default=1.0)  # не деньги: 0..1 — Float корректен
     is_manual = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     __table_args__ = (
         Index("idx_mapping_lookup", "source_platform", "source_category_id", "target_platform"),
@@ -123,7 +123,7 @@ class Product(Base):
     vat_rate = Column(String, nullable=True)  # НДС: none | 10 | 22
     okpd_code = Column(String, nullable=True)  # Код ОКПД/ТН ВЭД (маркировка)
     units_per_item = Column(Integer, nullable=True, default=1)  # Единиц в одном товаре
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # --- Богатая модель данных ---
     sku = Column(String, nullable=True, index=True)
@@ -132,7 +132,7 @@ class Product(Base):
     photos = Column(JSON, default=list)
     sku_count = Column(Integer, default=1)
     stock = Column(Integer, nullable=True)  # ← ДОБАВЛЕНО
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # ← ДОБАВЛЕНО
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)  # ← ДОБАВЛЕНО
 
     owner = relationship("User", back_populates="products")
     attributes = relationship(
@@ -158,7 +158,7 @@ class ProductAttribute(Base):
         String, nullable=True
     )  # ID характеристики на площадке (для Ozon/WB)
     sort_order = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Связь с товаром
     product = relationship("Product", back_populates="attributes")
@@ -182,7 +182,7 @@ class ProductVariant(Base):
     stock = Column(Integer, nullable=True)
     external_id = Column(String, nullable=True)  # ID варианта на площадке
     sort_order = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     product = relationship("Product", back_populates="variants")
 
@@ -206,7 +206,7 @@ class FileOperationLog(Base):
     updated = Column(Integer, default=0)
     failed = Column(Integer, default=0)
     errors = Column(JSON, default=list)  # первые N ошибок
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
 
 
 class MigrationLog(Base):
@@ -228,7 +228,7 @@ class MigrationLog(Base):
     error_message = Column(String, nullable=True)
     is_batch = Column(Boolean, default=False)
     batch_id = Column(String, nullable=True)  # task_id для группировки пакета
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
 
 
 class ImportExportStats(Base):
@@ -247,7 +247,7 @@ class ImportExportStats(Base):
     success_items = Column(Integer, default=0)
     failed_items = Column(Integer, default=0)
     duration_ms = Column(Integer, default=0)  # время обработки, мс
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
 
 
 class PasswordResetToken(Base):
@@ -288,7 +288,7 @@ class PlatformCategorySpec(Base):
     category_name = Column(String, nullable=False)  # человекочитаемое имя
     parent_category_id = Column(String, nullable=True)  # родительская категория
     spec = Column(JSON, nullable=False, default=dict)  # вся спека (см. ниже структуру)
-    fetched_at = Column(DateTime, default=datetime.utcnow)  # когда подтянули с API
+    fetched_at = Column(DateTime, default=utcnow)  # когда подтянули с API
     version = Column(String, nullable=True)  # хэш для детекта изменений
 
     user = relationship("User", backref="category_specs")

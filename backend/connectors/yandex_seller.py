@@ -4,9 +4,8 @@
 """
 
 import logging
-import socket
 
-import aiohttp
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -60,32 +59,32 @@ class YandexSellerConnector:
         payload: dict = {}
 
         # Принудительно используем IPv4, чтобы избежать [Errno 101] Network is unreachable в Docker
-        tcp_connector = aiohttp.TCPConnector(family=socket.AF_INET)
+        transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
 
         try:
-            async with aiohttp.ClientSession(connector=tcp_connector) as session:
-                async with session.post(
+            async with httpx.AsyncClient(transport=transport) as client:
+                resp = await client.post(
                     url, headers=self.headers, params=params, json=payload, timeout=20
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        result = data.get("result") or {}
-                        mappings = result.get("offerMappings") or result.get("offers") or []
-                        return [self.parse_yandex_offer(item) for item in mappings]
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    result = data.get("result") or {}
+                    mappings = result.get("offerMappings") or result.get("offers") or []
+                    return [self.parse_yandex_offer(item) for item in mappings]
 
-                    error_text = await resp.text()
-                    if "API_DISABLED" in error_text:
-                        raise ValueError(
-                            f"Яндекс Маркет вернул API_DISABLED для кабинета {self.business_id}: "
-                            "в кабинете пока нет активного (подключённого) магазина. "
-                            "Завершите настройку магазина в ЛК Яндекса или импортируйте товары через Excel-файл."
-                        )
-                    if resp.status == 401:
-                        raise ValueError("Ошибка авторизации Яндекс Маркета (401): неверный API-ключ")
+                error_text = resp.text
+                if "API_DISABLED" in error_text:
                     raise ValueError(
-                        f"Ошибка API Яндекс Маркета ({resp.status}): {error_text[:250]}"
+                        f"Яндекс Маркет вернул API_DISABLED для кабинета {self.business_id}: "
+                        "в кабинете пока нет активного (подключённого) магазина. "
+                        "Завершите настройку магазина в ЛК Яндекса или импортируйте товары через Excel-файл."
                     )
-        except aiohttp.ClientError as e:
+                if resp.status_code == 401:
+                    raise ValueError("Ошибка авторизации Яндекс Маркета (401): неверный API-ключ")
+                raise ValueError(
+                    f"Ошибка API Яндекс Маркета ({resp.status_code}): {error_text[:250]}"
+                )
+        except httpx.HTTPError as e:
             raise ValueError(f"Ошибка сети при запросе к Яндекс Маркету: {e}")
 
     def parse_yandex_offer(self, item: dict) -> dict:

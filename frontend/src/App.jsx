@@ -37,7 +37,7 @@ import TemplatesPage from './pages/TemplatesPage';
 
 function App() {
   const [hash, setHash] = useState(window.location.hash);
-  const { token, isAuthenticated, user, handleLogin, handleLogout } = useAuth();
+  const { authChecked, isAuthenticated, user, handleLogin, handleLogout } = useAuth();
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
   const [authTab, setAuthTab] = useState(null);
   const [message, setMessage] = useState('');
@@ -81,7 +81,7 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
-    if (!token) {
+    if (!isAuthenticated) {
       setMessage('');
       setSelectedProductIds([]);
       setShowImportModal(false);
@@ -95,7 +95,7 @@ function App() {
       setEditLogisticsProduct(null);
       setCurrentView('products');
     }
-  }, [token]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!message) return undefined;
@@ -110,7 +110,7 @@ function App() {
     loading: productsLoading,
     loadData,
     getProductById,
-  } = useProducts(token, handleLogout);
+  } = useProducts(isAuthenticated, handleLogout);
 
   const { isMigratingProductId, migrateProduct, migrateBatch, pollBatchProgress } = useMigration(
     loadData,

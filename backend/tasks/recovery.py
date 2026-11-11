@@ -13,9 +13,9 @@ Guard: xlsx-воркер (очередь xlsx_export) статусы товар�
 """
 
 import logging
-from datetime import datetime
 
 from celery.signals import worker_ready
+from core.time import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def recover_stuck_processing(session_factory=None) -> int:
                         "Миграция прервана (перезапуск сервиса). "
                         "Повторите миграцию — данные не потеряны."
                     ),
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": utcnow(),
                 },
                 synchronize_session=False,
             )

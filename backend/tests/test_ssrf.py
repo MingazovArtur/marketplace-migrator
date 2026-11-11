@@ -6,8 +6,8 @@
 
 import socket
 
+import httpx
 import pytest
-import requests
 
 import core.ssrf as ssrf
 from core.ssrf import safe_get, validate_url
@@ -80,14 +80,19 @@ class _StubResponse:
 
 
 class _StubSession:
-    """Стаб requests.Session: отвечает заготовками по порядку, пишет журнал вызовов."""
+    """Стаб httpx.Client (контракт safe_get: build_request + send):
+    отвечает заготовками по порядку, пишет журнал вызовов."""
 
     def __init__(self, responses):
         self._responses = list(responses)
         self.calls = []
 
-    def get(self, url, **kwargs):
-        self.calls.append((url, kwargs))
+    def build_request(self, method, url, **kwargs):
+        return method, url, kwargs
+
+    def send(self, request, stream=False, **kwargs):
+        method, url, kw = request
+        self.calls.append((url, kw))
         return self._responses.pop(0)
 
 
@@ -198,7 +203,7 @@ def test_dns_rebinding_blocked_by_pinning(monkeypatch):
     connected = _record_socket_connections(monkeypatch)
 
     # Без пиннинга соединение ушло бы на 169.254.169.254 (второй резолв).
-    with pytest.raises(requests.exceptions.ConnectionError):
+    with pytest.raises(httpx.TransportError):
         safe_get(f"http://{REBIND_HOST}/photo.jpg", timeout=2)
 
     assert connected, "соединение должно было быть попыткой TCP-подключения"
@@ -218,22 +223,28 @@ def test_dns_rebinding_blocked_on_redirect_hop(monkeypatch):
 
     class _HybridSession:
         """hop-1 отвечает стабом-редиректом, hop-2 идёт по реальному
-        сетевому пути requests/urllib3 (fake DNS + fake socket)."""
+        сетевому пути httpx/httpcore (fake DNS + fake socket)."""
 
         def __init__(self):
             self.hop = 0
-            self._real = requests.Session()
+            self._real = httpx.Client()
 
-        def get(self, url, **kwargs):
+        def build_request(self, method, url, **kwargs):
+            return method, url, kwargs
+
+        def send(self, request, stream=False, **kwargs):
+            method, url, kw = request
             self.hop += 1
             if self.hop == 1:
                 return _StubResponse(location=f"http://{REBIND_HOST}/hop2")
-            return self._real.get(url, **kwargs)
+            return self._real.send(
+                self._real.build_request(method, url, **kw), stream=stream
+            )
 
     _install_rebinding_dns(monkeypatch, public_for_n=2)
     connected = _record_socket_connections(monkeypatch)
 
-    with pytest.raises(requests.exceptions.ConnectionError):
+    with pytest.raises(httpx.TransportError):
         safe_get(f"http://{REBIND_HOST}/hop1", session=_HybridSession(), timeout=2)
 
     # соединение состоялось и ушло только на валидированный IP
@@ -245,7 +256,7 @@ def test_pin_persists_for_uppercase_hostname(monkeypatch):
     """Пин ищется без учёта регистра (URL с REBIND.ExAMPLE)."""
     _install_rebinding_dns(monkeypatch)
     connected = _record_socket_connections(monkeypatch)
-    with pytest.raises(requests.exceptions.ConnectionError):
+    with pytest.raises(httpx.TransportError):
         safe_get(f"http://{REBIND_HOST.upper()}/photo.jpg", timeout=2)
     assert connected and connected[0][0] == PUBLIC_IP
 

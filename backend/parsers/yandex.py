@@ -8,7 +8,8 @@ import re
 from typing import Any
 
 import openpyxl
-import pandas as pd
+
+from .tables import read_csv_table
 
 from .base import BaseFileParser, ParseResult
 from .utils import (
@@ -280,13 +281,8 @@ class YandexFileParser(BaseFileParser):
         )
 
     def _parse_flat_csv(self, file_content: bytes) -> ParseResult:
-        try:
-            df = pd.read_csv(io.BytesIO(file_content))
-        except UnicodeDecodeError:
-            try:
-                df = pd.read_csv(io.BytesIO(file_content), encoding="windows-1251")
-            except Exception:
-                df = pd.read_csv(io.BytesIO(file_content), encoding="utf-8", errors="replace")
+        # кодировки (utf-8 -> windows-1251 -> replace) — внутри read_csv_table
+        df = read_csv_table(file_content)
 
         if df.empty:
             return ParseResult(
@@ -298,7 +294,7 @@ class YandexFileParser(BaseFileParser):
                 failed=0,
             )
 
-        columns = [str(c).strip() for c in df.columns.tolist()]
+        columns = [str(c).strip() for c in list(df.columns)]
         df.columns = columns
 
         name_col = find_column(columns, ["Название товара *", "Название товара", "Название", "Наименование"])

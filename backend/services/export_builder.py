@@ -7,10 +7,10 @@ import io
 import logging
 import re
 
-import pandas as pd
 from openpyxl.utils import get_column_letter
 
 from services.export_validator import VALIDATION_RULES
+from services.xlsx_io import rows_workbook
 
 logger = logging.getLogger(__name__)
 
@@ -181,17 +181,16 @@ def build_upload_file(products: list, platform: str) -> io.BytesIO:
         raise ValueError(f"Нет формата файла выгрузки для площадки '{platform}'")
 
     rows = build_rows(products, platform)
-    df = pd.DataFrame(rows)
+
+    sheet_name = fmt.get("sheet", "Товары")
+    wb = rows_workbook(rows, sheet_name)
+    ws = wb.active
+    for i, col in enumerate(ws[1], start=1):
+        col_letter = get_column_letter(i)
+        ws.column_dimensions[col_letter].width = max(15, min(45, len(str(col.value)) + 10))
 
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        sheet_name = fmt.get("sheet", "Товары")
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
-        ws = writer.sheets[sheet_name]
-        for i, col in enumerate(df.columns, start=1):
-            col_letter = get_column_letter(i)
-            ws.column_dimensions[col_letter].width = max(15, min(45, len(str(col)) + 10))
-
+    wb.save(output)
     output.seek(0)
     logger.info(f"📤 Сформирован файл выгрузки для {platform}: {len(rows)} товаров")
     return output

@@ -1,11 +1,11 @@
 """
 Парсер файлов Магнит Маркет (XLSX).
 """
-import io
 import logging
 from typing import Dict, List, Optional, Any
-import pandas as pd
+
 from .base import BaseFileParser, ParseResult
+from .tables import ExcelBook, Table
 from .utils import (
     clean_value, find_column, split_photos, parse_price, parse_stock,
     is_service_row, SERVICE_MARKERS
@@ -28,69 +28,69 @@ class MagnitFileParser(BaseFileParser):
     def parse(self, file_content: bytes, file_type: str) -> ParseResult:
         if file_type != "xlsx":
             raise ValueError("Для Магнит Маркета поддерживается только формат XLSX")
-        
-        xls = pd.ExcelFile(io.BytesIO(file_content))
-        
+
+        xls = ExcelBook(file_content)
+
         # Поиск листа с данными
         data_sheet = None
         skip_keywords = ["инструкция", "бренд", "справочник", "шаблон", "пример"]
-        
+
         for sheet_name in xls.sheet_names:
             sheet_lower = sheet_name.lower()
             if any(skip in sheet_lower for skip in skip_keywords):
                 continue
-            
+
             try:
-                df_tmp = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=30)
+                df_tmp = xls.parse(sheet_name=sheet_name, header=None, nrows=30)
             except Exception:
                 continue
-            
+
             for _, row in df_tmp.iterrows():
-                row_text = " ".join(str(v).lower() for v in row.values if pd.notna(v))
+                row_text = " ".join(str(v).lower() for v in row.values if v is not None)
                 if any(marker in row_text for marker in ["не менять", "не изменяйте"]):
                     continue
                 if "название товара" in row_text or ("название" in row_text and "артикул" in row_text):
                     data_sheet = sheet_name
                     break
-            
+
             if data_sheet:
                 break
-        
+
         if data_sheet is None:
             raise ValueError("Не найден лист с данными товаров в файле Магнит Маркета.")
-        
-        df = pd.read_excel(xls, sheet_name=data_sheet, header=None)
-        
+
+        df = xls.parse(sheet_name=data_sheet, header=None)
+
         # Поиск строки заголовков
         header_row_idx = None
         for idx, row in df.iterrows():
-            row_text = " ".join(str(v).lower() for v in row.values if pd.notna(v))
+            row_text = " ".join(str(v).lower() for v in row.values if v is not None)
             if any(marker in row_text for marker in ["не менять", "не изменяйте"]):
                 continue
             if "название товара" in row_text or ("название" in row_text and "артикул" in row_text):
                 header_row_idx = idx
                 break
-        
+
         if header_row_idx is None:
             raise ValueError("Не найдена строка заголовков в файле Магнит Маркета")
-        
+
         header_row = df.iloc[header_row_idx]
-        headers = [str(v).strip() if pd.notna(v) else f"col_{i}" for i, v in enumerate(header_row.values)]
-        
-        data = df.iloc[header_row_idx + 1:].copy()
+        headers = [str(v).strip() if v is not None else f"col_{i}" for i, v in enumerate(header_row.values)]
+
+        data = df.iloc[header_row_idx + 1:]
         data.columns = headers
-        
-        # Фильтрация служебных строк
-        filtered_rows = []
-        for _, row in data.iterrows():
-            row_text = " ".join(str(v).lower() for v in row.values if pd.notna(v))
+
+        # Фильтрация служебных строк (сохраняем исходные индексы для номеров строк)
+        filtered_rows: List[tuple[int, Any]] = []
+        for idx, row in data.iterrows():
+            row_text = " ".join(str(v).lower() for v in row.values if v is not None)
             if is_service_row(row_text):
                 continue
-            non_empty = [str(v).strip() for v in row.values if pd.notna(v) and str(v).strip()]
+            non_empty = [str(v).strip() for v in row.values if v is not None and str(v).strip()]
             if not non_empty:
                 continue
-            filtered_rows.append(row)
-        
+            filtered_rows.append((idx, row))
+
         if not filtered_rows:
             return ParseResult(
                 products=[],
@@ -100,8 +100,8 @@ class MagnitFileParser(BaseFileParser):
                 imported=0,
                 failed=0,
             )
-        
-        filtered_df = pd.DataFrame(filtered_rows)
+
+        filtered_df = Table(columns=headers, rows=[row.values for _, row in filtered_rows])
         
         # Маппинг колонок Магнит
         magnit_mapping = {
@@ -121,7 +121,7 @@ class MagnitFileParser(BaseFileParser):
             "tn_ved": ["ТН ВЭД", "ТНВЭД"],
         }
         
-        cols = filtered_df.columns.tolist()
+        cols = list(filtered_df.columns)
         name_col = find_column(cols, magnit_mapping["name"])
         price_col = find_column(cols, magnit_mapping["price"])
         sku_col = find_column(cols, magnit_mapping["sku"])
@@ -143,8 +143,8 @@ class MagnitFileParser(BaseFileParser):
         products: List[Dict] = []
         errors: List[Dict] = []
         
-        for idx, row in filtered_df.iterrows():
-            row_num = idx + 2
+        for orig_idx, row in filtered_rows:
+            row_num = orig_idx + 2
             name = clean_value(row.get(name_col))
             
             if not name:

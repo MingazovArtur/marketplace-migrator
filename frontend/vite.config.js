@@ -12,6 +12,11 @@ export default defineConfig({
       '/api': {
         target: 'http://backend:8000',  // ← ИЗМЕНИТЬ ЗДЕСЬ
         changeOrigin: true,
+      },
+      // Фото: отдаёт backend с авторизацией по куке (routers/media.py)
+      '/media': {
+        target: 'http://backend:8000',
+        changeOrigin: true,
       }
     }
   }

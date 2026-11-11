@@ -3,7 +3,6 @@
 import contextlib
 import logging
 import time
-from datetime import datetime
 
 from celery_app import celery_app
 from core.platforms import PLATFORM_CONFIG, PRICE_RULES
@@ -16,6 +15,7 @@ from tasks.matching import (
     _pick_target_category,
     _safe_float,
 )
+from core.time import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -350,7 +350,7 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
                         "error_message": error_msg,
                         "is_batch": True,
                         "batch_id": self.request.id,
-                        "created_at": datetime.utcnow(),
+                        "created_at": utcnow(),
                     }
                 )
                 logger.warning(f"⚠️ Товар {product_id}: {error_msg}")
@@ -396,7 +396,7 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
                         "error_message": None,
                         "is_batch": True,
                         "batch_id": self.request.id,
-                        "created_at": datetime.utcnow(),
+                        "created_at": utcnow(),
                     }
                 )
                 success_count += 1
@@ -421,7 +421,7 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
                     "error_message": str(e),
                     "is_batch": True,
                     "batch_id": self.request.id,
-                    "created_at": datetime.utcnow(),
+                    "created_at": utcnow(),
                 }
             )
 

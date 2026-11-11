@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../api';
 
-export const useProducts = (token, onAuthError) => {
+export const useProducts = (authed, onAuthError) => {
   const [products, setProducts] = useState([]);
   const [stats, setStats] = useState({ total: 0, pending: 0, success: 0, error: 0, processing: 0 });
   const [loading, setLoading] = useState(false);
@@ -25,7 +25,7 @@ export const useProducts = (token, onAuthError) => {
   }, [onAuthError]);
 
   const loadData = useCallback(async () => {
-    if (!token) {
+    if (!authed) {
       setProducts([]);
       setStats({ total: 0, pending: 0, success: 0, error: 0, processing: 0 });
       setTotalProducts(0);
@@ -48,7 +48,7 @@ export const useProducts = (token, onAuthError) => {
     } finally {
       setLoading(false);
     }
-  }, [token, filters]);
+  }, [authed, filters]);
 
   useEffect(() => {
     loadData();

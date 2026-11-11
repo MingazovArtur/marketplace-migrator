@@ -6,7 +6,7 @@
 import json
 from pathlib import Path
 
-import requests
+import httpx
 
 # Пути
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -72,7 +72,7 @@ def fetch_wildberries_subjects(api_key: str = "") -> dict:
     for ep in endpoints:
         try:
             print(f"   Пробуем: {ep['url']}")
-            response = requests.request(ep["method"], ep["url"], headers=ep["headers"], timeout=10)
+            response = httpx.request(ep["method"], ep["url"], headers=ep["headers"], timeout=10)
 
             if response.status_code == 200:
                 data = response.json()
@@ -135,7 +135,7 @@ def fetch_ozon_categories(client_id: str, api_key: str) -> dict:
     payload = {"language": "DEFAULT"}
 
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        response = httpx.post(url, headers=headers, json=payload, timeout=15)
         response.raise_for_status()
         data = response.json()
 

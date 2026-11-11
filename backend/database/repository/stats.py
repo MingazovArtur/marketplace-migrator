@@ -4,6 +4,7 @@ from sqlalchemy import case, func
 
 from database.models import ImportExportStats
 from database.session import SessionLocal
+from core.time import utcnow
 
 
 class StatsRepository:
@@ -45,7 +46,7 @@ class StatsRepository:
         """
         from datetime import datetime, timedelta
 
-        since = datetime.utcnow() - timedelta(days=days)
+        since = utcnow() - timedelta(days=days)
 
         with SessionLocal() as db:
             base = db.query(ImportExportStats).filter(ImportExportStats.created_at >= since)
@@ -90,7 +91,7 @@ class StatsRepository:
             )
             by_day = {}
             for i in range(days):
-                d = (datetime.utcnow() - timedelta(days=days - 1 - i)).date()
+                d = (utcnow() - timedelta(days=days - 1 - i)).date()
                 by_day[d.isoformat()] = {
                     "date": d.isoformat(),
                     "import": 0,

@@ -1,4 +1,30 @@
-# Документация проекта Marketplace Migrator
+# Marketplace Migrator
+
+Перенос товарных карточек между маркетплейсами (Ozon, Wildberries, Яндекс Маркет,
+Магнит Маркет) через Excel-шаблоны: импорт из любого источника → нормализация →
+маппинг категорий → готовые XLSX по официальным эталонам площадок.
+
+[![CI](https://github.com/MingazovArtur/marketplace-migrator/actions/workflows/ci.yml/badge.svg)](https://github.com/MingazovArtur/marketplace-migrator/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/MingazovArtur/marketplace-migrator/actions/workflows/codeql.yml/badge.svg)](https://github.com/MingazovArtur/marketplace-migrator/actions/workflows/codeql.yml)
+![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
+![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+
+## Быстрый старт (Docker, весь стек)
+
+```bash
+git clone https://github.com/MingazovArtur/marketplace-migrator.git
+cd marketplace-migrator
+cp .env.example .env        # заполнить секреты (CHANGE_ME -> сгенерировать)
+docker compose up --build   # API: localhost:8000 (swagger: /docs), фронт: localhost:5173
+```
+
+Прод-конфигурация (nginx, 8 сервисов, HTTPS): [docker-compose.prod.yml](docker-compose.prod.yml)
++ [deploy/](deploy/) (nginx-конфиги, HTTPS одной командой, бэкапы БД).
+Разработка и тесты (без Docker): [docs/engineering.md](docs/engineering.md).
+
+---
 
 ## 1. Идея и смысл проекта
 

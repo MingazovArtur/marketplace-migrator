@@ -6,18 +6,29 @@ export const API_URL =
 // Все динамические сегменты пути (кириллица, пробелы, «→») обязаны кодироваться
 const enc = encodeURIComponent;
 
-const getHeaders = () => {
-  const token = localStorage.getItem('token');
-  return {
-    'Content-Type': 'application/json',
-    ...(token && { Authorization: `Bearer ${token}` }),
-  };
-};
+/* ---------- Аутентификация (cookie-based) ----------
+ * Токен живёт в httpOnly-куке access_token (JS не читает — защита от XSS).
+ * Все запросы идут с credentials: 'include' (в проде same-origin, в dev — CORS).
+ * Мутации дополнительно подписываются CSRF-заголовком (double-submit).
+ */
+const getCsrfToken = () =>
+  document.cookie
+    .split('; ')
+    .find((c) => c.startsWith('csrf_token='))
+    ?.split('=')[1] || '';
 
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
+const csrfHeaders = () => ({ 'X-CSRF-Token': getCsrfToken() });
+
+const getHeaders = () => ({
+  'Content-Type': 'application/json',
+  ...csrfHeaders(),
+});
+
+const getAuthHeaders = () => ({ ...csrfHeaders() });
+
+// fetch с куками (единая точка)
+const doFetch = (url, options = {}) =>
+  fetch(url, { credentials: 'include', ...options });
 
 function extractErrorMessage(data, fallback) {
   if (!data) return fallback;
@@ -84,7 +95,7 @@ export const api = {
   /* ==================== Auth ==================== */
 
   login: async (credentials) => {
-    const res = await fetch(`${API_URL}/auth/login`, {
+    const res = await doFetch(`${API_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(credentials),
@@ -94,7 +105,7 @@ export const api = {
   },
 
   register: async (payload) => {
-    const res = await fetch(`${API_URL}/auth/register`, {
+    const res = await doFetch(`${API_URL}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -103,18 +114,23 @@ export const api = {
     return res.json();
   },
 
-  logout: () => {
-    localStorage.removeItem('token');
+  logout: async () => {
+    // Куки чистит backend (Set-Cookie с истечением); CSRF-заголовок обязателен
+    try {
+      await doFetch(`${API_URL}/auth/logout`, { method: 'POST', headers: getHeaders() });
+    } catch {
+      /* кука всё равно истечёт на сервере; локально чистить нечего */
+    }
   },
 
   getCurrentUser: async () => {
-    const res = await fetch(`${API_URL}/auth/me`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/auth/me`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось получить профиль'));
     return res.json();
   },
 
   getMe: async () => {
-    const res = await fetch(`${API_URL}/auth/me`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/auth/me`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось получить профиль'));
     return res.json();
   },
@@ -122,7 +138,7 @@ export const api = {
   /* ==================== Email ==================== */
 
   verifyEmail: async (token) => {
-    const res = await fetch(`${API_URL}/auth/verify-email`, {
+    const res = await doFetch(`${API_URL}/auth/verify-email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
@@ -132,7 +148,7 @@ export const api = {
   },
 
   resendVerification: async () => {
-    const res = await fetch(`${API_URL}/auth/resend-verification`, {
+    const res = await doFetch(`${API_URL}/auth/resend-verification`, {
       method: 'POST',
       headers: getHeaders(),
     });
@@ -141,7 +157,7 @@ export const api = {
   },
 
   forgotPassword: async (email) => {
-    const res = await fetch(`${API_URL}/auth/forgot-password`, {
+    const res = await doFetch(`${API_URL}/auth/forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
@@ -151,7 +167,7 @@ export const api = {
   },
 
   resetPassword: async (token, newPassword) => {
-    const res = await fetch(`${API_URL}/auth/reset-password`, {
+    const res = await doFetch(`${API_URL}/auth/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, new_password: newPassword }),
@@ -174,13 +190,13 @@ export const api = {
     if (params.limit !== undefined) q.append('limit', params.limit);
 
     const qs = q.toString();
-    const res = await fetch(`${API_URL}/products${qs ? '?' + qs : ''}`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/products${qs ? '?' + qs : ''}`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить товары'));
     return res.json();
   },
 
   deleteProduct: async (productId) => {
-    const res = await fetch(`${API_URL}/products/${enc(productId)}`, {
+    const res = await doFetch(`${API_URL}/products/${enc(productId)}`, {
       method: 'DELETE',
       headers: getHeaders(),
     });
@@ -189,7 +205,7 @@ export const api = {
   },
 
   bulkDeleteProducts: async (productIds) => {
-    const res = await fetch(`${API_URL}/products/bulk-delete`, {
+    const res = await doFetch(`${API_URL}/products/bulk-delete`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ product_ids: productIds }),
@@ -199,7 +215,7 @@ export const api = {
   },
 
   deleteAllProducts: async () => {
-    const res = await fetch(`${API_URL}/products/delete-all`, {
+    const res = await doFetch(`${API_URL}/products/delete-all`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ confirm: true }),
@@ -209,7 +225,7 @@ export const api = {
   },
 
   bulkUpdateProducts: async (payload) => {
-    const res = await fetch(`${API_URL}/products/bulk-update`, {
+    const res = await doFetch(`${API_URL}/products/bulk-update`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(payload),
@@ -220,7 +236,7 @@ export const api = {
 
   /* Точечное обновление товара — кнопка «Сохранить» в окне миграции */
   updateProduct: async (productId, payload) => {
-    const res = await fetch(`${API_URL}/products/${enc(productId)}`, {
+    const res = await doFetch(`${API_URL}/products/${enc(productId)}`, {
       method: 'PATCH',
       headers: getHeaders(),
       body: JSON.stringify(payload),
@@ -232,7 +248,7 @@ export const api = {
   /* ==================== Product details ==================== */
 
   setAttributes: async (productId, attributes) => {
-    const res = await fetch(`${API_URL}/products/${enc(productId)}/attributes`, {
+    const res = await doFetch(`${API_URL}/products/${enc(productId)}/attributes`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(attributes),
@@ -242,7 +258,7 @@ export const api = {
   },
 
   getVariants: async (productId) => {
-    const res = await fetch(`${API_URL}/products/${enc(productId)}/variants`, {
+    const res = await doFetch(`${API_URL}/products/${enc(productId)}/variants`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка загрузки вариаций'));
@@ -250,7 +266,7 @@ export const api = {
   },
 
   setVariants: async (productId, variants) => {
-    const res = await fetch(`${API_URL}/products/${enc(productId)}/variants`, {
+    const res = await doFetch(`${API_URL}/products/${enc(productId)}/variants`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(variants),
@@ -260,7 +276,7 @@ export const api = {
   },
 
   setPhotos: async (productId, photos) => {
-    const res = await fetch(`${API_URL}/products/${enc(productId)}/photos`, {
+    const res = await doFetch(`${API_URL}/products/${enc(productId)}/photos`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify({ photos }),
@@ -272,7 +288,7 @@ export const api = {
   uploadProductPhotos: async (productId, files) => {
     const fd = new FormData();
     Array.from(files || []).forEach((f) => fd.append('files', f));
-    const res = await fetch(`${API_URL}/products/${enc(productId)}/photos/upload`, {
+    const res = await doFetch(`${API_URL}/products/${enc(productId)}/photos/upload`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: fd,
@@ -282,7 +298,7 @@ export const api = {
   },
 
   downloadPhotos: async (productId) => {
-    const res = await fetch(`${API_URL}/products/${enc(productId)}/photos/download`, {
+    const res = await doFetch(`${API_URL}/products/${enc(productId)}/photos/download`, {
       method: 'POST',
       headers: getHeaders(),
     });
@@ -293,7 +309,7 @@ export const api = {
   /* ==================== Logistics ==================== */
 
   updateLogistics: async (productId, payload) => {
-    const res = await fetch(`${API_URL}/products/${enc(productId)}/logistics`, {
+    const res = await doFetch(`${API_URL}/products/${enc(productId)}/logistics`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(payload),
@@ -307,13 +323,13 @@ export const api = {
   /* ==================== Platforms & categories ==================== */
 
   getPlatforms: async () => {
-    const res = await fetch(`${API_URL}/platforms`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/platforms`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить платформы'));
     return res.json();
   },
 
   getCategories: async (platform) => {
-    const res = await fetch(`${API_URL}/categories/${enc(platform)}`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/categories/${enc(platform)}`, { headers: getHeaders() });
     if (res.status === 404) return [];
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить категории'));
     return res.json();
@@ -321,7 +337,7 @@ export const api = {
 
   refreshCategories: async (platform, apiKey) => {
     const q = new URLSearchParams({ api_key: apiKey || '' });
-    const res = await fetch(`${API_URL}/categories/${enc(platform)}/refresh?${q.toString()}`, {
+    const res = await doFetch(`${API_URL}/categories/${enc(platform)}/refresh?${q.toString()}`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ api_key: apiKey || '' }),
@@ -335,7 +351,7 @@ export const api = {
       source_platform: sourcePlatform || '',
       target_platform: targetPlatform || '',
     });
-    const res = await fetch(`${API_URL}/category-mapping?${q.toString()}`, {
+    const res = await doFetch(`${API_URL}/category-mapping?${q.toString()}`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить маппинг категорий'));
@@ -354,7 +370,7 @@ export const api = {
       target_platform: targetPlatform,
       target_category_id: String(targetCategoryId),
     });
-    const res = await fetch(`${API_URL}/category-mapping?${q.toString()}`, {
+    const res = await doFetch(`${API_URL}/category-mapping?${q.toString()}`, {
       method: 'POST',
       headers: getHeaders(),
     });
@@ -363,7 +379,7 @@ export const api = {
   },
 
   deleteCategoryMapping: async (mappingId) => {
-    const res = await fetch(`${API_URL}/category-mapping/${enc(mappingId)}`, {
+    const res = await doFetch(`${API_URL}/category-mapping/${enc(mappingId)}`, {
       method: 'DELETE',
       headers: getHeaders(),
     });
@@ -374,7 +390,7 @@ export const api = {
   /* ==================== Import ==================== */
 
   importProducts: async (authKey) => {
-    const res = await fetch(`${API_URL}/import`, {
+    const res = await doFetch(`${API_URL}/import`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ key: authKey, full_key: authKey, auth_key: authKey }),
@@ -387,7 +403,7 @@ export const api = {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('platform', platform);
-    const res = await fetch(`${API_URL}/import/preview`, {
+    const res = await doFetch(`${API_URL}/import/preview`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: fd,
@@ -397,7 +413,7 @@ export const api = {
   },
 
   downloadImportTemplate: async (platform) => {
-    const res = await fetch(`${API_URL}/templates/${enc(platform)}`, {
+    const res = await doFetch(`${API_URL}/templates/${enc(platform)}`, {
       headers: getAuthHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Шаблон не найден'));
@@ -417,7 +433,7 @@ export const api = {
     formData.append('file', file);
     formData.append('platform', platform);
     formData.append('mode', mode);
-    const res = await fetch(`${API_URL}/import/file`, {
+    const res = await doFetch(`${API_URL}/import/file`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: formData,
@@ -429,7 +445,7 @@ export const api = {
   /* ==================== Migration ==================== */
 
   previewMigration: async (productId, targetPlatform) => {
-    const res = await fetch(`${API_URL}/migrate/preview`, {
+    const res = await doFetch(`${API_URL}/migrate/preview`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ product_id: productId, target_marketplace: targetPlatform }),
@@ -441,7 +457,7 @@ export const api = {
   migrateProduct: async (productId, targetPlatform, editedData = null) => {
     const body = { platform: targetPlatform };
     if (editedData) body.edited_data = editedData;
-    const res = await fetch(`${API_URL}/migrate/${enc(productId)}`, {
+    const res = await doFetch(`${API_URL}/migrate/${enc(productId)}`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify(body),
@@ -454,7 +470,7 @@ export const api = {
     const ids = (productIds || []).map((id) => Number(id)).filter((id) => !isNaN(id) && id > 0);
     if (!ids.length) throw new Error('Нет валидных товаров для миграции');
 
-    const res = await fetch(`${API_URL}/migrate/batch`, {
+    const res = await doFetch(`${API_URL}/migrate/batch`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ product_ids: ids, platform }),
@@ -466,7 +482,7 @@ export const api = {
   startBatchMigration: (ids, platform) => api.migrateBatch(ids, platform),
 
   getTaskProgress: async (taskId) => {
-    const res = await fetch(`${API_URL}/migrate/batch/${enc(taskId)}/progress`, {
+    const res = await doFetch(`${API_URL}/migrate/batch/${enc(taskId)}/progress`, {
       headers: getAuthHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось получить прогресс'));
@@ -485,7 +501,7 @@ export const api = {
     } else if (productIdOrIds) {
       q.append('product_id', productIdOrIds);
     }
-    const res = await fetch(`${API_URL}/export/platform/${enc(platform)}?${q.toString()}`, {
+    const res = await doFetch(`${API_URL}/export/platform/${enc(platform)}?${q.toString()}`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось сформировать файл'));
@@ -508,7 +524,7 @@ export const api = {
     } else if (productIdOrIds) {
       q.append('product_id', productIdOrIds);
     }
-    const res = await fetch(`${API_URL}/export/preview/${enc(platform)}?${q.toString()}`, {
+    const res = await doFetch(`${API_URL}/export/preview/${enc(platform)}?${q.toString()}`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка предпросмотра выгрузки'));
@@ -516,7 +532,7 @@ export const api = {
   },
 
   exportTemplate: async (platform) => {
-    const res = await fetch(`${API_URL}/export/template/${enc(platform)}`, {
+    const res = await doFetch(`${API_URL}/export/template/${enc(platform)}`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка скачивания шаблона'));
@@ -532,7 +548,7 @@ export const api = {
   },
 
   exportReport: async () => {
-    const res = await fetch(`${API_URL}/export/report`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/export/report`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось сформировать отчет'));
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -553,7 +569,7 @@ export const api = {
     } else if (productIdOrIds) {
       q.append('product_id', productIdOrIds);
     }
-    const res = await fetch(`${API_URL}/export/validate/${enc(platform)}?${q.toString()}`, {
+    const res = await doFetch(`${API_URL}/export/validate/${enc(platform)}?${q.toString()}`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка проверки готовности к экспорту'));
@@ -569,7 +585,7 @@ export const api = {
       q.append('product_id', productIdOrIds);
     }
 
-    const res = await fetch(`${API_URL}/export/xlsx/${enc(platform)}?${q.toString()}`, {
+    const res = await doFetch(`${API_URL}/export/xlsx/${enc(platform)}?${q.toString()}`, {
       headers: getHeaders(),
     });
 
@@ -610,13 +626,13 @@ export const api = {
   /* ==================== Дефолты экспорта ==================== */
 
   getDefaults: async () => {
-    const res = await fetch(`${API_URL}/defaults`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/defaults`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить дефолты'));
     return res.json();
   },
 
   saveDefaults: async (payload) => {
-    const res = await fetch(`${API_URL}/defaults`, {
+    const res = await doFetch(`${API_URL}/defaults`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(payload),
@@ -626,7 +642,7 @@ export const api = {
   },
 
   deleteCategoryDefaults: async (categoryName) => {
-    const res = await fetch(`${API_URL}/defaults/category?category_name=${enc(categoryName)}`, {
+    const res = await doFetch(`${API_URL}/defaults/category?category_name=${enc(categoryName)}`, {
       method: 'DELETE',
       headers: getHeaders(),
     });
@@ -635,7 +651,7 @@ export const api = {
   },
 
   getGaps: async (status = 'all') => {
-    const res = await fetch(`${API_URL}/defaults/gaps?status=${enc(status)}`, {
+    const res = await doFetch(`${API_URL}/defaults/gaps?status=${enc(status)}`, {
       headers: getHeaders(),
     });
     if (!res.ok) return { total: 0, gaps: {} };
@@ -645,7 +661,7 @@ export const api = {
   applyDefaults: async (modeOrPayload = 'all') => {
     const body = modeOrPayload && typeof modeOrPayload === 'object' ? modeOrPayload : null;
     const q = !body && modeOrPayload ? `?status=${enc(modeOrPayload)}` : '';
-    const res = await fetch(`${API_URL}/products/apply-defaults${q}`, {
+    const res = await doFetch(`${API_URL}/products/apply-defaults${q}`, {
       method: 'POST',
       headers: body ? getHeaders() : getAuthHeaders(),
       body: body ? JSON.stringify(body) : undefined,
@@ -661,7 +677,7 @@ export const api = {
     fd.append('category_name', categoryName);
     fd.append('platform', platform);
     fd.append('file', file);
-    const res = await fetch(`${API_URL}/export/ozon-template/upload`, {
+    const res = await doFetch(`${API_URL}/export/ozon-template/upload`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: fd,
@@ -671,7 +687,7 @@ export const api = {
   },
 
   listOzonTemplates: async (platform = 'ozon') => {
-    const res = await fetch(
+    const res = await doFetch(
       `${API_URL}/export/ozon-template/list?platform=${enc(platform)}`,
       { headers: getHeaders() }
     );
@@ -680,13 +696,13 @@ export const api = {
   },
 
   listOzonTemplatesMeta: async () => {
-    const res = await fetch(`${API_URL}/export/ozon-template/meta`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/export/ozon-template/meta`, { headers: getHeaders() });
     if (!res.ok) return { templates: [] };
     return res.json();
   },
 
   getOzonTemplateStatus: async (categoryName, platform = 'ozon') => {
-    const res = await fetch(
+    const res = await doFetch(
       `${API_URL}/export/ozon-template/status?category_name=${enc(categoryName)}&platform=${enc(platform)}`,
       { headers: getHeaders() }
     );
@@ -695,7 +711,7 @@ export const api = {
   },
 
   downloadOzonTemplate: async (categoryName, platform = 'ozon') => {
-    const res = await fetch(
+    const res = await doFetch(
       `${API_URL}/export/ozon-template/download?category_name=${enc(categoryName)}&platform=${enc(platform)}`,
       { headers: getHeaders() }
     );
@@ -717,7 +733,7 @@ export const api = {
   },
 
   deleteOzonTemplate: async (categoryName, platform = 'ozon') => {
-    const res = await fetch(
+    const res = await doFetch(
       `${API_URL}/export/ozon-template?category_name=${enc(categoryName)}&platform=${enc(platform)}`,
       {
         method: 'DELETE',
@@ -731,13 +747,13 @@ export const api = {
   /* ==================== Stats / History ==================== */
 
   getStats: async () => {
-    const res = await fetch(`${API_URL}/stats`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/stats`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить статистику'));
     return res.json();
   },
 
   getDashboardStats: async (days = 7) => {
-    const res = await fetch(`${API_URL}/stats/dashboard?days=${enc(days)}`, {
+    const res = await doFetch(`${API_URL}/stats/dashboard?days=${enc(days)}`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить дашборд статистики'));
@@ -749,7 +765,7 @@ export const api = {
     if (params.operation) q.append('operation', params.operation);
     if (params.limit) q.append('limit', params.limit);
     const qs = q.toString();
-    const res = await fetch(`${API_URL}/history${qs ? '?' + qs : ''}`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/history${qs ? '?' + qs : ''}`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить историю'));
     return res.json();
   },
@@ -757,20 +773,20 @@ export const api = {
   /* ==================== Спецификации категорий ==================== */
 
   getSpecs: async (platform) => {
-    const res = await fetch(`${API_URL}/specs/${enc(platform)}`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/specs/${enc(platform)}`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка получения спеков'));
     return res.json();
   },
 
   getSpecNames: async (platform) => {
-    const res = await fetch(`${API_URL}/specs/${enc(platform)}/names`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/specs/${enc(platform)}/names`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, `HTTP ${res.status}`));
     const d = await res.json();
     return (d.names || []).sort();
   },
 
   getSpec: async (platform, categoryId) => {
-    const res = await fetch(`${API_URL}/specs/${enc(platform)}/${enc(categoryId)}`, {
+    const res = await doFetch(`${API_URL}/specs/${enc(platform)}/${enc(categoryId)}`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка получения спека'));
@@ -778,7 +794,7 @@ export const api = {
   },
 
   deleteSpec: async (platform, categoryId) => {
-    const res = await fetch(`${API_URL}/specs/${enc(platform)}/${enc(categoryId)}`, {
+    const res = await doFetch(`${API_URL}/specs/${enc(platform)}/${enc(categoryId)}`, {
       method: 'DELETE',
       headers: getHeaders(),
     });
@@ -787,7 +803,7 @@ export const api = {
   },
 
   deleteAllSpecs: async (platform) => {
-    const res = await fetch(`${API_URL}/specs/${enc(platform)}`, {
+    const res = await doFetch(`${API_URL}/specs/${enc(platform)}`, {
       method: 'DELETE',
       headers: getHeaders(),
     });
@@ -796,7 +812,7 @@ export const api = {
   },
 
   refreshSpecs: async (platform, apiKey, categoryIds = null, businessId = null) => {
-    const res = await fetch(`${API_URL}/specs/${enc(platform)}/refresh`, {
+    const res = await doFetch(`${API_URL}/specs/${enc(platform)}/refresh`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({
@@ -811,7 +827,7 @@ export const api = {
 
   getSpecKeySource: async (platform) => {
     try {
-      const res = await fetch(`${API_URL}/specs/${enc(platform)}/key-source`, {
+      const res = await doFetch(`${API_URL}/specs/${enc(platform)}/key-source`, {
         headers: getHeaders(),
       });
       if (!res.ok) return { has_server_key: false };
@@ -822,7 +838,7 @@ export const api = {
   },
 
   getSpecsRefreshProgress: async (platform, taskId) => {
-    const res = await fetch(`${API_URL}/specs/${enc(platform)}/refresh/${enc(taskId)}/progress`, {
+    const res = await doFetch(`${API_URL}/specs/${enc(platform)}/refresh/${enc(taskId)}/progress`, {
       headers: getHeaders(),
     });
     if (!res.ok) return { status: 'unknown' };
@@ -831,14 +847,14 @@ export const api = {
 
   /* Мониторинг загрузок спеков — только для админа */
   getAdminSpecsTasks: async () => {
-    const res = await fetch(`${API_URL}/admin/specs-tasks`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/admin/specs-tasks`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка загрузки мониторинга спеков'));
     return res.json();
   },
 
   /* Пауза загрузки спеков (админ): задача дообработает текущий блок и остановится */
   pauseSpecsTask: async (taskId) => {
-    const res = await fetch(`${API_URL}/admin/specs-tasks/${enc(taskId)}/pause`, {
+    const res = await doFetch(`${API_URL}/admin/specs-tasks/${enc(taskId)}/pause`, {
       method: 'POST',
       headers: getHeaders(),
     });
@@ -848,7 +864,7 @@ export const api = {
 
   /* Продолжить остановленную загрузку спеков (админ): новая задача с места остановки */
   resumeSpecsTask: async (taskId) => {
-    const res = await fetch(`${API_URL}/admin/specs-tasks/${enc(taskId)}/resume`, {
+    const res = await doFetch(`${API_URL}/admin/specs-tasks/${enc(taskId)}/resume`, {
       method: 'POST',
       headers: getHeaders(),
     });

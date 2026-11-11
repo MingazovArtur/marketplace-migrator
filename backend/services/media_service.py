@@ -13,7 +13,7 @@ import logging
 import os
 from pathlib import Path
 
-import requests
+import httpx
 
 from core.ssrf import assert_safe_url, safe_get
 
@@ -47,7 +47,7 @@ def _safe_name(url: str) -> str:
 
 
 def download_single_photo(
-    product_id: int, url: str, session: requests.Session | None = None
+    product_id: int, url: str, session: httpx.Client | None = None
 ) -> str | None:
     """
     Скачивает одно фото в MEDIA_ROOT/products/{product_id}/.
@@ -69,7 +69,7 @@ def download_single_photo(
         return f"products/{product_id}/{path.name}"
 
     own_session = session is None
-    sess = session or requests.Session()
+    sess = session or httpx.Client()
     if own_session:
         sess.headers.update(DOWNLOAD_HEADERS)
 
@@ -86,7 +86,7 @@ def download_single_photo(
 
         size = 0
         with open(path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=64 * 1024):
+            for chunk in resp.iter_bytes(chunk_size=64 * 1024):
                 if not chunk:
                     continue
                 size += len(chunk)
@@ -129,7 +129,7 @@ def download_photos(product_id: int, urls: list[str]) -> list[str]:
     (в dev они выглядят как http://localhost:8000/media/...).
     """
     saved = []
-    with requests.Session() as session:
+    with httpx.Client() as session:
         session.headers.update(DOWNLOAD_HEADERS)
         for url in urls:
             if "/media/products/" in str(url):

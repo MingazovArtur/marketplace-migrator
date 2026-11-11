@@ -17,14 +17,11 @@ pydantic>=2.9.0
 pydantic-settings>=2.2.1
 python-multipart>=0.0.9          # загрузка файлов (FastAPI UploadFile)
 
-# ===== HTTP-клиенты (используются все три; консолидация — отдельная задача) =====
-requests>=2.32.0                 # core/ssrf.py, парсеры
-httpx>=0.27.0                    # загрузка спеков площадок
-aiohttp>=3.9.0                   # connectors/* (async)
+# ===== HTTP-клиент (единый: sync + async) =====
+httpx>=0.27.0                    # core/ssrf.py, парсеры, connectors/* (async)
 
 # ===== Excel / CSV =====
-pandas>=2.2.0                    # парсеры импорта (8 файлов)
-openpyxl>=3.1.0                  # генерация/чтение xlsx
+openpyxl>=3.1.0                  # генерация/чтение xlsx (парсеры — без pandas: parsers/tables.py)
 
 # ===== БД: Dual-Engine (sync psycopg2 + async asyncpg) =====
 sqlalchemy>=2.0.0

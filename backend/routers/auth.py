@@ -8,8 +8,10 @@ B-1 (неделя 2): register/login/logout — sync def. FastAPI выполня
 """
 
 import logging
+import secrets
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 
 from core.auth import (
@@ -18,6 +20,7 @@ from core.auth import (
     get_password_hash,
     verify_password,
 )
+from core.config import settings
 from core.rate_limit import limiter
 from database.access_log import get_client_ip, log_access
 from database.models import User
@@ -160,7 +163,23 @@ def login(payload: UserLogin, request: Request):
         )
         token = create_access_token({"sub": str(user.id), "role": user.role})
         logger.info(f"✅ Вход выполнен: {user.username}")
-        return {"access_token": token, "token_type": "bearer"}
+
+        # Куки: access_token — httpOnly (JS не может прочитать токен — защита от XSS-кражи),
+        # csrf_token — читается фронтендом и возвращается заголовком X-CSRF-Token (double-submit)
+        csrf_token = secrets.token_urlsafe(32)
+        max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        response = JSONResponse(content={"access_token": token, "token_type": "bearer", "csrf_token": csrf_token})
+        response.set_cookie(
+            "access_token", token,
+            max_age=max_age, httponly=True, samesite=settings.COOKIE_SAMESITE,
+            secure=settings.COOKIE_SECURE, path="/",
+        )
+        response.set_cookie(
+            "csrf_token", csrf_token,
+            max_age=max_age, httponly=False, samesite=settings.COOKIE_SAMESITE,
+            secure=settings.COOKIE_SECURE, path="/",
+        )
+        return response
 
     finally:
         db.close()
@@ -171,8 +190,8 @@ def login(payload: UserLogin, request: Request):
 # ============================================================
 @limiter.limit("10/minute")
 @router.post("/logout")
-def logout(request: Request, current_user: User = Depends(get_current_user)):
-    """Выход с логированием"""
+def logout(request: Request, response: Response, current_user: User = Depends(get_current_user)):
+    """Выход с логированием и очисткой кук"""
     ip = get_client_ip(request)
     ua = request.headers.get("user-agent")
     log_access(
@@ -183,6 +202,9 @@ def logout(request: Request, current_user: User = Depends(get_current_user)):
         user_agent=ua,
     )
     logger.info(f"👋 Выход: {current_user.username}")
+    # сбрасываем обе куки (браузер удалит их)
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("csrf_token", path="/")
     return {"message": "Вы вышли из системы"}
 
 
