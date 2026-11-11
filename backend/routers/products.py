@@ -678,6 +678,31 @@ async def update_product_logistics(
         raise HTTPException(status_code=500, detail=f"Ошибка обновления логистики: {e}")
 
 
+@router.get("/products/{product_id}")
+async def get_product_by_id(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Получить ОДИН товар со свежими данными из БД.
+
+    Нужен модалкам (миграция/логистика/фото), которые раньше получали товар
+    из кэша списка на фронте: после «Заполнить пропуски» или массового
+    обновления кэш мог показывать устаревшую цену (баг «в окне миграции
+    цена 0, хотя дефолт уже применён»).
+    """
+    product = await repo.get_by_id_async(
+        db,
+        product_id=product_id,
+        user_id=current_user.id,
+        is_admin=current_user.role == "admin",
+    )
+    if not product:
+        raise HTTPException(status_code=404, detail="Товар не найден или не принадлежит вам")
+    return product
+
+
 @router.delete("/products/{product_id}")
 async def delete_product(
     product_id: int,

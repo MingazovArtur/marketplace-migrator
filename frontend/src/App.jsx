@@ -57,7 +57,11 @@ function App() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
-  const [migrateProductId, setMigrateProductId] = useState(null);
+  // ✅ Храним сам объект товара (свежий из строки таблицы), а не только ID:
+  // у App свой кэш-список (useProducts, первые 50), который мог не обновиться —
+  // раньше для товара вне этой выборки модалка вообще не открывалась,
+  // а для «старого» товара показывала устаревшую цену (баг цены 0).
+  const [migrateTarget, setMigrateTarget] = useState(null);
   const [selectedProductIds, setSelectedProductIds] = useState([]);
 
   // Модалки редактирования товара
@@ -85,7 +89,7 @@ function App() {
       setShowImportModal(false);
       setShowExportModal(false);
       setShowBatchModal(false);
-      setMigrateProductId(null);
+      setMigrateTarget(null);
       setEditAttributesProduct(null);
       setEditVariantsProduct(null);
       setEditPhotosProduct(null);
@@ -166,7 +170,7 @@ function App() {
   // ==================== Обработчики миграции ====================
   const handleConfirmMigrate = useCallback(
     async (id, platform, edited, autoExport = true) => {
-      setMigrateProductId(null);
+      setMigrateTarget(null);
       try {
         await migrateProduct(id, platform, edited);
         setMessage('✅ Карточка мигрирована');
@@ -216,16 +220,21 @@ function App() {
     [migrateBatch]
   );
 
-  const handleProductsPageMigrate = useCallback((target) => {
-    if (Array.isArray(target)) {
-      setSelectedProductIds(target);
-      setShowBatchModal(true);
-    } else if (target && target.id) {
-      setMigrateProductId(target.id);
-    } else if (typeof target === 'number') {
-      setMigrateProductId(target);
-    }
-  }, []);
+  // Товар в окно миграции: объект из строки таблицы (свежий) — приоритетнее
+  // устаревшего App-списка; fallback — поиск по App-списку для вызовов по ID.
+  const handleProductsPageMigrate = useCallback(
+    (target) => {
+      if (Array.isArray(target)) {
+        setSelectedProductIds(target);
+        setShowBatchModal(true);
+      } else if (target && target.id) {
+        setMigrateTarget(target);
+      } else if (typeof target === 'number') {
+        setMigrateTarget(products.find((p) => p.id === target) || { id: target });
+      }
+    },
+    [products]
+  );
 
   // ==================== Обработчики экспорта ====================
   const handleExportForPlatform = useCallback(async (platform, status, activeIds = null) => {
@@ -445,16 +454,16 @@ function App() {
         loading={productsLoading}
       />
 
-      {migrateProductId && (
+      {migrateTarget && (
         <MigrateModal
-          key={`migrate-${migrateProductId}`}
+          key={`migrate-${migrateTarget.id}`}
           isOpen
-          onClose={() => setMigrateProductId(null)}
-          product={getProductById(migrateProductId)}
+          onClose={() => setMigrateTarget(null)}
+          product={getProductById(migrateTarget.id) || migrateTarget}
           onConfirm={handleConfirmMigrate}
           onSaved={refreshAll}
           onNotify={setMessage}
-          loading={isMigratingProductId === migrateProductId}
+          loading={isMigratingProductId === migrateTarget.id}
         />
       )}
 

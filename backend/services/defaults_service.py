@@ -82,7 +82,12 @@ def get_merged_defaults(user_id: int, category_name: str | None = None) -> dict[
 
 
 def compute_gaps(user_id: int, status: str = "all") -> dict[str, object]:
-    """Счётчик пропусков по полям — для баннера «Заполнить пропуски (N)»."""
+    """Счётчик пропусков по полям — для баннера «Заполнить пропуски (N)».
+
+    total — все товары пользователя; products_with_gaps — у скольких из них
+    есть хотя бы один пропуск (total раньше выдавали за это число и баннер
+    кричал «пропуски у 387 товаров», даже когда пропуски были у 10).
+    """
     db = SessionLocal()
     try:
         q = db.query(Product).filter(Product.user_id == user_id)
@@ -92,16 +97,27 @@ def compute_gaps(user_id: int, status: str = "all") -> dict[str, object]:
         gaps = dict.fromkeys(BASE_FIELDS, 0)
         gaps["price"] = 0
         gaps["main_photo"] = 0
+        with_gaps = 0
         for p in products:
+            has_gap = False
             for f in BASE_FIELDS:
                 if _is_empty(getattr(p, f, None)):
                     gaps[f] += 1
+                    has_gap = True
             price = _to_float(p.price)
             if price is None or price <= 0:
                 gaps["price"] += 1
+                has_gap = True
             if not (p.photos or []):
                 gaps["main_photo"] += 1
-        return {"total": len(products), "gaps": gaps}
+                has_gap = True
+            if has_gap:
+                with_gaps += 1
+        return {
+            "total": len(products),
+            "products_with_gaps": with_gaps,
+            "gaps": gaps,
+        }
     finally:
         db.close()
 

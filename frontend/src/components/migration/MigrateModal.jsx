@@ -23,7 +23,17 @@ const MigrateModal = ({
   const [progress, setProgress] = useState(null);
   const [localError, setLocalError] = useState('');
   const [saveState, setSaveState] = useState('idle'); // idle | saving | saved
+  // ✅ Свежая копия товара из БД: App-список мог устареть (например, после
+  // «Заполнить пропуски» дефолтной ценой) — модалка обязана показывать
+  // и отправлять на миграцию актуальную цену, а не «0» из старого кэша.
+  const [fetched, setFetched] = useState(null);
+  const touchedRef = useRef(false); // пользователь уже правил поля — не затираем его ввод
   const pollTimerRef = useRef(null);
+
+  // Свежие данные: из БД, как только пришли; до тех пор — из пропса.
+  // Объявлены ДО useCallback'ов: productTitle попадает в их deps.
+  const baseProduct = fetched || product;
+  const productTitle = baseProduct?.name || '';
 
   const loadSpecCategories = useCallback(async (pl) => {
     setSpecsLoading(true);
@@ -102,7 +112,7 @@ const MigrateModal = ({
     setProgress({ status: 'pending', percent: 0 });
 
     const editedData = {
-      name: form.name.trim() || product.name,
+      name: form.name.trim() || productTitle,
       price: priceNum,
       category: form.category || undefined,
     };
@@ -122,7 +132,7 @@ const MigrateModal = ({
       setLocalError(e.message);
       setProgress(null);
     }
-  }, [form, product, platform, autoExport, onConfirm, onSaved, onClose, pollProgress]);
+  }, [form, product, platform, autoExport, onConfirm, onSaved, onClose, pollProgress, productTitle]);
 
   // Сохранить изменения (название/цена/категория) в товаре БЕЗ запуска миграции —
   // товары из файлов часто приходят с ценой 0, раньше её было негде сохранить,
@@ -133,7 +143,7 @@ const MigrateModal = ({
       setLocalError('Чтобы сохранить, укажите цену больше 0 ₽.');
       return;
     }
-    const name = form.name.trim() || product.name;
+    const name = form.name.trim() || productTitle;
     if (!name) {
       setLocalError('Укажите название товара.');
       return;
@@ -142,12 +152,17 @@ const MigrateModal = ({
     setLocalError('');
     setSaveState('saving');
     try {
-      await api.updateProduct(product.id, {
+      const r = await api.updateProduct(product.id, {
         name,
         price: priceNum,
         category: form.category || null,
       });
       setSaveState('saved');
+      // ✅ Синхронизируем локальную копию с ответом PATCH — цена/имя/категория
+      // в модалке совпадают с тем, что реально лежит в БД
+      if (r && r.product) {
+        setFetched((prev) => ({ ...(prev || product), ...r.product }));
+      }
       if (onNotify) {
         onNotify(
           `✅ Товар #${product.id}: изменения сохранены (цена ${priceNum} ₽). Можно мигрировать.`
@@ -165,20 +180,44 @@ const MigrateModal = ({
       setSaveState('idle');
       setLocalError(`Не удалось сохранить: ${e.message}`);
     }
-  }, [form, product, onSaved, onNotify]);
+  }, [form, product, onSaved, onNotify, productTitle]);
 
   useEffect(() => {
-    if (isOpen && product) {
+    // ✅ При открытии подтягиваем товар из БД — защита от устаревшего кэша списка
+    if (!isOpen || !product?.id) return undefined;
+    setFetched(null);
+    touchedRef.current = false;
+    let cancelled = false;
+    api
+      .getProduct(product.id)
+      .then((fresh) => {
+        if (!cancelled && !touchedRef.current && fresh && fresh.id) {
+          setFetched(fresh);
+        }
+      })
+      .catch(() => {/* сеть недоступна — остаёмся на данных пропса */});
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, product?.id]);
+
+  useEffect(() => {
+    if (isOpen && product && !touchedRef.current) {
       setForm({
-        name: product.name || '',
-        price: product.price != null ? String(product.price) : '',
-        category: product.mapped_category || '',
+        name: baseProduct.name || '',
+        price: baseProduct.price != null ? String(baseProduct.price) : '',
+        category: baseProduct.mapped_category || '',
       });
       setLocalError('');
       setProgress(null);
-      loadSpecCategories(platform);
     }
-  }, [isOpen, product, platform, loadSpecCategories]);
+    // platform НЕ в зависимостях: смена площадки не должна сбрасывать
+    // уже введённые название/цену (раньше форма очищалась)
+  }, [isOpen, product, fetched]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (isOpen) loadSpecCategories(platform);
+  }, [isOpen, platform, loadSpecCategories]);
 
   useEffect(() => {
     return () => {
@@ -222,9 +261,9 @@ const MigrateModal = ({
           }}
         >
           <div style={{ color: 'var(--text-muted)' }}>Товар:</div>
-          <div style={{ fontWeight: 600 }}>{product.name}</div>
+          <div style={{ fontWeight: 600 }}>{productTitle}</div>
           <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-            ID {product.id} · {product.source || 'без источника'}
+            ID {product.id} · {baseProduct.source || product.source || 'без источника'}
           </div>
         </div>
 
@@ -251,8 +290,11 @@ const MigrateModal = ({
           className="form-input"
           type="text"
           value={form.name}
-          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          placeholder={product.name}
+          onChange={(e) => {
+            touchedRef.current = true;
+            setForm((f) => ({ ...f, name: e.target.value }));
+          }}
+          placeholder={productTitle}
           disabled={isInProgress}
         />
 
@@ -266,7 +308,10 @@ const MigrateModal = ({
           step="0.01"
           min="0.01"
           value={form.price}
-          onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
+          onChange={(e) => {
+            touchedRef.current = true;
+            setForm((f) => ({ ...f, price: e.target.value }));
+          }}
           placeholder="990"
           disabled={isInProgress}
           style={priceInvalid && form.price ? { borderColor: 'var(--danger, #ef4444)' } : {}}
@@ -292,7 +337,10 @@ const MigrateModal = ({
           type="text"
           list={`spec-categories-${platform}`}
           value={form.category}
-          onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+          onChange={(e) => {
+            touchedRef.current = true;
+            setForm((f) => ({ ...f, category: e.target.value }));
+          }}
           placeholder="Одежда / Футболка"
           disabled={isInProgress || specsLoading}
         />

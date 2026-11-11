@@ -5,7 +5,7 @@ import { api } from '../../api';
 
 const VAT_OPTIONS = [
   { value: 'none', label: 'Не облагается' },
-  { value: '22', label: '22' },
+  { value: '20', label: '20' },
   { value: '10', label: '10' },
   { value: '7', label: '7' },
   { value: '5', label: '5' },
@@ -71,22 +71,25 @@ const DefaultsModal = ({ isOpen, onClose, onNotify, specNames = [], productCateg
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  // Что сейчас на экране → payload для PUT /defaults (одна схема для
+  // «Сохранить дефолты» и для «Заполнить пропуски»)
+  const buildPayload = () => ({
+    category_name: tab === 'category' ? category || null : null,
+    vat_rate: form.vat_rate || null,
+    okpd_code: form.okpd_code || null,
+    package_weight_grams: form.package_weight_grams ? Number(form.package_weight_grams) : null,
+    package_width_mm: form.package_width_mm ? Number(form.package_width_mm) : null,
+    package_height_mm: form.package_height_mm ? Number(form.package_height_mm) : null,
+    package_length_mm: form.package_length_mm ? Number(form.package_length_mm) : null,
+    brand: form.brand || null,
+    marking: form.marking || null,
+    price_default: form.price_default ? Number(form.price_default) : null, // цена по умолчанию
+  });
+
   const handleSave = async () => {
     setLoading(true);
     try {
-      const payload = {
-        category_name: tab === 'category' ? category || null : null,
-        vat_rate: form.vat_rate || null,
-        okpd_code: form.okpd_code || null,
-        package_weight_grams: form.package_weight_grams ? Number(form.package_weight_grams) : null,
-        package_width_mm: form.package_width_mm ? Number(form.package_width_mm) : null,
-        package_height_mm: form.package_height_mm ? Number(form.package_height_mm) : null,
-        package_length_mm: form.package_length_mm ? Number(form.package_length_mm) : null,
-        brand: form.brand || null,
-        marking: form.marking || null,
-        price_default: form.price_default ? Number(form.price_default) : null, // ✅ цена
-      };
-      await api.saveDefaults(payload);
+      await api.saveDefaults(buildPayload());
       await load();
       if (onNotify) onNotify('✅ Дефолты сохранены');
     } catch (e) {
@@ -96,13 +99,18 @@ const DefaultsModal = ({ isOpen, onClose, onNotify, specNames = [], productCateg
     }
   };
 
+  // ✅ «Заполнить пропуски» сначала сохраняет то, что сейчас на экране, и только
+  // потом применяет. Раньше кнопка применяла СТАРЫЕ сохранённые дефолты: пользователь
+  // вводил цену 99.97, жал «Заполнить» — и ничего не заполнялось, потому что
+  // он не нажал «Сохранить дефолты» отдельно.
   const handleApply = async () => {
     setApplying(true);
     try {
+      await api.saveDefaults(buildPayload());
       const r = await api.applyDefaults('all');
       if (onNotify) {
         onNotify(
-          `🩹 Заполнено товаров: ${r.updated} из ${r.total}` +
+          `🩹 Дефолты сохранены. Заполнено товаров: ${r.updated} из ${r.total}` +
             (Object.keys(r.fields || {}).length
               ? ` (поля: ${Object.entries(r.fields)
                   .map(([k, v]) => `${GAP_LABELS[k] || k}: ${v}`)
@@ -136,16 +144,20 @@ const DefaultsModal = ({ isOpen, onClose, onNotify, specNames = [], productCateg
         {gaps && gaps.total > 0 && (
           <div
             className={gapEntries.length ? 'alert alert-error' : 'alert alert-success'}
-            style={{ marginBottom: '0.75rem' }}
+            style={{ marginBottom: '0.75rem', alignItems: 'flex-start' }}
           >
-            <div>
+            <div style={{ flex: 1, minWidth: 0 }}>
               {gapEntries.length ? (
                 <>
-                  ❌ Пропуски по {gaps.total} товарам:{' '}
+                  Не хватает полей у <strong>{gaps.products_with_gaps ?? gaps.total}</strong> из{' '}
+                  {gaps.total} товаров:{' '}
                   {gapEntries.map(([k, n]) => `${GAP_LABELS[k] || k} — ${n}`).join('; ')}.
+                  <div style={{ marginTop: '0.3rem', fontSize: '0.8rem', opacity: 0.8 }}>
+                    Заполните значения ниже и нажмите кнопку — она сама сохранит их и применит.
+                  </div>
                   <div style={{ marginTop: '0.5rem' }}>
                     <Button size="small" onClick={handleApply} loading={applying}>
-                      🩹 Заполнить пропуски из дефолтов (все товары)
+                      🩹 Заполнить пропуски (все товары)
                     </Button>
                   </div>
                 </>
@@ -247,8 +259,8 @@ const DefaultsModal = ({ isOpen, onClose, onNotify, specNames = [], productCateg
               className="form-hint"
               style={{ color: 'var(--warning, #f59e0b)', fontSize: '0.8rem', marginTop: '0.25rem' }}
             >
-              ⚠️ Подставится ТОЛЬКО товарам с ценой 0/пустой. Уже указанные цены не меняются.
-              Проверьте цену перед выгрузкой: Ozon продаёт товар ровно по той цене, что в файле.
+              ⚠ Подставится только товарам с ценой 0/пустой. Существующие цены не трогаем — Ozon
+              продаёт ровно по цене в файле.
             </p>
           </div>
           <div>

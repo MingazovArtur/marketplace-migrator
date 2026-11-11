@@ -141,6 +141,26 @@ class ProductRepository:
             "products": [self._to_dict(p) for p in products],
         }
 
+    async def get_by_id_async(
+        self, db: AsyncSession, product_id: int, user_id: int = None, is_admin: bool = False
+    ) -> dict | None:
+        """Неблокирующее получение ОДНОГО товара по ID (модалки миграции/редактирования).
+
+        Важно: читает СВЕЖИЕ данные из БД, а не из кэша фронтенда — после
+        «Заполнить пропуски» / массового обновления цена и поля уже актуальны.
+        """
+        stmt = (
+            select(Product)
+            .options(selectinload(Product.attributes), selectinload(Product.variants))
+            .where(Product.id == product_id)
+        )
+        if not is_admin and user_id is not None:
+            stmt = stmt.where(Product.user_id == user_id)
+
+        res = await db.execute(stmt)
+        product = res.scalars().first()
+        return self._to_dict(product)
+
     async def get_stats_async(
         self,
         db: AsyncSession,

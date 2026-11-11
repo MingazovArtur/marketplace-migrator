@@ -23,26 +23,36 @@ const SORT_OPTIONS = [
   { value: 'price_desc', label: 'Цена ↓' },
 ];
 
+// Ширины по умолчанию — ТОЛЬКО для компактных колонок. Колонка «Товар» (name)
+// без ширины: в table-layout:fixed она забирает всё свободное место, а остальные
+// колонки держатся по содержимому (раньше лишние пиксели распихивались
+// поровну и «Цена»/«Статус» раздувались втрое шире своего содержимого).
 const DEFAULT_WIDTHS = {
-  check: 40,
-  id: 60,
-  name: 320,
-  category: 220,
-  price: 110,
-  status: 110,
-  actions: 160,
+  check: 36,
+  id: 56,
+  category: 190,
+  price: 96,
+  status: 100,
+  actions: 132,
 };
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
+// Цена в человеческом формате: 99.97 → «99,97», 1000 → «1 000»
+const fmtPrice = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+};
+
 const GAP_LABELS = {
-  vat_rate: 'НДС, %',
+  vat_rate: 'НДС %',
   okpd_code: 'ТН ВЭД',
-  package_weight_grams: 'Вес в упаковке, г',
+  package_weight_grams: 'Вес упаковки',
   package_width_mm: 'Ширина, мм',
   package_height_mm: 'Высота, мм',
   package_length_mm: 'Длина, мм',
-  price: 'Цена > 0',
+  price: 'Цена = 0',
   main_photo: 'Главное фото',
 };
 
@@ -345,7 +355,28 @@ const ProductsPage = ({
   );
 
   const gapEntries = gaps ? Object.entries(gaps.gaps || {}).filter(([, n]) => n > 0) : [];
-  const gapsTotal = gapEntries.reduce((acc, [, n]) => acc + n, 0);
+
+  // Есть ли БЛОКИРУЮЩИЕ пропуски (цена 0 / нет фото) — от этого зависит цвет баннера:
+  // красный только когда миграция реально сломается, иначе — спокойное предупреждение
+  const hasBlockingGaps = gapEntries.some(([k]) => BLOCKING_GAP_FIELDS.includes(k));
+
+  // Чипы пропусков: три габарита (Ш×В×Д) с одинаковым счётчиком схлопываем
+  // в один «Габариты, мм — N», чтобы не читать три одинаковые строки
+  const gapChips = (() => {
+    const g = gaps?.gaps || {};
+    const dims = ['package_width_mm', 'package_height_mm', 'package_length_mm'];
+    const counts = dims.map((f) => g[f] || 0);
+    const same = counts[0] > 0 && counts.every((n) => n === counts[0]);
+    const out = [];
+    gapEntries.forEach(([k, n]) => {
+      if (dims.includes(k) && same) {
+        if (!out.some(([label]) => label === 'Габариты, мм')) out.push(['Габариты, мм', n]);
+      } else {
+        out.push([GAP_LABELS[k] || k, n]);
+      }
+    });
+    return out;
+  })();
 
   // ✅ Пропуски в ВЫДЕЛЕННЫХ товарах (для badge и confirm)
   const selectedGaps = useMemo(() => {
@@ -399,70 +430,55 @@ const ProductsPage = ({
             </Button>
           )}
           {onExport && (
-            <Button
-              variant="secondary"
-              onClick={onExport}
-              data-onboarding="export-btn"
-            >
+            <Button variant="secondary" onClick={onExport} data-onboarding="export-btn">
               <Icon name="export" size={16} /> Выгрузка
             </Button>
           )}
-          <Button
-            variant="secondary"
-            onClick={() => setDeleteMode('all')}
-            title={isAdmin ? 'Удалить все товары в системе' : 'Удалить все мои товары'}
-          >
-            <Icon name="trash" size={16} />{' '}
-            {isAdmin ? 'Удалить все в системе' : 'Удалить все товары'}
-          </Button>
-          <Button variant="secondary" onClick={load} disabled={loading}>
-            <Icon name="refresh" size={16} /> Обновить
-          </Button>
         </div>
       </header>
 
       {/* ==================== Баннер пропусков ==================== */}
       {gaps && gaps.total > 0 && gapEntries.length > 0 && (
-        <div className="alert alert-error" style={{ marginBottom: '0.75rem' }}>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: '0.5rem',
-            }}
-          >
-            <div>
-              ❌ Пропуски обязательных полей у {gaps.total} товаров:{' '}
+        <div
+          className={`alert gaps-banner ${hasBlockingGaps ? 'alert-error' : 'alert-warning'}`}
+          style={{ marginBottom: '0.75rem' }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
               <strong>
-                {gapEntries.map(([k, n]) => `${GAP_LABELS[k] || k} — ${n}`).join('; ')}
+                {hasBlockingGaps ? '❌ Не всё готово к выгрузке' : '⚠️ Не хватает полей'} —{' '}
+                {gaps.products_with_gaps ?? gaps.total} из {gaps.total} товаров:
               </strong>
-              {selected.length > 0 && selectedBlockingTotal + selectedFillableTotal > 0 && (
-                <span
-                  style={{
-                    display: 'block',
-                    marginTop: '0.25rem',
-                    fontSize: '0.85rem',
-                    opacity: 0.9,
-                  }}
-                >
-                  ↳ в выделенных ({selected.length}):{' '}
-                  {Object.entries(selectedGaps || {})
-                    .filter(([, n]) => n > 0)
-                    .map(([k, n]) => `${GAP_LABELS[k] || k} — ${n}`)
-                    .join('; ')}
+              {gapChips.map(([label, n]) => (
+                <span key={label} className="gap-chip">
+                  {label} <strong>{n}</strong>
                 </span>
-              )}
+              ))}
             </div>
-            <Button size="small" onClick={() => handleApplyDefaults('all')} loading={applyLoading}>
-              <Icon name="edit" size={15} /> Заполнить пропуски из дефолтов (все товары)
-            </Button>
+            {selected.length > 0 && selectedBlockingTotal + selectedFillableTotal > 0 && (
+              <div style={{ marginTop: '0.3rem', fontSize: '0.8rem', opacity: 0.9 }}>
+                В выделенных ({selected.length}):{' '}
+                {Object.entries(selectedGaps || {})
+                  .filter(([, n]) => n > 0)
+                  .map(([k, n]) => `${GAP_LABELS[k] || k} — ${n}`)
+                  .join('; ')}
+              </div>
+            )}
+            <div style={{ marginTop: '0.3rem', fontSize: '0.8rem', opacity: 0.75 }}>
+              {hasBlockingGaps
+                ? 'Цена 0 и отсутствие фото блокируют миграцию — заполните их. Остальные поля дозаполнятся из «Дефолтов».'
+                : 'Кнопка «Заполнить из дефолтов» допишет пустые НДС, ТН ВЭД, вес, габариты и цену по умолчанию.'}
+            </div>
           </div>
-          <p style={{ margin: '0.4rem 0 0', fontSize: '0.85rem', opacity: 0.9 }}>
-            Значения берутся из <strong>Дефолтов экспорта</strong>: глобальных и по категориям. Один
-            клик — и все товары получат НДС, ТН ВЭД, ОВХ и вес.
-          </p>
+          <Button
+            size="small"
+            onClick={() => handleApplyDefaults('all')}
+            loading={applyLoading}
+            title="Дозаполнит пустые поля у всех товаров из глобальных дефолтов и дефолтов категорий"
+            style={{ alignSelf: 'center', whiteSpace: 'nowrap' }}
+          >
+            <Icon name="edit" size={15} /> Заполнить из дефолтов
+          </Button>
         </div>
       )}
 
@@ -529,16 +545,30 @@ const ProductsPage = ({
         >
           <Icon name="settings" size={16} /> Дефолты
         </Button>
-        {gapsTotal > 0 && (
-          <Button
-            variant="outline"
-            onClick={() => handleApplyDefaults('all')}
-            loading={applyLoading}
-            title="Дозаполнит пустые НДС/ТН ВЭД/ОВХ/вес из дефолтов по всем товарам"
-          >
-            <Icon name="edit" size={16} /> Заполнить пропуски ({gapsTotal})
-          </Button>
-        )}
+
+        {/* Обновить список — иконкой: текст на кнопке не добавлял смысла */}
+        <Button
+          variant="outline"
+          size="small"
+          className="btn-icon"
+          onClick={load}
+          disabled={loading}
+          title="Обновить список товаров"
+        >
+          <Icon name="refresh" size={15} />
+        </Button>
+
+        {/* Опасная операция — ушла из шапки в тулбар, чтобы не висела рядом
+            с «Импорт»/«Выгрузка» и не создавала визуальный шум */}
+        <Button
+          variant="outline"
+          size="small"
+          className="btn-danger-outline"
+          onClick={() => setDeleteMode('all')}
+          title={isAdmin ? 'Удалить ВСЕ товары в системе (с подтверждением)' : 'Удалить все мои товары (с подтверждением)'}
+        >
+          <Icon name="trash" size={15} /> Удалить все
+        </Button>
       </div>
 
       {error && (
@@ -661,7 +691,7 @@ const ProductsPage = ({
           onAction={onImport}
         />
       ) : (
-        <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
+        <div className="card" style={{ padding: 0, overflowX: 'auto' }} data-onboarding="products-table">
           <table
             style={{
               width: '100%',
@@ -811,33 +841,22 @@ const ProductsPage = ({
                           : undefined
                       }
                     >
-                      {priceBad ? '❌ —' : `${p.price} ₽`}
+                      {priceBad ? '❌ —' : `${fmtPrice(p.price)} ₽`}
                     </td>
                     <td style={{ padding: '0.6rem', textAlign: 'center', overflow: 'hidden' }}>
                       <span className={`badge ${st.cls}`}>{st.label}</span>
                     </td>
-                    <td style={{ padding: '0.6rem', overflow: 'hidden' }}>
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-                          gap: '0.25rem',
-                        }}
-                      >
+                    <td style={{ padding: '0.45rem 0.6rem', overflow: 'hidden' }}>
+                      {/* Компактные иконки-кнопки: раньше у каждой было 16px
+                          горизонтального паддинга и кнопка была втрое шире иконки */}
+                      <div className="row-actions">
                         {onLogistics && (
                           <Button
                             variant="secondary"
                             size="small"
-                            title="Логистика"
-                            onClick={() => {
-                              console.log(
-                                '📦 Открываем логистику для товара',
-                                p.id,
-                                'package_weight_grams:',
-                                p.package_weight_grams
-                              );
-                              onLogistics(p);
-                            }}
+                            className="btn-icon"
+                            title="Логистика: вес, габариты, НДС, ТН ВЭД"
+                            onClick={() => onLogistics(p)}
                           >
                             <Icon name="box" size={15} />
                           </Button>
@@ -846,6 +865,7 @@ const ProductsPage = ({
                           <Button
                             variant="secondary"
                             size="small"
+                            className="btn-icon"
                             title="Характеристики"
                             onClick={() => onAttributes(p)}
                           >
@@ -856,7 +876,8 @@ const ProductsPage = ({
                           <Button
                             variant="secondary"
                             size="small"
-                            title="Варианты"
+                            className="btn-icon"
+                            title="Варианты (SKU)"
                             onClick={() => onVariants(p)}
                           >
                             <Icon name="variants" size={15} />
@@ -866,6 +887,7 @@ const ProductsPage = ({
                           <Button
                             variant="secondary"
                             size="small"
+                            className="btn-icon"
                             title={
                               photoBad ? '❌ Фото отсутствует — миграция будет отклонена' : 'Фото'
                             }
@@ -883,6 +905,8 @@ const ProductsPage = ({
                           <Button
                             variant="secondary"
                             size="small"
+                            className="btn-icon"
+                            data-onboarding="migrate-btn"
                             title={
                               hasBlocking ? '⚠️ Товар имеет блокирующие пропуски' : 'Мигрировать'
                             }
@@ -899,6 +923,7 @@ const ProductsPage = ({
                         <Button
                           variant="secondary"
                           size="small"
+                          className="btn-icon"
                           title="Удалить товар"
                           onClick={() => {
                             setDeleteTargetId(p.id);

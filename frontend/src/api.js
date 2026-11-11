@@ -195,6 +195,17 @@ export const api = {
     return res.json();
   },
 
+  /* Один товар со свежими данными из БД (модалки: миграция/логистика/фото).
+     Кэш списка на фронте может устареть после «Заполнить пропуски»/массовых
+     обновлений — этот запрос всегда возвращает актуальную цену и поля. */
+  getProduct: async (productId) => {
+    const res = await doFetch(`${API_URL}/products/${enc(productId)}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить товар'));
+    return res.json();
+  },
+
   deleteProduct: async (productId) => {
     const res = await doFetch(`${API_URL}/products/${enc(productId)}`, {
       method: 'DELETE',
