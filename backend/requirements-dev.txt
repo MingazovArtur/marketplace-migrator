@@ -1,4 +1,5 @@
-# Зависимости разработки/CI (в прод-образ не ставятся)
+# Зависимости разработки/CI (в прод-образ НЕ ставятся)
 # Установка: pip install -r requirements.txt -r requirements-dev.txt
-# (ruff и black уже входят в requirements.txt)
 pytest>=8.0.0
+black>=24.0.0       # форматирование (перенесено из prod-requirements 2026-11-11)
+ruff>=0.1.0         # линтер (перенесено из prod-requirements 2026-11-11)

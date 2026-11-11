@@ -102,3 +102,6 @@ backend/media/
 backend/data/*.xlsx
 backend/*.xlsx
 backend/*.db
+
+# === Патчи ассистента не коммитим в репо ===
+*.patch
