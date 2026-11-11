@@ -38,7 +38,7 @@ kombu>=5.3.0                     # прямой импорт в celery_app.py
 
 # ===== Аутентификация / шифрование =====
 python-jose[cryptography]>=3.3.0  # JWT
-bcrypt>=4.2.0                     # хэширование паролей
+bcrypt>=5.0.0                     # хэширование паролей
 cryptography>=42.0.0              # Fernet для ключей маркетплейсов (core/crypto.py)
 
 # ===== Rate limiting =====
