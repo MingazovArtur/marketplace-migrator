@@ -234,6 +234,37 @@ export const api = {
     return res.json();
   },
 
+  /* Предпросмотр массового обновления без записи: цены до/после + валидность категории */
+  bulkPreviewProducts: async (payload) => {
+    const res = await doFetch(`${API_URL}/products/bulk-preview`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Ошибка предпросмотра'));
+    return res.json();
+  },
+
+  /* Отмена последнего массового обновления (undo из снапшота) */
+  bulkUndoProducts: async () => {
+    const res = await doFetch(`${API_URL}/products/bulk-undo`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось отменить обновление'));
+    return res.json();
+  },
+
+  /* Подсказки категорий назначения из спеков площадок (автокомплит) */
+  categorySuggestions: async (q = '', limit = 15) => {
+    const query = new URLSearchParams({ q, limit: String(limit) }).toString();
+    const res = await doFetch(`${API_URL}/products/categories-suggest?${query}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить подсказки'));
+    return res.json();
+  },
+
   /* Точечное обновление товара — кнопка «Сохранить» в окне миграции */
   updateProduct: async (productId, payload) => {
     const res = await doFetch(`${API_URL}/products/${enc(productId)}`, {

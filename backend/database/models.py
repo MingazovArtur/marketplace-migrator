@@ -327,3 +327,29 @@ class ExportDefault(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "category_name", name="uq_export_defaults_user_category"),
     )
+
+
+class BulkEditSnapshot(Base):
+    """
+    Снапшот значений перед массовым обновлением (undo «Отменить последнее изменение»).
+
+    Пишется в bulk-update: для каждого затронутого товара сохраняются его прежние
+    цена/бренд/категория назначения. POST /products/bulk-undo восстанавливает
+    значения из ПОСЛЕДНЕГО снапшота пользователя.
+
+    Ротация: хранятся последние SNAPSHOTS_PER_USER (см. routers/products.py) —
+    старые удаляются, чтобы таблица не росла бесконечно.
+    """
+
+    __tablename__ = "bulk_edit_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at = Column(DateTime, default=utcnow)
+    # {"fields": ["price", "brand", "category"], "items": [
+    #     {"id": 1, "price": 1200.0, "brand": "X", "mapped_category": "Y"}, ...]}
+    payload = Column(JSON, nullable=False)
+
+    user = relationship("User", backref="bulk_edit_snapshots")

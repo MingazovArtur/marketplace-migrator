@@ -21,12 +21,19 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import get_current_user
+from database.models import BulkEditSnapshot
 from database.models import PlatformCategorySpec
 from database.models import Product as ProductORM
 from database.models import User
 from database.repository import repo, stats_repo
 from database.session import get_async_db
 from models.schemas import ProductBulkUpdate, ProductLogisticsUpdate, Stats
+from services.bulk_ops import (
+    apply_snapshot,
+    build_snapshot_payload,
+    compute_preview,
+    escape_like,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +48,9 @@ SORT_MAP = {
     "price_asc": ("price", "asc"),
     "price_desc": ("price", "desc"),
 }
+
+# Сколько undo-снапшотов массового обновления храним на пользователя
+SNAPSHOTS_PER_USER = 5
 
 
 # ==================== Схемы запросов удаления ====================
@@ -144,6 +154,21 @@ async def bulk_update_products(
     res = await db.execute(stmt)
     products_by_id = {p.id: p for p in res.scalars().all()}
 
+    # ✅ Undo-снапшот: снимок ТЕКУЩИХ значений до изменения (одна строка на операцию).
+    #    Ротация: храним последние 5 снапшотов пользователя — старые удаляем.
+    snapshot = None
+    if products_by_id:
+        changed_fields = [
+            name
+            for name in ("price", "price_percent", "brand", "category")
+            if getattr(request, name, None) is not None
+        ]
+        snapshot = BulkEditSnapshot(
+            user_id=user_id,
+            payload=build_snapshot_payload(products_by_id.values(), changed_fields),
+        )
+        db.add(snapshot)
+
     for pid in request.product_ids:
         p = products_by_id.get(pid)
         if not p:
@@ -175,16 +200,30 @@ async def bulk_update_products(
             updated += 1
             updated_ids.append(pid)
 
-    if updated > 0:
+    if updated == 0 and snapshot is not None:
+        # Ничего не изменилось — снапшот не нужен
+        await db.rollback()
+    else:
         await db.commit()
+        if snapshot is not None and snapshot.id is not None:
+            # Ротация: оставляем последние 5 снапшотов пользователя
+            old_ids = (
+                await db.execute(
+                    select(BulkEditSnapshot.id)
+                    .where(BulkEditSnapshot.user_id == user_id)
+                    .order_by(BulkEditSnapshot.id.desc())
+                    .offset(SNAPSHOTS_PER_USER)
+                )
+            ).scalars().all()
+            if old_ids:
+                await db.execute(
+                    delete(BulkEditSnapshot).where(BulkEditSnapshot.id.in_(old_ids))
+                )
+                await db.commit()
 
     # ✅ Список изменённых полей считаем отдельно — выражения f-string
     #    не могут продолжаться в соседнем строковом литерале
-    changed_fields = [
-        name
-        for name in ("price", "price_percent", "brand", "category")
-        if getattr(request, name, None) is not None
-    ]
+    changed_fields = snapshot.payload["fields"] if snapshot else []
     logger.warning(
         f"✏️ Bulk update: user={current_user.id} "
         f"updated={updated}/{len(request.product_ids)} fields={changed_fields}"
@@ -209,6 +248,134 @@ async def bulk_update_products(
         "updated": updated,
         "updated_ids": updated_ids,
         "category_warning": category_warning,
+    }
+
+
+@router.post("/products/bulk-preview")
+async def bulk_preview_products(
+    request: ProductBulkUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Предпросмотр массового обновления БЕЗ записи: что случится с ценами
+    и валидна ли категория назначения. Вызывается модалкой на лету.
+    """
+    if not request.product_ids:
+        raise HTTPException(status_code=400, detail="Не указаны товары для предпросмотра")
+
+    if all(
+        v is None for v in (request.price, request.price_percent, request.brand, request.category)
+    ):
+        raise HTTPException(status_code=400, detail="Не указаны поля для предпросмотра")
+
+    stmt = select(ProductORM).where(
+        ProductORM.id.in_(request.product_ids),
+        ProductORM.user_id == current_user.id,
+    )
+    products = (await db.execute(stmt)).scalars().all()
+
+    preview = compute_preview(
+        products, price=request.price, price_percent=request.price_percent
+    )
+
+    category_info = None
+    if request.category is not None and request.category.strip():
+        spec_check = await _validate_category_against_specs_async(db, request.category)
+        category_info = {
+            "valid": spec_check["exists"],
+            "platforms": spec_check["platforms"],
+        }
+
+    return {"success": True, "preview": preview, "category": category_info}
+
+
+@router.get("/products/categories-suggest")
+async def categories_suggest(
+    q: str = Query("", max_length=200),
+    limit: int = Query(15, ge=1, le=50),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Подсказки категорий назначения из спеков площадок (для автокомплита
+    в массовом обновлении). Ищем по частичному совпадению имени.
+    """
+    pattern = f"%{escape_like(q.strip())}%"
+    stmt = (
+        select(
+            PlatformCategorySpec.category_name,
+            func.array_agg(func.distinct(PlatformCategorySpec.platform)),
+        )
+        .where(PlatformCategorySpec.category_name.ilike(pattern))
+        .group_by(PlatformCategorySpec.category_name)
+        .order_by(func.length(PlatformCategorySpec.category_name))
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+    return {
+        "suggestions": [
+            {"name": name, "platforms": sorted(platforms or [])} for name, platforms in rows
+        ]
+    }
+
+
+@router.post("/products/bulk-undo")
+async def bulk_undo_products(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Отмена ПОСЛЕДНЕГО массового обновления: восстанавливает цену/бренд/
+    категорию назначения из undo-снапшота. Товары, удалённые после обновления,
+    пропускаются.
+    """
+    stmt = (
+        select(BulkEditSnapshot)
+        .where(BulkEditSnapshot.user_id == current_user.id)
+        .order_by(BulkEditSnapshot.id.desc())
+        .limit(1)
+    )
+    snapshot = (await db.execute(stmt)).scalar_one_or_none()
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Нет массовых изменений для отмены")
+
+    ids = [item["id"] for item in snapshot.payload.get("items", [])]
+    products = (
+        await db.execute(
+            select(ProductORM).where(
+                ProductORM.id.in_(ids), ProductORM.user_id == current_user.id
+            )
+        )
+    ).scalars().all()
+
+    result = apply_snapshot({p.id: p for p in products}, snapshot.payload)
+    await db.delete(snapshot)
+    await db.commit()
+
+    logger.info(
+        f"↩️ Bulk undo: user={current_user.id} "
+        f"restored={result['restored']} skipped_missing={result['skipped_missing']}"
+    )
+    try:
+        stats_repo.record(
+            user_id=current_user.id,
+            operation="bulk_undo",
+            platform=None,
+            status="success",
+            total_items=len(ids),
+            success_items=result["restored"],
+            failed_items=result["skipped_missing"],
+            duration_ms=0,
+        )
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "restored": result["restored"],
+        "skipped_missing": result["skipped_missing"],
+        "created_at": snapshot.created_at.isoformat() if snapshot.created_at else None,
     }
 
 

@@ -4,6 +4,7 @@ import Icon from '../components/icons';
 import EmptyState from '../components/common/EmptyState';
 import DeleteConfirmModal from '../components/products/DeleteConfirmModal';
 import DefaultsModal from '../components/products/DefaultsModal';
+import BulkUpdateModal from '../components/products/BulkUpdateModal';
 import { api } from '../api';
 
 const STATUS_META = {
@@ -80,6 +81,8 @@ const ProductsPage = ({
 
   const [showBulkUpdate, setShowBulkUpdate] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [undoAvailable, setUndoAvailable] = useState(false); // после успешного bulk-update
+  const [undoLoading, setUndoLoading] = useState(false);
 
   const [showDefaults, setShowDefaults] = useState(false);
   const [gaps, setGaps] = useState(null);
@@ -245,19 +248,41 @@ const ProductsPage = ({
     }
   };
 
-  // ==================== Массовое обновление ====================
+  // ==================== Массовое обновление (+ undo) ====================
   const handleBulkUpdate = async (payload) => {
     setBulkLoading(true);
     try {
       const r = await api.bulkUpdateProducts({ product_ids: selected, ...payload });
-      setMessage(`Обновлено товаров: ${r.updated}`);
+      let msg = `Обновлено товаров: ${r.updated}`;
+      if (r.category_warning) msg += ` · ⚠ ${r.category_warning}`;
+      setMessage(msg);
       setShowBulkUpdate(false);
       setSelected([]);
+      setUndoAvailable(true); // ← показать кнопку «Отменить»
+      await load();
+      return true;
+    } catch (e) {
+      setError(e.message);
+      return false;
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkUndo = async () => {
+    setUndoLoading(true);
+    try {
+      const r = await api.bulkUndoProducts();
+      setMessage(
+        `↩ Отменено: значения до обновления восстановлены у ${r.restored} товаров` +
+          (r.skipped_missing ? ` (пропущено удалённых: ${r.skipped_missing})` : '')
+      );
+      setUndoAvailable(false);
       await load();
     } catch (e) {
       setError(e.message);
     } finally {
-      setBulkLoading(false);
+      setUndoLoading(false);
     }
   };
 
@@ -369,12 +394,16 @@ const ProductsPage = ({
         </div>
         <div className="header-actions">
           {onImport && (
-            <Button onClick={onImport}>
+            <Button onClick={onImport} data-onboarding="import-btn">
               <Icon name="import" size={16} /> Импорт
             </Button>
           )}
           {onExport && (
-            <Button variant="secondary" onClick={onExport}>
+            <Button
+              variant="secondary"
+              onClick={onExport}
+              data-onboarding="export-btn"
+            >
               <Icon name="export" size={16} /> Выгрузка
             </Button>
           )}
@@ -493,7 +522,11 @@ const ProductsPage = ({
           </Button>
         )}
 
-        <Button variant="secondary" onClick={() => setShowDefaults(true)}>
+        <Button
+          variant="secondary"
+          onClick={() => setShowDefaults(true)}
+          data-onboarding="defaults-btn"
+        >
           <Icon name="settings" size={16} /> Дефолты
         </Button>
         {gapsTotal > 0 && (
@@ -517,6 +550,28 @@ const ProductsPage = ({
         <div className="alert alert-success">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <Icon name="check" size={16} /> {message}
+          </div>
+        </div>
+      )}
+
+      {/* ✅ Undo последнего массового обновления */}
+      {undoAvailable && (
+        <div className="alert alert-success bulk-undo-alert">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <Icon name="refresh" size={16} /> Последнее массовое обновление можно отменить
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <Button size="small" onClick={handleBulkUndo} loading={undoLoading}>
+              ↩ Отменить
+            </Button>
+            <Button
+              variant="outline"
+              size="small"
+              onClick={() => setUndoAvailable(false)}
+              disabled={undoLoading}
+            >
+              Скрыть
+            </Button>
           </div>
         </div>
       )}
@@ -955,6 +1010,7 @@ const ProductsPage = ({
 
       {showBulkUpdate && (
         <BulkUpdateModal
+          selectedIds={selected}
           count={selected.length}
           loading={bulkLoading}
           onSubmit={handleBulkUpdate}
@@ -975,80 +1031,6 @@ const ProductsPage = ({
         />
       )}
     </>
-  );
-};
-
-/* ========== Модалка массового обновления ========== */
-const BulkUpdateModal = ({ count, loading, onSubmit, onClose }) => {
-  const [pricePercent, setPricePercent] = useState('');
-  const [brand, setBrand] = useState('');
-  const [category, setCategory] = useState('');
-
-  const canSubmit = pricePercent !== '' || brand.trim() || category.trim();
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2 className="modal-title">
-            <Icon name="edit" size={20} /> Массовое обновление ({count})
-          </h2>
-          <button type="button" className="close-btn" onClick={onClose} title="Закрыть">
-            <Icon name="close" size={16} />
-          </button>
-        </div>
-
-        <label className="form-label">Наценка / скидка, %</label>
-        <input
-          className="form-input"
-          type="number"
-          value={pricePercent}
-          onChange={(e) => setPricePercent(e.target.value)}
-          placeholder="Например: 15 или -10"
-          disabled={loading}
-        />
-        <p className="form-hint">Цена каждого товара будет умножена на (1 + %/100).</p>
-
-        <label className="form-label">Бренд</label>
-        <input
-          className="form-input"
-          type="text"
-          value={brand}
-          onChange={(e) => setBrand(e.target.value)}
-          placeholder="Оставьте пустым, чтобы не менять"
-          disabled={loading}
-        />
-
-        <label className="form-label">Категория назначения</label>
-        <input
-          className="form-input"
-          type="text"
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          placeholder="Например: Одежда / Футболка"
-          disabled={loading}
-        />
-
-        <div className="modal-actions">
-          <Button variant="outline" onClick={onClose} disabled={loading}>
-            Отмена
-          </Button>
-          <Button
-            onClick={() =>
-              onSubmit({
-                price_percent: pricePercent === '' ? undefined : Number(pricePercent),
-                brand: brand.trim() || undefined,
-                category: category.trim() || undefined,
-              })
-            }
-            disabled={loading || !canSubmit}
-            loading={loading}
-          >
-            <Icon name="edit" size={16} /> Применить
-          </Button>
-        </div>
-      </div>
-    </div>
   );
 };
 

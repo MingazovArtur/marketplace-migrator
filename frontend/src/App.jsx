@@ -15,7 +15,6 @@ import ImportModal from './components/import/ImportModal';
 import MigrateModal from './components/migration/MigrateModal';
 import BatchMigrateModal from './components/migration/BatchMigrateModal';
 import ExportModal from './components/export/ExportModal';
-import BulkEditModal from './components/products/BulkEditModal';
 import AttributesModal from './components/products/AttributesModal';
 import VariantsModal from './components/products/VariantsModal';
 import PhotosModal from './components/products/PhotosModal';
@@ -57,7 +56,6 @@ function App() {
   // Модалки
   const [showImportModal, setShowImportModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [showBulkModal, setShowBulkModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [migrateProductId, setMigrateProductId] = useState(null);
   const [selectedProductIds, setSelectedProductIds] = useState([]);
@@ -86,7 +84,6 @@ function App() {
       setSelectedProductIds([]);
       setShowImportModal(false);
       setShowExportModal(false);
-      setShowBulkModal(false);
       setShowBatchModal(false);
       setMigrateProductId(null);
       setEditAttributesProduct(null);
@@ -230,22 +227,7 @@ function App() {
     }
   }, []);
 
-  // ==================== Обработчики массового обновления и экспорта ====================
-  const handleBulkEdit = useCallback(
-    async (payload) => {
-      try {
-        const data = await api.bulkUpdateProducts(payload);
-        setMessage(`✅ Обновлено товаров: ${data.updated}`);
-        setShowBulkModal(false);
-        setSelectedProductIds([]);
-        await refreshAll();
-      } catch (e) {
-        setMessage('❌ ' + e.message);
-      }
-    },
-    [refreshAll]
-  );
-
+  // ==================== Обработчики экспорта ====================
   const handleExportForPlatform = useCallback(async (platform, status, activeIds = null) => {
     try {
       const filename = await api.exportXlsxV2(platform, status, activeIds);
@@ -496,15 +478,6 @@ function App() {
         selectedIds={selectedProductIds}
         loading={productsLoading}
         onOpenTemplates={() => setCurrentView('templates')}
-      />
-
-      <BulkEditModal
-        key={`bulk-${selectedProductIds.join('-')}`}
-        isOpen={showBulkModal}
-        onClose={() => setShowBulkModal(false)}
-        selectedIds={selectedProductIds}
-        onSubmit={handleBulkEdit}
-        loading={productsLoading}
       />
 
       {editLogisticsProduct && (

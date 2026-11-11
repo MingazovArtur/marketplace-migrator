@@ -359,6 +359,7 @@ const ProductTable = ({
                         size="small"
                         title="Перенести на площадку"
                         onClick={() => onMigrate(product.id)}
+                        data-onboarding="migrate-btn"
                         disabled={
                           product.status === 'processing' ||
                           product.status === 'success' ||

@@ -28,6 +28,7 @@ const Sidebar = ({ currentView, setCurrentView, theme, setTheme, isAdmin = false
             key={id}
             className={`sidebar-item ${currentView === id ? 'active' : ''}`}
             onClick={() => setCurrentView(id)}
+            data-onboarding={id === 'specs' ? 'specs-nav' : undefined}
           >
             <Icon name={icon} size={20} />
             <span className="sidebar-item-text">{label}</span>
