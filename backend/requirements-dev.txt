@@ -1,5 +1,6 @@
 # Зависимости разработки/CI (в прод-образ НЕ ставятся)
 # Установка: pip install -r requirements.txt -r requirements-dev.txt
 pytest>=8.0.0
+pytest-asyncio>=1.0.0  # @pytest.mark.asyncio в тестах (strict-режим); без него CI: 13 async-тестов падают
 black>=24.0.0       # форматирование (перенесено из prod-requirements 2026-11-11)
 ruff>=0.1.0         # линтер (перенесено из prod-requirements 2026-11-11)

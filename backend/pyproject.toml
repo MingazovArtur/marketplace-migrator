@@ -27,3 +27,4 @@ known-first-party = ["core", "database", "routers", "services", "parsers", "mode
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+asyncio_default_fixture_loop_scope = "function"  # pytest-asyncio: убрать DeprecationWarning
