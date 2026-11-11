@@ -6,6 +6,7 @@ import DeleteConfirmModal from '../components/products/DeleteConfirmModal';
 import DefaultsModal from '../components/products/DefaultsModal';
 import BulkUpdateModal from '../components/products/BulkUpdateModal';
 import { api } from '../api';
+import { GAP_LABELS, FILLED_LABELS, BLOCKING_GAP_FIELDS } from '../constants/gaps';
 
 const STATUS_META = {
   pending: { label: 'Ожидает', cls: 'badge-pending' },
@@ -33,7 +34,7 @@ const DEFAULT_WIDTHS = {
   category: 190,
   price: 96,
   status: 100,
-  actions: 132,
+  actions: 156,
 };
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
@@ -45,19 +46,6 @@ const fmtPrice = (v) => {
   return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 };
 
-const GAP_LABELS = {
-  vat_rate: 'НДС %',
-  okpd_code: 'ТН ВЭД',
-  package_weight_grams: 'Вес упаковки',
-  package_width_mm: 'Ширина, мм',
-  package_height_mm: 'Высота, мм',
-  package_length_mm: 'Длина, мм',
-  price: 'Цена = 0',
-  main_photo: 'Главное фото',
-};
-
-// ✅ Поля, которые БЛОКИРУЮТ миграцию (критические)
-const BLOCKING_GAP_FIELDS = ['price', 'main_photo'];
 
 const ProductsPage = ({
   isAdmin = false,
@@ -96,7 +84,6 @@ const ProductsPage = ({
 
   const [showDefaults, setShowDefaults] = useState(false);
   const [gaps, setGaps] = useState(null);
-  const [gapsLoading, setGapsLoading] = useState(false);
   const [applyLoading, setApplyLoading] = useState(false);
   const [specNames, setSpecNames] = useState([]);
 
@@ -147,14 +134,11 @@ const ProductsPage = ({
 
   // ✅ Загрузка счётчика пропусков
   const loadGaps = useCallback(async () => {
-    setGapsLoading(true);
     try {
       const g = await api.getGaps('all');
       setGaps(g);
     } catch {
       setGaps(null);
-    } finally {
-      setGapsLoading(false);
     }
   }, []);
 
@@ -301,11 +285,14 @@ const ProductsPage = ({
     setApplyLoading(true);
     try {
       const r = await api.applyDefaults(mode === 'selected' ? { product_ids: selected } : 'all');
+      // r.fields — счётчик ЗАПОЛНЕННЫХ полей (не пропусков!), поэтому подписываем
+      // метками действий: «подставлено: цена — 3», а не «Цена = 0: 3»
       const summary = Object.entries(r.fields || {})
-        .map(([k, v]) => `${GAP_LABELS[k] || k}: ${v}`)
+        .map(([k, v]) => `${FILLED_LABELS[k] || k} — ${v}`)
         .join(', ');
       setMessage(
-        `Дозаполнено товаров: ${r.updated} из ${r.total}` + (summary ? ` (${summary})` : '')
+        `Дозаполнено товаров: ${r.updated} из ${r.total}` +
+          (summary ? ` · подставлено: ${summary}` : '')
       );
       if (mode === 'selected') setSelected([]);
       await loadGaps();
@@ -555,7 +542,7 @@ const ProductsPage = ({
           disabled={loading}
           title="Обновить список товаров"
         >
-          <Icon name="refresh" size={15} />
+          <Icon name="refresh" size={19} />
         </Button>
 
         {/* Опасная операция — ушла из шапки в тулбар, чтобы не висела рядом
@@ -858,7 +845,7 @@ const ProductsPage = ({
                             title="Логистика: вес, габариты, НДС, ТН ВЭД"
                             onClick={() => onLogistics(p)}
                           >
-                            <Icon name="box" size={15} />
+                            <Icon name="box" size={19} />
                           </Button>
                         )}
                         {onAttributes && (
@@ -869,7 +856,7 @@ const ProductsPage = ({
                             title="Характеристики"
                             onClick={() => onAttributes(p)}
                           >
-                            <Icon name="tag" size={15} />
+                            <Icon name="tag" size={19} />
                           </Button>
                         )}
                         {onVariants && (
@@ -880,7 +867,7 @@ const ProductsPage = ({
                             title="Варианты (SKU)"
                             onClick={() => onVariants(p)}
                           >
-                            <Icon name="variants" size={15} />
+                            <Icon name="variants" size={19} />
                           </Button>
                         )}
                         {onPhotos && (
@@ -898,7 +885,7 @@ const ProductsPage = ({
                                 : undefined
                             }
                           >
-                            <Icon name="photo" size={15} />
+                            <Icon name="photo" size={19} />
                           </Button>
                         )}
                         {onMigrate && (
@@ -917,7 +904,7 @@ const ProductsPage = ({
                                 : undefined
                             }
                           >
-                            <Icon name="migrate" size={15} />
+                            <Icon name="migrate" size={19} />
                           </Button>
                         )}
                         <Button
@@ -930,7 +917,7 @@ const ProductsPage = ({
                             setDeleteMode('single');
                           }}
                         >
-                          <Icon name="trash" size={15} />
+                          <Icon name="trash" size={19} />
                         </Button>
                       </div>
                     </td>

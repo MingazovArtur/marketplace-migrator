@@ -1,6 +1,0 @@
-export const VALIDATION_RULES = {
-  MIN_PASSWORD_LENGTH: 6,
-  MAX_NAME_LENGTH: 255,
-  MAX_PHOTOS_PER_PRODUCT: 15,
-  // ...
-};

@@ -27,7 +27,6 @@ const BatchMigrateModal = ({
   isOpen,
   onClose,
   selectedIds,
-  products,
   onStartMigration,
   pollProgress,
   loading,

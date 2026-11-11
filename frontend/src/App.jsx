@@ -473,7 +473,6 @@ function App() {
         onAutoExport={handleAutoExport}
         onClose={handleCloseBatchModal}
         selectedIds={selectedProductIds}
-        products={products}
         onStartMigration={handleStartBatchMigration}
         pollProgress={pollBatchProgress}
         loading={productsLoading}

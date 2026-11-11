@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Button from '../common/Button';
 import Icon from '../icons';
 import { api } from '../../api';
+import { GAP_LABELS, FILLED_LABELS } from '../../constants/gaps';
 
 const VAT_OPTIONS = [
   { value: 'none', label: 'Не облагается' },
@@ -21,17 +22,6 @@ const EMPTY_FORM = {
   brand: '',
   marking: 'Нет',
   price_default: '', // ✅ цена по умолчанию для дозаполнения нулевых
-};
-
-const GAP_LABELS = {
-  vat_rate: 'НДС, %',
-  okpd_code: 'ТН ВЭД коды ЕАЭС',
-  package_weight_grams: 'Вес в упаковке, г',
-  package_width_mm: 'Ширина упаковки, мм',
-  package_height_mm: 'Высота упаковки, мм',
-  package_length_mm: 'Длина упаковки, мм',
-  price: 'Цена > 0',
-  main_photo: 'Главное фото',
 };
 
 /**
@@ -109,13 +99,13 @@ const DefaultsModal = ({ isOpen, onClose, onNotify, specNames = [], productCateg
       await api.saveDefaults(buildPayload());
       const r = await api.applyDefaults('all');
       if (onNotify) {
+        // r.fields — счётчик ЗАПОЛНЕННЫХ полей, не пропусков: метки действий
+        const summary = Object.entries(r.fields || {})
+          .map(([k, v]) => `${FILLED_LABELS[k] || k} — ${v}`)
+          .join(', ');
         onNotify(
-          `🩹 Дефолты сохранены. Заполнено товаров: ${r.updated} из ${r.total}` +
-            (Object.keys(r.fields || {}).length
-              ? ` (поля: ${Object.entries(r.fields)
-                  .map(([k, v]) => `${GAP_LABELS[k] || k}: ${v}`)
-                  .join(', ')})`
-              : '')
+          `🩹 Дефолты сохранены. Дозаполнено товаров: ${r.updated} из ${r.total}` +
+            (summary ? ` · подставлено: ${summary}` : '')
         );
       }
       await load();

@@ -433,7 +433,7 @@ const ICONS = {
 /**
  * Единая иконка набора.
  */
-export const Icon = ({ name, size = 20, className = '' }) => {
+const Icon = ({ name, size = 20, className = '' }) => {
   const body = ICONS[name];
   if (!body) return null;
   return (
@@ -453,39 +453,5 @@ export const Icon = ({ name, size = 20, className = '' }) => {
     </svg>
   );
 };
-
-/* Удобные алиасы */
-export const DownloadIcon = (p) => <Icon name="import" {...p} />;
-export const UploadIcon = (p) => <Icon name="export" {...p} />;
-export const MigrateIcon = (p) => <Icon name="migrate" {...p} />;
-export const PhotoIcon = (p) => <Icon name="photo" {...p} />;
-export const TagIcon = (p) => <Icon name="tag" {...p} />;
-export const VariantsIcon = (p) => <Icon name="variants" {...p} />;
-export const ReportIcon = (p) => <Icon name="report" {...p} />;
-export const EditIcon = (p) => <Icon name="edit" {...p} />;
-export const PencilIcon = (p) => <Icon name="edit" {...p} />;
-export const RefreshIcon = (p) => <Icon name="refresh" {...p} />;
-export const SearchIcon = (p) => <Icon name="search" {...p} />;
-export const LogoIcon = (p) => <Icon name="logo" {...p} />;
-export const DashboardIcon = (p) => <Icon name="dashboard" {...p} />;
-export const ProductsIcon = (p) => <Icon name="products" {...p} />;
-export const ImportIcon = (p) => <Icon name="import" {...p} />;
-export const ExportIcon = (p) => <Icon name="export" {...p} />;
-export const MappingIcon = (p) => <Icon name="mapping" {...p} />;
-export const HistoryIcon = (p) => <Icon name="history" {...p} />;
-export const SunIcon = (p) => <Icon name="sun" {...p} />;
-export const MoonIcon = (p) => <Icon name="moon" {...p} />;
-export const LogoutIcon = (p) => <Icon name="logout" {...p} />;
-export const CloseIcon = (p) => <Icon name="close" {...p} />;
-export const StarIcon = (p) => <Icon name="star" {...p} />;
-export const TrashIcon = (p) => <Icon name="trash" {...p} />;
-export const PlusIcon = (p) => <Icon name="plus" {...p} />;
-export const CheckIcon = (p) => <Icon name="check" {...p} />;
-export const AlertIcon = (p) => <Icon name="alert" {...p} />;
-export const TemplateIcon = (p) => <Icon name="template" {...p} />;
-export const KeyIcon = (p) => <Icon name="key" {...p} />;
-export const FileIcon = (p) => <Icon name="file" {...p} />;
-export const InfoIcon = (p) => <Icon name="info" {...p} />;
-export const SettingsIcon = (p) => <Icon name="settings" {...p} />;
 
 export default Icon;
