@@ -39,7 +39,7 @@ alembic>=1.13.0                  # миграции (CLI: alembic upgrade head �
 # ===== Очереди =====
 celery>=5.3.0
 redis>=5.0.0
-kombu>=5.3.0                     # прямой импорт в celery_app.py
+kombu>=5.7.0                     # прямой импорт в celery_app.py
 
 # ===== Аутентификация / шифрование =====
 python-jose[cryptography]>=3.3.0  # JWT
