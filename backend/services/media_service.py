@@ -1,5 +1,7 @@
 """
-Медиа-сервис: скачивание фото товаров в локальное хранилище.
+Медиа-сервис: скачивание фото товаров в локальное хранилище,
+генерация WebP-миниатюр для галереи (/media/thumbs/...).
+
 Копии хранятся в /app/media/products/{product_id}/ и доступны по /media/...
 
 Безопасность (было 🔴 K-2 из код-ревью):
@@ -12,8 +14,10 @@ import hashlib
 import logging
 import os
 from pathlib import Path
+from uuid import uuid4
 
 import httpx
+from PIL import Image, ImageOps
 
 from core.ssrf import assert_safe_url, safe_get
 
@@ -138,3 +142,70 @@ def download_photos(product_id: int, urls: list[str]) -> list[str]:
             if rel_path:
                 saved.append(rel_path)
     return saved
+
+
+# ---------------------------------------------------------------------------
+# Миниатюры (/media/thumbs/...)
+# ---------------------------------------------------------------------------
+
+# Предел по длинной стороне (px) — хватит для карточек галереи
+THUMB_MAX_SIDE = 320
+# Качество WebP (0-100): визуально неотличимо от оригинала в галерее
+THUMB_QUALITY = 80
+# Дерево миниатюр внутри MEDIA_ROOT: thumbs/<путь оригинала>.webp
+THUMB_DIR = "thumbs"
+
+
+def thumb_path(rel_path: str) -> Path:
+    """Путь миниатюры для оригинала rel_path ('products/7/img-<md5>.jpg')."""
+    return MEDIA_ROOT / THUMB_DIR / f"{rel_path}.webp"
+
+
+def get_or_create_thumb(rel_path: str, original: Path) -> Path | None:
+    """
+    WebP-миниатюра (<= THUMB_MAX_SIDE по длинной стороне), создаётся при
+    первом запросе и кэшируется на диске. Имя оригинала детерминировано
+    (img-<md5>), поэтому содержимое миниатюры неизменимо — кэшируется навсегда.
+
+    rel_path — путь внутри MEDIA_ROOT (его раздаёт /media, им же проверяется
+    ownership); original — уже провалидированный полный путь к файлу.
+
+    Возвращает путь к миниатюре или None (не изображение / битый файл /
+    декомпрессионная бомба — Pillow сам ограничивает MAX_IMAGE_PIXELS).
+
+    Атомарность: пишем во временный файл и os.replace — параллельные запросы
+    не портят друг друга (последняя запись выигрывает, файл всегда целый).
+    """
+    rel_path = (rel_path or "").strip().strip("/")
+    parts = rel_path.split("/")
+    if (
+        not rel_path
+        or ".." in parts
+        or rel_path.startswith(f"{THUMB_DIR}/")
+        or os.path.splitext(rel_path)[1].lower() not in ALLOWED_EXT
+        or not original.is_file()
+    ):
+        return None
+
+    thumb = thumb_path(rel_path)
+    if thumb.exists() and thumb.stat().st_size > 0:
+        return thumb
+
+    thumb.parent.mkdir(parents=True, exist_ok=True)
+    tmp = thumb.with_name(f"{thumb.name}.{uuid4().hex}.tmp")
+    try:
+        with Image.open(original) as img:
+            # EXIF-ориентация (снятые вертикально iPhone) + вписывание в квадрат
+            img = ImageOps.exif_transpose(img)
+            img.thumbnail((THUMB_MAX_SIDE, THUMB_MAX_SIDE))
+            # P/CMYK и прочие режимы WebP не умеет — приводим к поддерживаемым
+            if img.mode not in ("RGB", "RGBA", "L"):
+                img = img.convert("RGBA")
+            img.save(tmp, format="WEBP", quality=THUMB_QUALITY)
+        os.replace(tmp, thumb)
+        logger.info(f"🖼 Миниатюра создана: {rel_path} -> {thumb.name}")
+        return thumb
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось создать миниатюру {rel_path}: {e}")
+        tmp.unlink(missing_ok=True)
+        return None

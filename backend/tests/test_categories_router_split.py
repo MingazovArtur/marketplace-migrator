@@ -15,7 +15,9 @@ from _route_helpers import served_routes
 EXPECTED_ROUTES = {
     ("/api/specs/{platform}/refresh", "POST"),
     ("/api/specs/{platform}/refresh/{task_id}/progress", "GET"),
+    ("/api/specs/{platform}/refresh/{task_id}/events", "GET"),
     ("/api/admin/specs-tasks", "GET"),
+    ("/api/admin/specs-tasks/events", "GET"),
     ("/api/admin/specs-tasks/{task_id}/pause", "POST"),
     ("/api/admin/specs-tasks/{task_id}/resume", "POST"),
     ("/api/specs/{platform}/key-source", "GET"),
@@ -73,6 +75,8 @@ def test_fixed_spec_paths_not_swallowed_by_catch_all():
         "/api/specs/ozon/names",
         "/api/specs/ozon/key-source",
         "/api/specs/ozon/refresh/some-task-id/progress",
+        "/api/specs/ozon/refresh/some-task-id/events",
+        "/api/admin/specs-tasks/events",
     ]
     for path in fixed_paths:
         r = client.get(path)

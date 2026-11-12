@@ -257,7 +257,7 @@ function App() {
     getProductById,
   } = useProducts(isAuthenticated, handleLogout);
 
-  const { isMigratingProductId, migrateProduct, migrateBatch, pollBatchProgress } = useMigration(
+  const { isMigratingProductId, migrateProduct, migrateBatch } = useMigration(
     loadData,
     setMessage
   );
@@ -617,7 +617,6 @@ function App() {
         onClose={handleCloseBatchModal}
         selectedIds={selectedProductIds}
         onStartMigration={handleStartBatchMigration}
-        pollProgress={pollBatchProgress}
         loading={productsLoading}
       />
 

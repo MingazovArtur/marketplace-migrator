@@ -4,10 +4,12 @@
 # Порядок и состав выверены ревью 2026-11-11 (сверка: все import
 # в backend/ против этого файла). Правила:
 #   - дев-инструменты (black, ruff) живут в requirements-dev.txt
-#   - пакеты с нулевыми импортами удалены (Pillow, beautifulsoup4,
+#   - пакеты с нулевыми импортами удалены (beautifulsoup4,
 #     psycopg3), транзитивные (limits) не объявляем явно
 #   - пакеты с прямыми импортами объявлены явно, даже если они
 #     приходят транзитивно (cryptography, kombu)
+#   - Pillow удалён ревью как неиспользуемый и вернулся в Round 8:
+#     теперь это движок миниатюр /media/thumbs (media_service.py)
 # ============================================================
 
 # ===== Web-фреймворк =====
@@ -22,6 +24,9 @@ httpx>=0.27.0                    # core/ssrf.py, парсеры, connectors/* (a
 
 # ===== Excel / CSV =====
 openpyxl>=3.1.0                  # генерация/чтение xlsx (парсеры — без pandas: parsers/tables.py)
+
+# ===== Изображения =====
+Pillow>=10.0.0                   # WebP-миниатюры /media/thumbs (services/media_service.py)
 
 # ===== БД: Dual-Engine (sync psycopg2 + async asyncpg) =====
 sqlalchemy>=2.0.0

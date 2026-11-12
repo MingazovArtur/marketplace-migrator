@@ -1,7 +1,11 @@
 /* Миграция: точечная/пакетная, прогресс задач, ✅ v4 профили миграции
- * (Р5: вынесено из api.js — секции «Migration» и «профили миграции»). */
+ * (Р5: вынесено из api.js — секции «Migration» и «профили миграции»).
+ *
+ * Round 8: прогресс — SSE-поток (streamTaskProgress); старые polling-эндпоинты
+ * остаются рабочим резервом (используются api/sse.js при сбое SSE). */
 
 import { API_URL, doFetch, enc, getAuthHeaders, getHeaders, safeError } from './client';
+import { watchTask } from './sse';
 
 export const migrationApi = {
   previewMigration: async (productId, targetPlatform) => {
@@ -50,6 +54,23 @@ export const migrationApi = {
   },
 
   getBatchProgress: (batchId) => migrationApi.getTaskProgress(batchId),
+
+  /* ✅ Round 8: прогресс миграции пушем (SSE), polling — автоматический резерв.
+   * Резолвится терминальным кадром (completed/failed); onUpdate — каждый кадр. */
+  streamTaskProgress: async (
+    taskId,
+    { onUpdate, onError, signal, timeoutMs, timeoutMessage, pollIntervalMs } = {}
+  ) => {
+    return await watchTask(`${API_URL}/migrate/batch/${enc(taskId)}/events`, {
+      onEvent: onUpdate,
+      onError,
+      pollFallback: () => migrationApi.getTaskProgress(taskId),
+      signal,
+      timeoutMs,
+      timeoutMessage,
+      pollIntervalMs,
+    });
+  },
 
   /* ---------- ✅ v4: профили миграции (площадка + дефолты) ---------- */
 

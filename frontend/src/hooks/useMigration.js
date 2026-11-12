@@ -8,44 +8,37 @@ import { api } from '../api';
  *   - migrateProduct возвращает Promise после завершения Celery-задачи
  *   - migrateBatchWithExport: пакетная миграция + авто-экспорт всех успешных товаров
  *   - Обработка ZIP (несколько категорий) и ошибок экспорта
+ *
+ * ✅ Round 8: ожидание задачи — SSE-поток (api.streamTaskProgress);
+ * polling — автоматический резерв внутри api/sse.js (при сбое SSE).
  */
 export const useMigration = (loadData, onMessage) => {
   const [isMigratingProductId, setIsMigratingProductId] = useState(null);
 
   // =====================================================================
-  // Внутренний polling: ждёт завершения Celery-задачи
+  // Ожидание завершения Celery-задачи: SSE-пуш, polling — резерв
   // =====================================================================
   const pollUntilDone = useCallback(async (taskId, maxAttempts = 90) => {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      const progress = await api.streamTaskProgress(taskId, {
+        timeoutMs: maxAttempts * 1000,
+        timeoutMessage: `Таймаут ожидания миграции (${maxAttempts} сек). Проверьте логи Celery.`,
+      });
 
-      try {
-        const progress = await api.getTaskProgress(taskId);
-
-        if (progress.status === 'completed') {
-          return { status: 'completed', progress };
-        }
-        if (progress.status === 'failed' || progress.status === 'error') {
-          return {
-            status: 'failed',
-            error: progress.error || progress.message || 'Миграция завершилась с ошибкой',
-            progress,
-          };
-        }
-      } catch (err) {
-        if (attempt >= maxAttempts) {
-          return {
-            status: 'failed',
-            error: `Не удалось получить прогресс задачи: ${err.message}`,
-          };
-        }
+      if (progress.status === 'completed') {
+        return { status: 'completed', progress };
       }
+      return {
+        status: 'failed',
+        error: progress.error || progress.message || 'Миграция завершилась с ошибкой',
+        progress,
+      };
+    } catch (err) {
+      return {
+        status: 'failed',
+        error: `Не удалось получить прогресс задачи: ${err.message}`,
+      };
     }
-
-    return {
-      status: 'failed',
-      error: 'Таймаут ожидания миграции (90 сек). Проверьте логи Celery.',
-    };
   }, []);
 
   // =====================================================================
@@ -184,23 +177,14 @@ export const useMigration = (loadData, onMessage) => {
   );
 
   // =====================================================================
-  // ПОЛУЧЕНИЕ ПРОГРЕССА ПАКЕТНОЙ МИГРАЦИИ (один запрос)
+  // ПОЛУЧЕНИЕ ПРОГРЕССА ПАКЕТНОЙ МИГРАЦИИ: не нужно — BatchMigrateModal
+  // читает SSE-поток напрямую (api.streamTaskProgress, Round 8)
   // =====================================================================
-  const pollBatchProgress = useCallback(async (taskId) => {
-    return await api.getTaskProgress(taskId);
-  }, []);
-
-  // =====================================================================
-  // Cleanup (no-op для обратной совместимости)
-  // =====================================================================
-  const cleanupPolling = useCallback(() => {}, []);
 
   return {
     isMigratingProductId,
     migrateProduct,
     migrateBatch,
     migrateBatchWithExport, // ✅ новый метод
-    pollBatchProgress,
-    cleanupPolling,
   };
 };

@@ -40,7 +40,7 @@ const SpecsPage = ({ user, onNotify, onOpenMonitor }) => {
 
   // ✅ Состояние прогресса для фоновой загрузки спеков (единое для всех площадок)
   const [progress, setProgress] = useState(null);
-  const pollingRef = useRef(null);
+  const trackAbortRef = useRef(null); // отмена SSE-потока прогресса (Round 8)
 
   useEffect(() => {
     if (user?.role) {
@@ -162,37 +162,32 @@ const SpecsPage = ({ user, onNotify, onOpenMonitor }) => {
     }
   };
 
-  // ✅ Остановка polling при размонтировании
+  // ✅ Round 8: отмена SSE-потока прогресса при размонтировании
   useEffect(() => {
     return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
+      trackAbortRef.current?.abort();
     };
   }, []);
 
   // =====================================================================
-  // Polling прогресса фоновой загрузки спеков (единый для всех площадок)
+  // Прогресс фоновой загрузки спеков: SSE-поток (Round 8), polling — резерв
   // =====================================================================
-  const startPolling = useCallback(
+  const trackRefresh = useCallback(
     (taskId) => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
+      trackAbortRef.current?.abort();
+      const ac = new AbortController();
+      trackAbortRef.current = ac;
 
-      pollingRef.current = setInterval(async () => {
-        try {
-          const p = await api.getSpecsRefreshProgress(platform, taskId);
-          setProgress(p);
-
-          if (p.status === 'completed' || p.status === 'failed' || p.status === 'paused') {
-            clearInterval(pollingRef.current);
-            pollingRef.current = null;
+      api
+        .streamSpecsRefresh(platform, taskId, {
+          onUpdate: (p) => {
+            setProgress(p);
 
             if (p.status === 'completed') {
               setRefreshMessage(
                 `✅ Готово: ${p.success || p.done || 0} категорий загружено. Ошибок: ${p.errors || 0}.`
               );
-              await load();
+              load();
             } else if (p.status === 'paused') {
               // Загрузку остановил админ со страницы мониторинга; сделанное сохранено,
               // продолжить можно там же без повторного ввода ключа
@@ -203,20 +198,21 @@ const SpecsPage = ({ user, onNotify, onOpenMonitor }) => {
             } else if (p.status === 'failed') {
               setRefreshMessage(`❌ Ошибка загрузки: ${p.error || 'неизвестная ошибка'}`);
             }
-          }
-        } catch (err) {
-          console.warn('Polling failed:', err);
-        }
-      }, 1500);
+          },
+          timeoutMs: 30 * 60 * 1000,
+          signal: ac.signal,
+        })
+        .catch(() => {
+          /* таймаут/отмена: прогресс-бар уже показывает последнее состояние */
+        });
     },
     [platform, load]
   );
 
   const handleCloseModal = () => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
+    // Закрыли модалку — отслеживание загрузки больше не нужно
+    trackAbortRef.current?.abort();
+    trackAbortRef.current = null;
     setProgress(null);
     setShowRefreshModal(false);
     setRefreshMessage('');
@@ -244,7 +240,7 @@ const SpecsPage = ({ user, onNotify, onOpenMonitor }) => {
         setRefreshMessage(`🚀 Загрузка спецификаций ${platformTitle} запущена в фоне...`);
         setProgress({ status: 'pending', total: 0, done: 0, success: 0, errors: 0, percent: 0 });
         setRefreshLoading(false);
-        startPolling(result.task_id);
+        trackRefresh(result.task_id);
         return;
       }
 

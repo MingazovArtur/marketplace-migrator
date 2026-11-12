@@ -132,6 +132,32 @@ pre-commit run --all-files
 - **Vitest** — `vitest.config.js` (jsdom) + `src/test/setup.js`, тесты в
   `src/**/*.test.{js,jsx}`; в CI добавлен шаг `npm run test`.
 
+Push вместо polling + миниатюры (Round 8):
+
+- **SSE-прогресс задач** — `backend/core/sse.py::task_events` (первый кадр
+  мгновенно, дедуп неизменных снимков, keepalive каждые 15 с, лимит жизни
+  потока 600 с, терминальный статус закрывает поток). Эндпоинты:
+  `GET /api/migrate/batch/{id}/events` (completed/failed),
+  `GET /api/specs/{p}/refresh/{id}/events` (+paused — терминальный:
+  продолжение на странице мониторинга), `GET /api/admin/specs-tasks/events`
+  (мониторинг без терминала: поток живёт до лимита, фронт переподключается).
+  Заголовок `X-Accel-Buffering: no` отключает буферизацию nginx; старые
+  polling-эндпоинты `/progress` остаются рабочим резервом;
+- **api/sse.js** — клиент поверх fetch+ReadableStream (EventSource не умеет
+  наши cookie+CSRF): `watchTask` — SSE с автопереподключением, при сбое
+  SSE до первого события или 3 сбоев подряд — тихий откат на polling тех же
+  данных, общий timeout на SSE и резерв. Потребители: useMigration,
+  MigrateModal, BatchMigrateModal (проп `pollProgress` из App удалён),
+  SpecsPage, SpecsMonitorPage (setInterval'ы удалены);
+- **Миниатюры /media/thumbs** — WebP ≤ 320px, генерируются Pillow'ом при
+  первом запросе и кэшируются на диске (`media/thumbs/<путь оригинала>.webp`,
+  атомарный os.replace). Права идентичны /media: ownership проверяется по
+  пути ОРИГИНАЛА; дерево thumbs/ напрямую через /media/{path} не отдаётся
+  (маршрут /media/thumbs/{path} объявлен до catch-all, а catch-all режет
+  `thumbs/`). Pillow вернулся в requirements (движок миниатюр);
+  галерея PhotosModal грузит миниатюры, цепочка ошибок: миниатюра →
+  оригинал → прокси.
+
 Правила:
 
 - имена Celery-задач заданы явно (`name="tasks.*"`) и НЕ зависят от пути
@@ -144,6 +170,13 @@ pre-commit run --all-files
 - тесты роутеров собирают маршруты через OpenAPI-схему
   (`tests/_route_helpers.py::served_routes`) — плоский обход
   `router.routes` ломается на Starlette >= 1.10;
+- в `routers/media.py` порядок МАТЕРИАЛЕН: `/media/thumbs/{path}` объявлен
+  ДО catch-all `/media/{path}`, а catch-all отклоняет `thumbs/` — иначе
+  миниатюры раздавались бы без ownership-контроля оригинала
+  (тест test_thumbs_tree_not_served_by_catch_all);
+- SSE-тайминги (POLL/HEARTBEAT/MAX_STREAM_SECONDS) — константы модуля
+  `core/sse.py`, а не дефолты в сигнатуре: эндпоинты их не дублируют,
+  тесты подменяют monkeypatch'ем (иначе SSE-тесты спят на реальных интервалах);
 - новые модули держим < 500 строк; следующие кандидаты на разбиение —
   `services/ozon_specs.py` (635) и `services/specs_monitor.py` (при росте);
 - маппинг «модуль → домен» описан в docstring каждого пакета.

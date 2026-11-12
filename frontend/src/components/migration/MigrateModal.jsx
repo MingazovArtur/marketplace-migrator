@@ -4,8 +4,6 @@ import Icon from '../icons';
 import { PLATFORMS } from '../../utils/platformUtils';
 import { api } from '../../api';
 
-const POLL_INTERVAL_MS = 700;
-
 const MigrateModal = ({
   isOpen,
   onClose,
@@ -28,7 +26,7 @@ const MigrateModal = ({
   // и отправлять на миграцию актуальную цену, а не «0» из старого кэша.
   const [fetched, setFetched] = useState(null);
   const touchedRef = useRef(false); // пользователь уже правил поля — не затираем его ввод
-  const pollTimerRef = useRef(null);
+  const trackAbortRef = useRef(null); // отмена SSE-потока прогресса (Round 8)
 
   // Свежие данные: из БД, как только пришли; до тех пор — из пропса.
   // Объявлены ДО useCallback'ов: productTitle попадает в их deps.
@@ -47,53 +45,60 @@ const MigrateModal = ({
     }
   }, []);
 
-  const pollProgress = useCallback(
+  // ✅ Round 8: прогресс — SSE-поток (кадры пушем), polling — резерв в api/sse.js.
+  // Каждый кадр обновляет прогресс-бар; терминальный завершает ожидание.
+  const trackProgress = useCallback(
     async (taskId) => {
+      trackAbortRef.current?.abort();
+      const ac = new AbortController();
+      trackAbortRef.current = ac;
       try {
-        const data = await api.getTaskProgress(taskId);
+        const data = await api.streamTaskProgress(taskId, {
+          onUpdate: setProgress,
+          onError: (e) => setLocalError(`Связь с сервером: ${e.message} (продолжаем пробовать)`),
+          timeoutMs: 15 * 60 * 1000,
+          timeoutMessage: 'Таймаут ожидания миграции (15 мин). Проверьте логи Celery.',
+          signal: ac.signal,
+        });
         setProgress(data);
-        if (data.status === 'completed' || data.status === 'failed') {
-          if (pollTimerRef.current) {
-            clearTimeout(pollTimerRef.current);
-            pollTimerRef.current = null;
-          }
 
-          if (onSaved && data.status === 'completed') {
-            try {
-              await onSaved();
-            } catch (e) {
-              console.warn('refreshAll failed:', e);
-            }
-          }
-
-          // ✅ ИСПРАВЛЕНО: автоскачивание ТОЛЬКО этого товара (product.id) работает для всех площадок
-          if (data.status === 'completed' && autoExport && product?.id) {
-            const platformTitle = PLATFORMS.find((p) => p.id === platform)?.name || platform;
-            try {
-              await api.exportXlsxV2(platform, 'success', product.id);
-              if (onNotify) {
-                onNotify(
-                  `✅ Карточка #${product.id} перенесена. ` +
-                    `XLSX только с этим товаром скачан — загрузите его в кабинете ${platformTitle}.`
-                );
-              }
-            } catch (e) {
-              if (onNotify) {
-                onNotify(
-                  `✅ Карточка #${product.id} перенесена, но XLSX не скачался: ${e.message}`
-                );
-              }
-            }
-          }
-
-          if (data.status === 'completed') {
-            setTimeout(onClose, 600);
-          }
-        } else {
-          pollTimerRef.current = setTimeout(() => pollProgress(taskId), POLL_INTERVAL_MS);
+        if (data.status !== 'completed') {
+          return; // failed: прогресс-бар уже показывает ошибку (data.error)
         }
+
+        if (onSaved) {
+          try {
+            await onSaved();
+          } catch (e) {
+            console.warn('refreshAll failed:', e);
+          }
+        }
+
+        // ✅ ИСПРАВЛЕНО: автоскачивание ТОЛЬКО этого товара (product.id) работает для всех площадок
+        if (autoExport && product?.id) {
+          const platformTitle = PLATFORMS.find((p) => p.id === platform)?.name || platform;
+          try {
+            await api.exportXlsxV2(platform, 'success', product.id);
+            if (onNotify) {
+              onNotify(
+                `✅ Карточка #${product.id} перенесена. ` +
+                  `XLSX только с этим товаром скачан — загрузите его в кабинете ${platformTitle}.`
+              );
+            }
+          } catch (e) {
+            if (onNotify) {
+              onNotify(`✅ Карточка #${product.id} перенесена, но XLSX не скачался: ${e.message}`);
+            }
+          }
+        }
+
+        setTimeout(onClose, 600);
       } catch (e) {
-        setLocalError(`Не удалось получить прогресс: ${e.message}`);
+        if (!ac.signal.aborted) {
+          setLocalError(`Не удалось получить прогресс: ${e.message}`);
+        }
+      } finally {
+        if (trackAbortRef.current === ac) trackAbortRef.current = null;
       }
     },
     [autoExport, platform, onClose, onSaved, onNotify, product]
@@ -120,7 +125,7 @@ const MigrateModal = ({
     try {
       const result = await api.migrateProduct(product.id, platform, editedData);
       if (result && result.task_id) {
-        pollProgress(result.task_id);
+        trackProgress(result.task_id);
       } else {
         if (onConfirm) {
           await onConfirm(product.id, platform, editedData, autoExport);
@@ -132,7 +137,7 @@ const MigrateModal = ({
       setLocalError(e.message);
       setProgress(null);
     }
-  }, [form, product, platform, autoExport, onConfirm, onSaved, onClose, pollProgress, productTitle]);
+  }, [form, product, platform, autoExport, onConfirm, onSaved, onClose, trackProgress, productTitle]);
 
   // Сохранить изменения (название/цена/категория) в товаре БЕЗ запуска миграции —
   // товары из файлов часто приходят с ценой 0, раньше её было негде сохранить,
@@ -219,12 +224,10 @@ const MigrateModal = ({
     if (isOpen) loadSpecCategories(platform);
   }, [isOpen, platform, loadSpecCategories]);
 
+  // ✅ Round 8: отмена SSE-потока прогресса при размонтировании
   useEffect(() => {
     return () => {
-      if (pollTimerRef.current) {
-        clearTimeout(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
+      trackAbortRef.current?.abort();
     };
   }, []);
 

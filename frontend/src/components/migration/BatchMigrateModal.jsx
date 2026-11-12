@@ -29,7 +29,6 @@ const BatchMigrateModal = ({
   onClose,
   selectedIds,
   onStartMigration,
-  pollProgress,
   loading,
   onAutoExport,
 }) => {
@@ -141,32 +140,42 @@ const BatchMigrateModal = ({
     }
   }, [isOpen]);
 
-  /* Поллинг прогресса */
+  /* ✅ Round 8: прогресс пакетной миграции — SSE-поток (кадры пушем),
+   * polling — автоматический резерв внутри api/sse.js */
   useEffect(() => {
     const batchId = batch?.batch_id || batch?.id;
     if (!batchId || finished) return undefined;
 
-    const timer = setInterval(async () => {
-      try {
-        const raw = await pollProgress(batchId);
-        const n = normalize(raw);
-        setProg(n);
-        if (n.error) setError(n.error);
+    const ac = new AbortController();
+    const onUpdate = (raw) => {
+      const n = normalize(raw);
+      setProg(n);
+      if (n.error) setError(n.error);
 
-        if (isFinished(n)) {
-          setFinished(true);
-          if (n.status !== 'failed' && autoExport && !exportedRef.current && onAutoExport) {
-            exportedRef.current = true;
-            onAutoExport(platform);
-          }
+      if (isFinished(n)) {
+        setFinished(true);
+        if (n.status !== 'failed' && autoExport && !exportedRef.current && onAutoExport) {
+          exportedRef.current = true;
+          onAutoExport(platform);
         }
-      } catch (e) {
-        setError('Ошибка опроса прогресса: ' + e.message);
       }
-    }, 1500);
+    };
 
-    return () => clearInterval(timer);
-  }, [batch, finished, autoExport, platform, pollProgress, onAutoExport]);
+    api
+      .streamTaskProgress(batchId, {
+        onUpdate,
+        onError: (e) => setError(`Связь с сервером: ${e.message} (продолжаем пробовать)`),
+        timeoutMs: 30 * 60 * 1000,
+        timeoutMessage: 'Таймаут ожидания пакетной миграции (30 мин). Проверьте логи Celery.',
+        pollIntervalMs: 1500,
+        signal: ac.signal,
+      })
+      .catch((e) => {
+        if (!ac.signal.aborted) setError('Ошибка отслеживания прогресса: ' + e.message);
+      });
+
+    return () => ac.abort();
+  }, [batch, finished, autoExport, platform, onAutoExport]);
 
   if (!isOpen) return null;
 

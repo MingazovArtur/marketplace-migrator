@@ -1,7 +1,11 @@
 /* Спецификации категорий: чтение/удаление/фоновая загрузка, мониторинг (админ)
- * (Р5: вынесено из api.js — секция «Спецификации категорий»). */
+ * (Р5: вынесено из api.js — секция «Спецификации категорий»).
+ *
+ * Round 8: прогресс загрузки и мониторинг — SSE-потоки (streamSpecsRefresh,
+ * streamAdminSpecsTasks); старые polling-эндпоинты — рабочий резерв api/sse.js. */
 
 import { API_URL, doFetch, enc, getHeaders, safeError } from './client';
+import { watchTask } from './sse';
 
 export const specsApi = {
   getSpecs: async (platform) => {
@@ -77,11 +81,43 @@ export const specsApi = {
     return res.json();
   },
 
+  /* ✅ Round 8: прогресс фоновой загрузки спеков пушем (SSE), polling — резерв.
+   * paused — терминальный: продолжение — на странице мониторинга. */
+  streamSpecsRefresh: async (
+    platform,
+    taskId,
+    { onUpdate, onError, signal, timeoutMs } = {}
+  ) => {
+    return await watchTask(`${API_URL}/specs/${enc(platform)}/refresh/${enc(taskId)}/events`, {
+      onEvent: onUpdate,
+      onError,
+      pollFallback: () => specsApi.getSpecsRefreshProgress(platform, taskId),
+      isTerminal: (p) => ['completed', 'failed', 'paused'].includes(p?.status),
+      signal,
+      timeoutMs,
+      pollIntervalMs: 1500,
+    });
+  },
+
   /* Мониторинг загрузок спеков — только для админа */
   getAdminSpecsTasks: async () => {
     const res = await doFetch(`${API_URL}/admin/specs-tasks`, { headers: getHeaders() });
     if (!res.ok) throw new Error(await safeError(res, 'Ошибка загрузки мониторинга спеков'));
     return res.json();
+  },
+
+  /* ✅ Round 8: живой мониторинг загрузок спеков (SSE-поток снимков).
+   * Терминального статуса нет: поток живёт, пока страница открыта; сервер
+   * закрывает его по лимиту времени — подключаемся заново (api/sse.js). */
+  streamAdminSpecsTasks: async ({ onUpdate, onError, signal } = {}) => {
+    return await watchTask(`${API_URL}/admin/specs-tasks/events`, {
+      onEvent: onUpdate,
+      onError,
+      pollFallback: () => specsApi.getAdminSpecsTasks(),
+      isTerminal: () => false,
+      signal,
+      pollIntervalMs: 3000,
+    });
   },
 
   /* Пауза загрузки спеков (админ): задача дообработает текущий блок и остановится */

@@ -1,10 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Button from '../components/common/Button';
 import Icon from '../components/icons';
 import { api } from '../api';
 import { PLATFORMS } from '../utils/platformUtils';
-
-const POLL_INTERVAL_MS = 3000;
 
 const platformName = (id) => PLATFORMS.find((p) => p.id === id)?.name || id || '—';
 
@@ -211,7 +209,6 @@ const SpecsMonitorPage = ({ user }) => {
   const [loading, setLoading] = useState(false);
   const [paused, setPaused] = useState(false);
   const [busyId, setBusyId] = useState(null);
-  const timerRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -226,13 +223,33 @@ const SpecsMonitorPage = ({ user }) => {
     }
   }, []);
 
+  // ✅ Round 8: живые снимки — SSE-поток (сервер пушит при изменении),
+  // polling — автоматический резерв внутри api/sse.js. Кнопка паузы
+  // останавливает и поток: переключение paused перезапускает эффект.
   useEffect(() => {
-    if (!isAdmin) return undefined;
-    load();
-    if (paused) return undefined;
-    timerRef.current = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(timerRef.current);
-  }, [isAdmin, paused, load]);
+    if (!isAdmin || paused) return undefined;
+
+    const ac = new AbortController();
+    setLoading(true); // спиннер до первого снимка (поток шлёт его мгновенно)
+    api
+      .streamAdminSpecsTasks({
+        onUpdate: (res) => {
+          setLoading(false);
+          setData(res);
+          setError('');
+        },
+        onError: (e) => {
+          setLoading(false);
+          setError(e.message);
+        },
+        signal: ac.signal,
+      })
+      .catch(() => {
+        /* поток отменён (пауза/unmount) или закрыт навсегда — молча */
+      });
+
+    return () => ac.abort();
+  }, [isAdmin, paused]);
 
   const handlePause = useCallback(
     async (taskId) => {

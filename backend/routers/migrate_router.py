@@ -9,20 +9,27 @@ Rate-limits (на идентификатор: user_id или IP):
   - /migrate/batch                : 5/min, 50/day   (Celery-задачи, самые тяжёлые)
   - /migrate/{product_id}         : 20/min          (одиночная миграция)
   - /migrate/batch/{id}/progress  : 60/min          (polling прогресса)
+  - /migrate/batch/{id}/events    : 60/min          (SSE-прогресс; 1 запрос на задачу)
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.auth import get_current_user
 from core.platforms import PRICE_RULES, Platform
 from core.rate_limit import limiter
+from core.sse import SSE_HEADERS, task_events
 from database.models import User
 from database.repository import repo
 from services.category_mapper import CategoryMapper
 from services.category_service import category_service
 from services.platform_utils import detect_platform
 from tasks import get_progress, migrate_batch_task, migrate_product_task
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Migration"])
 category_mapper = CategoryMapper()
@@ -206,3 +213,23 @@ def get_batch_progress(
 ):
     """Прогресс миграции (единый для одиночной и пакетной)."""
     return get_progress(batch_id)
+
+
+# ==================== ПРОГРЕСС МИГРАЦИИ (SSE) ====================
+# Push-версия /migrate/batch/{id}/progress: кадр — тот же JSON, но без
+# polling-цикла на фронте. Соединение живёт до completed/failed (или лимита
+# времени); при сбое SSE фронт уходит в polling по старому эндпоинту —
+# см. frontend/src/api/sse.js.
+@limiter.limit("60/minute")
+@router.get("/migrate/batch/{batch_id}/events")
+async def stream_batch_progress(
+    request: Request,
+    batch_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """SSE-прогресс миграции (единый для одиночной и пакетной)."""
+    return StreamingResponse(
+        task_events(lambda: get_progress(batch_id), terminal={"completed", "failed"}),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )

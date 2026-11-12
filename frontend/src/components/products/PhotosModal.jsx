@@ -29,6 +29,31 @@ const resolveDisplayUrl = (rawUrl) => {
   return u;
 };
 
+/**
+ * ✅ Round 8: миниатюра для галереи — WebP ≤ 320px (/media/thumbs/...),
+ * генерируется бэкендом при первом запросе. Только для локальных копий
+ * (products/..., /media/...): у внешних ссылок миниатюры нет — отдаём
+ * как есть (при сбое CDN сработает прокси-fallback в handleImgError).
+ */
+const resolveThumbUrl = (rawUrl) => {
+  if (!rawUrl) return '';
+  const u = String(rawUrl).trim();
+  const toThumb = (rel) => `${BACKEND_ORIGIN}/media/thumbs/${rel}`;
+  if (u.startsWith('http://') || u.startsWith('https://')) {
+    if (u.includes(':5173/media/') && BACKEND_ORIGIN) {
+      return toThumb(u.split('/media/')[1]);
+    }
+    return u; // внешнее фото — миниатюры нет, только у локальных копий
+  }
+  if (u.startsWith('/media/')) {
+    return toThumb(u.slice('/media/'.length));
+  }
+  if (u.startsWith('products/')) {
+    return toThumb(u);
+  }
+  return u;
+};
+
 const buildProxyUrl = (rawUrl) => {
   if (!rawUrl) return '';
   const u = String(rawUrl).trim();
@@ -161,9 +186,21 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
 
   /* ---------- fallback при ошибке загрузки картинки ---------- */
 
+  // Цепочка попыток (Round 8): миниатюра → оригинал → прокси → заглушка.
+  // Первое звено новое: миниатюра могла не сгенерироваться (битый оригинал,
+  // старый бэкенд без /media/thumbs) — тогда пробуем сам оригинал.
   const handleImgError = (e, rawUrl) => {
     const img = e.currentTarget;
-    // Попытка 1: если прямая ссылка заблокирована CDN, пробуем через наш backend-прокси
+    // Попытка 1: миниатюра не далась — грузим оригинал
+    if (!img.dataset.triedOriginal) {
+      img.dataset.triedOriginal = '1';
+      const original = resolveDisplayUrl(rawUrl);
+      if (original && original !== img.src) {
+        img.src = original;
+        return;
+      }
+    }
+    // Попытка 2: если прямая ссылка заблокирована CDN, пробуем через наш backend-прокси
     if (!img.dataset.triedProxy) {
       const proxyUrl = buildProxyUrl(rawUrl);
       if (proxyUrl) {
@@ -236,7 +273,7 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
                 onDragEnd={handleDragEnd}
               >
                 <img
-                  src={resolveDisplayUrl(url)}
+                  src={resolveThumbUrl(url)}
                   alt={`Фото ${idx + 1}`}
                   loading="lazy"
                   referrerPolicy="no-referrer"

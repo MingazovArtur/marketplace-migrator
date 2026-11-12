@@ -16,10 +16,12 @@ import logging
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 from core.auth import get_current_user
 from core.config import settings
 from core.crypto import encrypt_str
+from core.sse import SSE_HEADERS, task_events
 from database.models import User
 from models.schemas import RefreshSpecRequest
 from services import cache_service, specs_monitor
@@ -46,7 +48,7 @@ async def refresh_specs(
         raise HTTPException(status_code=501, detail=f"Загрузчик для {platform} ещё не реализован")
 
     raw_key = (payload.api_key or "").strip()
-    business_id = (str(payload.business_id).strip() if payload.business_id else "")
+    business_id = str(payload.business_id).strip() if payload.business_id else ""
 
     # Если для Ozon переданы раздельно business_id (как Client ID) и api_key (как UUID)
     if platform == "ozon" and raw_key and ":" not in raw_key and business_id:
@@ -119,6 +121,24 @@ def refresh_specs_progress(
 ):
     """Прогресс фоновой загрузки спеков (единый формат для всех площадок)."""
     return get_progress(task_id)
+
+
+@router.get("/specs/{platform}/refresh/{task_id}/events")
+async def refresh_specs_events(
+    platform: str,
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """SSE-прогресс фоновой загрузки спеков (тот же кадр, что /progress).
+
+    paused — терминальный статус: загрузку остановил админ, продолжить можно
+    на странице мониторинга, автопереподключение не нужно.
+    """
+    return StreamingResponse(
+        task_events(lambda: get_progress(task_id), terminal={"completed", "failed", "paused"}),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
 
 
 @router.get("/specs/{platform}/key-source")

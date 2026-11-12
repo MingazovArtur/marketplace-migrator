@@ -4,30 +4,28 @@
 Вынесено без изменений из монолита routers/categories.py (Р7).
 """
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 from core.auth import get_current_user
+from core.sse import SSE_HEADERS, task_events
 from database.models import User
+from routers.categories._support import _public_task_info, _require_admin
 from services import specs_monitor
 from tasks import get_progress, refresh_specs_task
-from routers.categories._support import _public_task_info, _require_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Частота опроса реестра в SSE-потоке мониторинга (сек) — как был polling страницы
+MONITOR_POLL_SECONDS = 3.0
 
-@router.get("/admin/specs-tasks")
-def admin_specs_tasks(current_user: User = Depends(get_current_user)):
-    """
-    Мониторинг загрузок спеков (только админ).
 
-    Активные (в очереди / в работе) с живым прогрессом из Celery
-    + последние завершённые (успех/ошибки/длительность/пауза).
-    """
-    _require_admin(current_user)
-
+def _admin_snapshot() -> dict:
+    """Снимок мониторинга (активные + история) — общее для GET и SSE-эндпоинта."""
     active = []
     for info in specs_monitor.list_active():
         live = get_progress(info.get("task_id", ""))
@@ -56,10 +54,9 @@ def admin_specs_tasks(current_user: User = Depends(get_current_user)):
     history = []
     for info in specs_monitor.list_history(20):
         info = _public_task_info(info)
-        info["can_resume"] = (
-            info.get("status") in specs_monitor.RESUMABLE_STATUSES
-            and not info.get("resumed_as")
-        )
+        info["can_resume"] = info.get(
+            "status"
+        ) in specs_monitor.RESUMABLE_STATUSES and not info.get("resumed_as")
         history.append(info)
 
     return {
@@ -67,6 +64,42 @@ def admin_specs_tasks(current_user: User = Depends(get_current_user)):
         "active": active,
         "history": history,
     }
+
+
+@router.get("/admin/specs-tasks")
+def admin_specs_tasks(current_user: User = Depends(get_current_user)):
+    """
+    Мониторинг загрузок спеков (только админ).
+
+    Активные (в очереди / в работе) с живым прогрессом из Celery
+    + последние завершённые (успех/ошибки/длительность/пауза).
+    """
+    _require_admin(current_user)
+    return _admin_snapshot()
+
+
+@router.get("/admin/specs-tasks/events")
+async def admin_specs_tasks_events(current_user: User = Depends(get_current_user)):
+    """
+    SSE-мониторинг загрузок спеков (только админ): снимок пушем при изменении.
+
+    Кадр — тот же JSON, что у GET /admin/specs-tasks. Терминального статуса нет
+    (мониторинг бесконечен): поток закрывается по лимиту времени core/sse.py,
+    фронт переподключается сам (api/sse.js). Первый снимок снимается здесь,
+    а не в генераторе, чтобы его ошибка (Redis/Celery) вернула честный 5xx.
+    """
+    _require_admin(current_user)
+    first = await asyncio.to_thread(_admin_snapshot)
+    return StreamingResponse(
+        task_events(
+            _admin_snapshot,
+            terminal=frozenset(),
+            initial=first,
+            poll_seconds=MONITOR_POLL_SECONDS,
+        ),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
 
 
 @router.post("/admin/specs-tasks/{task_id}/pause")
@@ -136,7 +169,10 @@ def admin_specs_task_resume(task_id: str, current_user: User = Depends(get_curre
         )
 
     # Что уже в БД: категории этой загрузки + унаследованные из предыдущих поколений
-    skip = sorted({str(k) for k in (info.get("done_keys") or [])} | {str(k) for k in (params.get("skip_category_ids") or [])})
+    skip = sorted(
+        {str(k) for k in (info.get("done_keys") or [])}
+        | {str(k) for k in (params.get("skip_category_ids") or [])}
+    )
 
     try:
         task = refresh_specs_task.delay(
