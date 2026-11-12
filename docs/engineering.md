@@ -93,7 +93,7 @@ pre-commit run --all-files
 
 ## 3. Структура кода (после недели 4)
 
-Тринадцать монолитов разбиты на пакеты с сохранением публичного API импортов
+Пятнадцать монолитов разбиты на пакеты с сохранением публичного API импортов
 (ни один импортёр не менялся):
 
 | Было | Стало | Публичный API |
@@ -111,6 +111,8 @@ pre-commit run --all-files
 | `services/tnved_mapper.py` (694) — Р11 | пакет `tnved_mapper/`: `_database_a`, `_database_b`, `_database` (склейка `{**A, **B}`), `_lookup` | `from services.tnved_mapper import suggest_tnved, get_tnved_description, search_tnved, TNVED_DATABASE` |
 | `services/spec_validator.py` (618) — Р12 | пакет `spec_validator/`: `_canon`, `_ozon_base`, `_attributes`, `_entry` | `from services.spec_validator import validate_product_by_spec, validate_products_by_specs` (импортёр routers/export/preview.py) |
 | `routers/import_router.py` (612) — Р13 | пакет `routers/import_router/`: `_support`, `_preview`, `_key_import`, `_file_import` | `from routers import import_router; import_router.router`, `import_router.repo`/`op_log`/`stats_repo` (точки патчинга) |
+| `database/repository/products.py` (593) — Р14 | пакет `repository/products/`: `_serialize`, `_filters`, `_async_reads`, `_sync_reads`, `_writes`, `_bulk_import`, сборка класса `_repository` (миксины) | `from database.repository.products import ProductRepository, repo`; статические `ProductRepository._to_dict/_variant_rows/_attr_rows` (через класс — variants.py/attributes.py/test_money_helpers.py) |
+| `tasks/migrate_tasks.py` (529) — Р15 | пакет `migrate_tasks/`: `_notify`, `_single`, `_batch` | `from tasks.migrate_tasks import migrate_batch_task, migrate_product_task` (импортёр tasks/__init__.py); Celery-имена явные `tasks.*` |
 
 Фронтенд (Р3–Р5): `pages/SpecsPage.jsx` (1115) → оркестрация 437 строк +
 `components/specs/`; `pages/ProductsPage.jsx` (1095) → 641 строка +
@@ -185,9 +187,23 @@ Push вместо polling + миниатюры (Round 8):
   тесты подменяют monkeypatch'ем (иначе SSE-тесты спят на реальных интервалах);
 - новые модули держим < 500 строк (справочник ТН ВЭД разбит на две части
   именно поэтому); `spec_validator.py` (618) и `import_router.py` (612)
-  разбиты в Р12–Р13; следующие кандидаты — `services/xlsx_generator/
-  aliexpress.py` (604), `services/xlsx_generator/columns.py` (597),
-  `database/repository/products.py` (593), `tasks/migrate_tasks.py` (529);
+  разбиты в Р12–Р13, `repository/products.py` (593) и `migrate_tasks.py`
+  (529) — в Р14–Р15; следующие кандидаты —
+  `services/xlsx_generator/aliexpress.py` (604),
+  `services/xlsx_generator/columns.py` (597);
+- в `database/repository/products/` класс собран из шести доменных
+  миксинов (`_repository.py`), тела методов перенесены 1:1 без
+  переопределений: и `self._to_dict` внутри методов, и статические
+  `ProductRepository._variant_rows/_attr_rows/_to_dict` через КЛАСС
+  (repository/variants.py, attributes.py, tests/test_money_helpers.py)
+  работают как в монолите; MRO: `_SerializeMixin` первым;
+- в `tasks/migrate_tasks/` Celery-задачи декорируются в подмодулях
+  `_single`/`_batch`: имена явные (`name="tasks.*"`), регистрация
+  срабатывает при импорте пакета (`celery_app.py: include=["tasks"]` →
+  `tasks/__init__.py` → `migrate_tasks/__init__.py`), маршрутизация
+  очередей от пути модуля не зависит; тесты подменяют зависимости
+  (`repo`/`stats_repo`/`op_log`/`defaults_service`/`_pick_target_category`)
+  в этих подмодулях и выполняют задачи eager-вызовом `.apply(throw=True)`;
 - в `services/tnved_mapper/` порядок ключей справочника МАТЕРИАЛЕН
   (search_tnved отдаёт первые 10 совпадений в порядке справочника):
   части `_database_a`/`_database_b` — последовательные строки монолита,
