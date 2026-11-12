@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './hooks/useAuth';
 import { useProducts } from './hooks/useProducts';
 import { useMigration } from './hooks/useMigration';
@@ -59,24 +61,145 @@ const ViewFallback = () => (
   </div>
 );
 
+/* ==================== Представления рабочих маршрутов ==================== */
+
+const DashboardView = ({ stats, onGoImport }) => {
+  const hasProducts = stats && stats.total > 0;
+  return (
+    <>
+      <header className="header">
+        <div>
+          <h1 className="header-title">Дашборд</h1>
+          <p className="header-subtitle">Обзор миграции товаров</p>
+        </div>
+      </header>
+      {hasProducts ? (
+        <>
+          <StatsGrid stats={stats} />
+          <Suspense fallback={<ViewFallback />}>
+            <StatsDashboard />
+          </Suspense>
+        </>
+      ) : (
+        <EmptyState
+          icon={<Icon name="dashboard" size={48} />}
+          title="Статистика появится после первой операции"
+          description="Импортируйте товары — и дашборд покажет сводку по статусам и источникам."
+          actionLabel="Перейти к импорту"
+          onAction={onGoImport}
+        />
+      )}
+    </>
+  );
+};
+
+const ImportView = ({ onOpenImportModal }) => (
+  <>
+    <header className="header">
+      <div>
+        <h1 className="header-title">Импорт товаров</h1>
+        <p className="header-subtitle">Загрузка карточек из файлов или по API</p>
+      </div>
+    </header>
+    <div className="import-quick-actions">
+      <div
+        className="card import-card"
+        role="button"
+        tabIndex={0}
+        onClick={onOpenImportModal}
+        onKeyDown={(e) => e.key === 'Enter' && onOpenImportModal()}
+      >
+        <div className="import-card-icon">
+          <Icon name="import" size={44} />
+        </div>
+        <h3>Из Excel / CSV</h3>
+        <p>
+          Рекомендуемый способ: выгрузка из кабинета Ozon, WB, Яндекс Маркет или Магнит Маркет
+        </p>
+        <Button>Выбрать файл</Button>
+      </div>
+      <div
+        className="card import-card"
+        role="button"
+        tabIndex={0}
+        onClick={onOpenImportModal}
+        onKeyDown={(e) => e.key === 'Enter' && onOpenImportModal()}
+      >
+        <div className="import-card-icon">
+          <Icon name="key" size={44} />
+        </div>
+        <h3>По API ключу / YML</h3>
+        <p>Ozon, Wildberries, Яндекс Маркет. Тест-ключ: test:test</p>
+        <Button>Ввести ключ</Button>
+      </div>
+    </div>
+  </>
+);
+
+/* Публичные маршруты с query-параметрами (token из ссылки из письма) */
+const VerifyEmailRoute = () => {
+  const [params] = useSearchParams();
+  return (
+    <Suspense fallback={<ViewFallback />}>
+      <VerifyEmailPage token={params.get('token')} />
+    </Suspense>
+  );
+};
+
+const ForgotPasswordRoute = () => (
+  <Suspense fallback={<ViewFallback />}>
+    <ForgotPasswordPage />
+  </Suspense>
+);
+
+const ResetPasswordRoute = () => {
+  const [params] = useSearchParams();
+  return (
+    <Suspense fallback={<ViewFallback />}>
+      <ResetPasswordPage token={params.get('token')} />
+    </Suspense>
+  );
+};
+
+/* Вкладки, которые имели смысл до роутинга: для редиректа с «/» в последнюю
+ * открытую (localStorage 'marketplace_active_view' — старые значения
+ * 1:1 совпадают с именами маршрутов). */
+const KNOWN_VIEWS = [
+  'dashboard',
+  'products',
+  'import',
+  'mapping',
+  'specs',
+  'specs-monitor',
+  'templates',
+  'history',
+];
+
 function App() {
-  const [hash, setHash] = useState(window.location.hash);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const queryClient = useQueryClient();
   const { authChecked, isAuthenticated, user, handleLogin, handleLogout } = useAuth();
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
   const [authTab, setAuthTab] = useState(null);
   const [message, setMessage] = useState('');
 
-  // ✅ Сохранение текущей вкладки в localStorage с фоллбэком на 'products'
-  const [currentView, setCurrentView] = useState(() => {
-    return localStorage.getItem('marketplace_active_view') || 'products';
-  });
+  // Последняя открытая вкладка: пишем при каждой навигации (только в рабочем
+  // режиме), для редиректа с «/» читаем localStorage в момент рендера роута —
+  // без memo, чтобы после «логаут → повторный вход» (App не перемонтируется,
+  // а при логауте вкладка сбрасывается на «Товары») редирект видел свежие
+  // данные, а не застарелый результат useMemo.
+  const getHomeRedirect = () => {
+    const saved = localStorage.getItem('marketplace_active_view');
+    return `/${KNOWN_VIEWS.includes(saved) ? saved : 'products'}`;
+  };
 
   useEffect(() => {
-    localStorage.setItem('marketplace_active_view', currentView);
-  }, [currentView]);
-
-  // Триггер синхронизации обоих списков товаров (App + ProductsPage)
-  const [refreshKey, setRefreshKey] = useState(0);
+    if (isAuthenticated) {
+      const view = location.pathname.replace(/^\//, '');
+      if (view) localStorage.setItem('marketplace_active_view', view);
+    }
+  }, [location, isAuthenticated]);
 
   // Модалки
   const [showImportModal, setShowImportModal] = useState(false);
@@ -97,16 +220,12 @@ function App() {
 
   // ==================== Эффекты ====================
   useEffect(() => {
-    const onHash = () => setHash(window.location.hash);
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
-
-  useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
   }, [theme]);
 
+  // Выход/логаут: закрыть модалки и вернуть следующую сессию к «Товарам»
+  // (раньше это делал setCurrentView('products'))
   useEffect(() => {
     if (!isAuthenticated) {
       setMessage('');
@@ -119,7 +238,7 @@ function App() {
       setEditVariantsProduct(null);
       setEditPhotosProduct(null);
       setEditLogisticsProduct(null);
-      setCurrentView('products');
+      localStorage.setItem('marketplace_active_view', 'products');
     }
   }, [isAuthenticated]);
 
@@ -143,15 +262,18 @@ function App() {
     setMessage
   );
 
-  // ОБЪЕДИНЁННАЯ функция перезагрузки:
-  // обновляет App-овский список (useProducts) И внутренний список ProductsPage через refreshKey.
+  // ОБЪЯДИНЁННАЯ функция перезагрузки (Round 7: вместо refreshKey-проброса —
+  // инвалидация кэша TanStack Query; подписчики ['products'], ['stats'],
+  // ['gaps'], ['spec-names'], ['edit-history'] перезапросятся сами).
   const refreshAll = useCallback(async () => {
-    try {
-      await loadData();
-    } finally {
-      setRefreshKey((k) => k + 1);
-    }
-  }, [loadData]);
+    await queryClient.invalidateQueries({ queryKey: ['products'] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['stats'] }),
+      queryClient.invalidateQueries({ queryKey: ['gaps'] }),
+      queryClient.invalidateQueries({ queryKey: ['spec-names'] }),
+      queryClient.invalidateQueries({ queryKey: ['edit-history'] }),
+    ]);
+  }, [queryClient]);
 
   // ==================== Обработчики импорта ====================
   const handleImport = useCallback(
@@ -313,186 +435,54 @@ function App() {
     setEditLogisticsProduct(product);
   }, []);
 
-  // ==================== Hash-роутинг (ПОСЛЕ всех хуков!) ====================
-  const hashPath = hash.split('?')[0];
-  const hashQuery = new URLSearchParams(hash.split('?')[1] || '');
-
-  if (hashPath === '#/privacy')
+  // ==================== Пока не знаем, залогинены ли — тишина ====================
+  // (раньше до ответа /auth/me мигал лендинг для залогиненного пользователя)
+  if (!authChecked) {
     return (
-      <Suspense fallback={<ViewFallback />}>
-        <PrivacyPolicyPage />
-      </Suspense>
-    );
-  if (hashPath === '#/terms')
-    return (
-      <Suspense fallback={<ViewFallback />}>
-        <TermsOfUsePage />
-      </Suspense>
-    );
-  if (hashPath === '#/verify-email')
-    return (
-      <Suspense fallback={<ViewFallback />}>
-        <VerifyEmailPage token={hashQuery.get('token')} />
-      </Suspense>
-    );
-  if (hashPath === '#/forgot-password')
-    return (
-      <Suspense fallback={<ViewFallback />}>
-        <ForgotPasswordPage />
-      </Suspense>
-    );
-  if (hashPath === '#/reset-password')
-    return (
-      <Suspense fallback={<ViewFallback />}>
-        <ResetPasswordPage token={hashQuery.get('token')} />
-      </Suspense>
-    );
-  if (hashPath === '#/help')
-    return (
-      <Suspense fallback={<ViewFallback />}>
-        <HelpPage />
-      </Suspense>
-    );
-
-  // ==================== Виды ====================
-  const renderDashboard = () => {
-    const hasProducts = stats && stats.total > 0;
-    return (
-      <>
-        <header className="header">
-          <div>
-            <h1 className="header-title">Дашборд</h1>
-            <p className="header-subtitle">Обзор миграции товаров</p>
-          </div>
-        </header>
-        {hasProducts ? (
-          <>
-            <StatsGrid stats={stats} />
-            <Suspense fallback={<ViewFallback />}>
-              <StatsDashboard />
-            </Suspense>
-          </>
-        ) : (
-          <EmptyState
-            icon={<Icon name="dashboard" size={48} />}
-            title="Статистика появится после первой операции"
-            description="Импортируйте товары — и дашборд покажет сводку по статусам и источникам."
-            actionLabel="Перейти к импорту"
-            onAction={() => setCurrentView('import')}
-          />
-        )}
-      </>
-    );
-  };
-
-  const renderImport = () => (
-    <>
-      <header className="header">
-        <div>
-          <h1 className="header-title">Импорт товаров</h1>
-          <p className="header-subtitle">Загрузка карточек из файлов или по API</p>
-        </div>
-      </header>
-      <div className="import-quick-actions">
-        <div
-          className="card import-card"
-          role="button"
-          tabIndex={0}
-          onClick={() => setShowImportModal(true)}
-          onKeyDown={(e) => e.key === 'Enter' && setShowImportModal(true)}
-        >
-          <div className="import-card-icon">
-            <Icon name="import" size={44} />
-          </div>
-          <h3>Из Excel / CSV</h3>
-          <p>
-            Рекомендуемый способ: выгрузка из кабинета Ozon, WB, Яндекс Маркет или Магнит Маркет
-          </p>
-          <Button>Выбрать файл</Button>
-        </div>
-        <div
-          className="card import-card"
-          role="button"
-          tabIndex={0}
-          onClick={() => setShowImportModal(true)}
-          onKeyDown={(e) => e.key === 'Enter' && setShowImportModal(true)}
-        >
-          <div className="import-card-icon">
-            <Icon name="key" size={44} />
-          </div>
-          <h3>По API ключу / YML</h3>
-          <p>Ozon, Wildberries, Яндекс Маркет. Тест-ключ: test:test</p>
-          <Button>Ввести ключ</Button>
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+        <div className="loading-spinner">
+          <div className="spinner" />
         </div>
       </div>
-    </>
-  );
-
-  const renderView = () => {
-    switch (currentView) {
-      case 'dashboard':
-        return renderDashboard();
-      case 'import':
-        return renderImport();
-      case 'mapping':
-        return (
-          <Suspense fallback={<ViewFallback />}>
-            <CategoryMapping onBack={() => setCurrentView('products')} />
-          </Suspense>
-        );
-      case 'history':
-        return (
-          <Suspense fallback={<ViewFallback />}>
-            <HistoryView />
-          </Suspense>
-        );
-      case 'specs':
-        return (
-          <Suspense fallback={<ViewFallback />}>
-            <SpecsPage
-              user={user}
-              onNotify={setMessage}
-              onOpenMonitor={() => setCurrentView('specs-monitor')}
-            />
-          </Suspense>
-        );
-      case 'specs-monitor':
-        return (
-          <Suspense fallback={<ViewFallback />}>
-            <SpecsMonitorPage user={user} />
-          </Suspense>
-        );
-      case 'templates':
-        return (
-          <Suspense fallback={<ViewFallback />}>
-            <TemplatesPage onNotify={setMessage} />
-          </Suspense>
-        );
-      case 'products':
-        return (
-          <ProductsPage
-            isAdmin={user?.role === 'admin'}
-            refreshKey={refreshKey}
-            onMigrate={handleProductsPageMigrate}
-            onLogistics={handleEditLogistics}
-            onAttributes={handleEditAttributes}
-            onVariants={handleEditVariants}
-            onPhotos={handleEditPhotos}
-            onExport={handleOpenExport}
-            onImport={() => setShowImportModal(true)}
-          />
-        );
-      default:
-        return renderDashboard();
-    }
-  };
+    );
+  }
 
   // ==================== Гостевой режим ====================
   if (!isAuthenticated) {
     return (
       <div className="public-layout">
         <TopBar isAuthenticated={false} onOpenAuth={openAuth} />
-        <Landing onOpenAuth={openAuth} />
+        <Routes>
+          <Route path="/" element={<Landing onOpenAuth={openAuth} />} />
+          <Route
+            path="/privacy"
+            element={
+              <Suspense fallback={<ViewFallback />}>
+                <PrivacyPolicyPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/terms"
+            element={
+              <Suspense fallback={<ViewFallback />}>
+                <TermsOfUsePage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/help"
+            element={
+              <Suspense fallback={<ViewFallback />}>
+                <HelpPage />
+              </Suspense>
+            }
+          />
+          <Route path="/verify-email" element={<VerifyEmailRoute />} />
+          <Route path="/forgot-password" element={<ForgotPasswordRoute />} />
+          <Route path="/reset-password" element={<ResetPasswordRoute />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
         <AuthModal
           isOpen={!!authTab}
           initialTab={authTab || 'login'}
@@ -511,23 +501,89 @@ function App() {
         user={user}
         onOpenAuth={openAuth}
         onLogout={handleLogout}
-        onOpenHistory={() => setCurrentView('history')}
+        onOpenHistory={() => navigate('/history')}
       />
 
       <EmailVerificationBanner user={user} />
       <OnboardingTour />
 
       <div className="app-body">
-        <Sidebar
-          currentView={currentView}
-          setCurrentView={setCurrentView}
-          theme={theme}
-          setTheme={setTheme}
-          isAdmin={user?.role === 'admin'}
-        />
+        <Sidebar theme={theme} setTheme={setTheme} isAdmin={user?.role === 'admin'} />
         <main className="main-content" data-onboarding="welcome">
           <Alert message={message} onClose={() => setMessage('')} />
-          {renderView()}
+          <Routes>
+            <Route path="/" element={<Navigate to={getHomeRedirect()} replace />} />
+            <Route
+              path="/dashboard"
+              element={<DashboardView stats={stats} onGoImport={() => navigate('/import')} />}
+            />
+            <Route path="/import" element={<ImportView onOpenImportModal={() => setShowImportModal(true)} />} />
+            <Route
+              path="/mapping"
+              element={
+                <Suspense fallback={<ViewFallback />}>
+                  <CategoryMapping onBack={() => navigate('/products')} />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/specs"
+              element={
+                <Suspense fallback={<ViewFallback />}>
+                  <SpecsPage
+                    user={user}
+                    onNotify={setMessage}
+                    onOpenMonitor={() => navigate('/specs-monitor')}
+                  />
+                </Suspense>
+              }
+            />
+            {/* Мониторинг спеков — только админ; остальным тихий редирект */}
+            <Route
+              path="/specs-monitor"
+              element={
+                user?.role === 'admin' ? (
+                  <Suspense fallback={<ViewFallback />}>
+                    <SpecsMonitorPage user={user} />
+                  </Suspense>
+                ) : (
+                  <Navigate to="/products" replace />
+                )
+              }
+            />
+            <Route
+              path="/templates"
+              element={
+                <Suspense fallback={<ViewFallback />}>
+                  <TemplatesPage onNotify={setMessage} />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/history"
+              element={
+                <Suspense fallback={<ViewFallback />}>
+                  <HistoryView />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/products"
+              element={
+                <ProductsPage
+                  isAdmin={user?.role === 'admin'}
+                  onMigrate={handleProductsPageMigrate}
+                  onLogistics={handleEditLogistics}
+                  onAttributes={handleEditAttributes}
+                  onVariants={handleEditVariants}
+                  onPhotos={handleEditPhotos}
+                  onExport={handleOpenExport}
+                  onImport={() => setShowImportModal(true)}
+                />
+              }
+            />
+            <Route path="*" element={<Navigate to="/products" replace />} />
+          </Routes>
         </main>
       </div>
 
@@ -572,12 +628,12 @@ function App() {
         onExport={handleExportForPlatform}
         selectedIds={selectedProductIds}
         loading={productsLoading}
-        onOpenTemplates={() => setCurrentView('templates')}
+        onOpenTemplates={() => navigate('/templates')}
       />
 
       {editLogisticsProduct && (
         <LogisticsModal
-          key={`logistics-${editLogisticsProduct.id}-${refreshKey}`}
+          key={`logistics-${editLogisticsProduct.id}`}
           isOpen
           onClose={() => setEditLogisticsProduct(null)}
           product={getProductById(editLogisticsProduct.id) || editLogisticsProduct}
@@ -587,7 +643,7 @@ function App() {
 
       {editAttributesProduct && (
         <AttributesModal
-          key={`attrs-${editAttributesProduct.id}-${refreshKey}`}
+          key={`attrs-${editAttributesProduct.id}`}
           isOpen
           onClose={() => setEditAttributesProduct(null)}
           product={getProductById(editAttributesProduct.id) || editAttributesProduct}
@@ -598,7 +654,7 @@ function App() {
 
       {editVariantsProduct && (
         <VariantsModal
-          key={`variants-${editVariantsProduct.id}-${refreshKey}`}
+          key={`variants-${editVariantsProduct.id}`}
           isOpen
           onClose={() => setEditVariantsProduct(null)}
           product={getProductById(editVariantsProduct.id) || editVariantsProduct}
@@ -608,7 +664,7 @@ function App() {
 
       {editPhotosProduct && (
         <PhotosModal
-          key={`photos-${editPhotosProduct.id}-${refreshKey}`}
+          key={`photos-${editPhotosProduct.id}`}
           isOpen
           onClose={() => setEditPhotosProduct(null)}
           product={getProductById(editPhotosProduct.id) || editPhotosProduct}

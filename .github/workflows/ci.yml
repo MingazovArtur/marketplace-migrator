@@ -36,7 +36,7 @@ jobs:
         run: python -m pytest
 
   frontend:
-    name: Frontend — линт + сборка
+    name: Frontend — линт + тесты + сборка
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -55,6 +55,11 @@ jobs:
 
       - name: ESLint
         run: npm run lint
+
+      # Round 7: юнит-тесты фронтенда (Vitest: хук debounce, чистые функции
+      # api/client, интеграция useProducts с TanStack Query)
+      - name: Тесты (Vitest)
+        run: npm run test
 
       - name: Сборка (vite build)
         run: npm run build

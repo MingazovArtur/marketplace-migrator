@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import Button from '../components/common/Button';
 import Icon from '../components/icons';
 import EmptyState from '../components/common/EmptyState';
@@ -11,6 +12,7 @@ import Pagination from '../components/products/Pagination';
 import GapsBanner from '../components/products/GapsBanner';
 import { useColumnResize } from '../components/products/useColumnResize';
 import { SORT_OPTIONS } from '../components/products/tableUtils';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import {
   computeSelectedGaps,
   selectedBlockingTotal,
@@ -26,10 +28,14 @@ import { FILLED_LABELS } from '../constants/gaps';
  * баннер пропусков в GapsBanner.jsx (+ чистые gapsHelpers.js),
  * ресайз колонок в useColumnResize.js, константы в tableUtils.js.
  * Здесь осталась только оркестрация: состояние, CRUD-хендлеры, layout.
+ *
+ * Round 7: список, счётчик пропусков, имена спеков и флаг undo переведены
+ * с ручного useEffect+load на TanStack Query (кэш инвалидируется из App
+ * после мутаций — проброс refreshKey больше не нужен). Поиск задебаужен:
+ * в queryKey уходит значение с задержкой 300 мс, инпут не залипает.
  */
 const ProductsPage = ({
   isAdmin = false,
-  refreshKey = 0,
   onMigrate,
   onLogistics,
   onAttributes,
@@ -38,9 +44,8 @@ const ProductsPage = ({
   onExport,
   onImport,
 }) => {
-  const [products, setProducts] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
@@ -49,6 +54,10 @@ const ProductsPage = ({
   const [sort, setSort] = useState('newest');
   const [skip, setSkip] = useState(0);
   const [limit, setLimit] = useState(50);
+
+  // ✅ Round 7: в queryKey — задержанное значение: сервер дёргается не чаще
+  // раза в 300 мс от начала ввода, инпут при этом остаётся мгновенным.
+  const debouncedSearch = useDebouncedValue(search, 300);
 
   const { colWidths, setColWidths, colStyle, Resizer } = useColumnResize();
 
@@ -59,93 +68,75 @@ const ProductsPage = ({
 
   const [showBulkUpdate, setShowBulkUpdate] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
-  const [undoAvailable, setUndoAvailable] = useState(false); // после успешного bulk-update
   const [undoLoading, setUndoLoading] = useState(false);
 
   // ✅ v4: массовый подбор ТН ВЭД для выделенных
   const [showTnved, setShowTnved] = useState(false);
 
   const [showDefaults, setShowDefaults] = useState(false);
-  const [gaps, setGaps] = useState(null);
   const [applyLoading, setApplyLoading] = useState(false);
-  const [specNames, setSpecNames] = useState([]);
 
-  // ==================== Загрузка ====================
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const d = await api.getProducts({
-        search: search || undefined,
-        status: status === 'all' ? undefined : status,
-        source: 'all',
-        sort,
-        skip,
-        limit,
-      });
-      setProducts(d.products || []);
-      setTotal(d.total ?? (d.products || []).length);
-      console.log('✅ ProductsPage: loaded', d.products?.length || 0, 'products');
-    } catch (e) {
-      setError(e.message);
-      console.error('❌ ProductsPage: load error', e);
-    } finally {
-      setLoading(false);
-    }
-  }, [search, status, sort, skip, limit]);
+  // ==================== Загрузка (TanStack Query) ====================
+  const listParams = useMemo(
+    () => ({
+      search: debouncedSearch || undefined,
+      status: status === 'all' ? undefined : status,
+      source: 'all',
+      sort,
+      skip,
+      limit,
+    }),
+    [debouncedSearch, status, sort, skip, limit]
+  );
 
-  const loadRef = useRef(load);
-  useEffect(() => {
-    loadRef.current = load;
-  }, [load]);
-  useEffect(() => {
-    load();
-  }, [load]);
+  const listQuery = useQuery({
+    queryKey: ['products', 'page', listParams],
+    queryFn: () => api.getProducts(listParams),
+    placeholderData: keepPreviousData,
+  });
 
-  useEffect(() => {
-    if (refreshKey > 0) {
-      console.log('🔄 ProductsPage: refreshKey changed to', refreshKey, '- reloading...');
-      loadRef.current();
-    }
-  }, [refreshKey]);
+  // Стабильная идентичность массива (см. useProducts.js)
+  const products = useMemo(() => listQuery.data?.products ?? [], [listQuery.data]);
+  const total = listQuery.data?.total ?? 0;
+  const loading = listQuery.isFetching;
+  // Ошибка запроса списка показываем вместе с ошибками мутаций
+  const listError = listQuery.error?.message || '';
+
+  const invalidateProducts = () => queryClient.invalidateQueries({ queryKey: ['products'] });
+  const invalidateGaps = () => queryClient.invalidateQueries({ queryKey: ['gaps'] });
+
+  // ✅ Счётчик пропусков (с KeyError — баннер просто не показывается)
+  const gapsQuery = useQuery({
+    queryKey: ['gaps', 'all'],
+    queryFn: () => api.getGaps('all'),
+    retry: 0,
+  });
+  const gaps = gapsQuery.data ?? null;
+
+  const specNamesQuery = useQuery({
+    queryKey: ['spec-names', 'ozon'],
+    queryFn: () => api.getSpecNames('ozon'),
+    retry: 0,
+  });
+  const specNames = Array.isArray(specNamesQuery.data) ? specNamesQuery.data : [];
+
+  // ✅ v4: есть ли неотменённые операции правок (баннер «Отменить последнее
+  // изменение»). Локальные переключения (после мутаций / «Скрыть») пишутся
+  // в кэш запроса — единый источник правды.
+  const undoQuery = useQuery({
+    queryKey: ['edit-history', 'has-undo'],
+    queryFn: () => api.getEditHistory(1),
+    retry: 0,
+  });
+  const undoAvailable = !!undoQuery.data?.has_undo;
+  const setUndoAvailable = (value) =>
+    queryClient.setQueryData(['edit-history', 'has-undo'], { has_undo: !!value });
 
   useEffect(() => {
     if (!message) return;
     const t = setTimeout(() => setMessage(''), 5000);
     return () => clearTimeout(t);
   }, [message]);
-
-  // ✅ Загрузка счётчика пропусков
-  const loadGaps = useCallback(async () => {
-    try {
-      const g = await api.getGaps('all');
-      setGaps(g);
-    } catch {
-      setGaps(null);
-    }
-  }, []);
-
-  const loadSpecNames = useCallback(async () => {
-    try {
-      const names = await api.getSpecNames('ozon');
-      setSpecNames(Array.isArray(names) ? names : []);
-    } catch {
-      setSpecNames([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadGaps();
-    loadSpecNames();
-  }, [refreshKey, loadGaps, loadSpecNames]);
-
-  // ✅ v4: есть ли неотменённые операции правок (баннер «Отменить последнее изменение»)
-  useEffect(() => {
-    api
-      .getEditHistory(1)
-      .then((d) => setUndoAvailable(!!d.has_undo))
-      .catch(() => setUndoAvailable(false));
-  }, [refreshKey]);
 
   // ==================== Выделение ====================
   const toggleOne = (id) => {
@@ -175,7 +166,7 @@ const ProductsPage = ({
       }
       setDeleteMode(null);
       setDeleteTargetId(null);
-      await load();
+      await invalidateProducts();
     } catch (e) {
       setError(e.message);
       setDeleteMode(null);
@@ -196,7 +187,7 @@ const ProductsPage = ({
       setShowBulkUpdate(false);
       setSelected([]);
       setUndoAvailable(true); // ← показать кнопку «Отменить»
-      await load();
+      await invalidateProducts();
       return true;
     } catch (e) {
       setError(e.message);
@@ -216,8 +207,8 @@ const ProductsPage = ({
       );
       // Могут остаться другие неотменённые операции — сверяемся с историей
       const d = await api.getEditHistory(1).catch(() => ({ has_undo: false }));
-      setUndoAvailable(!!d.has_undo);
-      await load();
+      queryClient.setQueryData(['edit-history', 'has-undo'], d);
+      await invalidateProducts();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -241,8 +232,8 @@ const ProductsPage = ({
       );
       if (r.updated > 0) setUndoAvailable(true); // ✅ v4: дозаполнение можно отменить
       if (mode === 'selected') setSelected([]);
-      await loadGaps();
-      await load();
+      await invalidateGaps();
+      await invalidateProducts();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -397,7 +388,7 @@ const ProductsPage = ({
           variant="outline"
           size="small"
           className="btn-icon"
-          onClick={load}
+          onClick={() => invalidateProducts()}
           disabled={loading}
           title="Обновить список товаров"
         >
@@ -421,6 +412,11 @@ const ProductsPage = ({
         </Button>
       </div>
 
+      {listError && (
+        <div className="alert alert-error">
+          <div>{listError}</div>
+        </div>
+      )}
       {error && (
         <div className="alert alert-error">
           <div>{error}</div>
@@ -616,8 +612,8 @@ const ProductsPage = ({
           onSaved={async () => {
             setUndoAvailable(true);
             setSelected([]);
-            await load();
-            await loadGaps();
+            await invalidateProducts();
+            await invalidateGaps();
           }}
         />
       )}
@@ -627,7 +623,7 @@ const ProductsPage = ({
           isOpen
           onClose={() => {
             setShowDefaults(false);
-            loadGaps();
+            invalidateGaps();
           }}
           onNotify={setMessage}
           productCategories={productCategories}

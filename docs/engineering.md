@@ -27,12 +27,16 @@ npm ci
 ```bash
 cd backend
 make test          # или: python -m pytest
+
+cd ../frontend
+npm run test       # Vitest: хук debounce, чистые функции api/client, useProducts
 ```
 
 Тесты не требуют БД, Redis и интернета: покрывают чистую логику
 (SSRF-валидация и DNS-pinning, шифрование Celery-payload, денежные
 преобразования Decimal→float, восстановление зависших статусов, хелперы
-генерации XLSX). Новая функциональность без тестов — не мержится.
+генерации XLSX). Фронтенд-тесты (Vitest + Testing Library, jsdom) тоже
+без сети — API замокан. Новая функциональность без тестов — не мержится.
 
 ### Линтеры
 
@@ -82,7 +86,7 @@ pre-commit run --all-files
 | Job | Что делает |
 |---|---|
 | **backend** | `ruff check --select E9,F63,F7,F82 .` + `python -m pytest` (Python 3.12) |
-| **frontend** | `npm ci` + `npm run lint` + `npm run build` (Node 22) |
+| **frontend** | `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run build` (Node 22) |
 | **docker** | сборка `backend/Dockerfile.prod` и `frontend/Dockerfile.prod` |
 
 Требование: **main всегда зелёный**. Красный CI — блокер для мержа.
@@ -107,6 +111,26 @@ pre-commit run --all-files
 `components/products/` (таблица/пагинация/баннер/хуки); `src/api.js` (1016,
 82 метода) → пакет `src/api/` из 10 доменных модулей с агрегатором
 `api/index.js` (`import { api } from '../api'` работает без изменений).
+
+Фронтенд-модернизация (Round 7):
+
+- **React Router 7 (HashRouter)** — маршруты вместо стейта `currentView`:
+  рабочие виды `/dashboard`, `/products`, `/import`, `/mapping`, `/specs`,
+  `/specs-monitor` (только админ), `/templates`, `/history`; публичные
+  страницы на прежних хэш-URL (`/privacy`, `/terms`, `/help`,
+  `/verify-email`, `/forgot-password`, `/reset-password`). HashRouter —
+  осознанно: SPA отдаётся с `/` без catch-all на сервере, а публичные
+  страницы уже жили на хэше. Восстановление последней вкладки сохранено
+  (localStorage `marketplace_active_view`, значения 1:1 = имена маршрутов);
+- **TanStack Query v5** — серверный кэш вместо ручных useState+useEffect:
+  ключи `['products', …]` (список страницы + App-список), `['stats']`,
+  `['gaps']`, `['spec-names']`, `['edit-history']`; мутации заканчиваются
+  инвалидацией префикса — проброс `refreshKey` из App в ProductsPage
+  удалён; при логауте кэш очищается целиком (`queryClient.clear()`);
+- **Debounce поиска** — `hooks/useDebouncedValue` (300 мс): в queryKey
+  уходит задержанное значение, инпут остаётся мгновенным;
+- **Vitest** — `vitest.config.js` (jsdom) + `src/test/setup.js`, тесты в
+  `src/**/*.test.{js,jsx}`; в CI добавлен шаг `npm run test`.
 
 Правила:
 

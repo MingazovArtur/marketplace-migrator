@@ -1,89 +1,92 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../api';
 
-export const useProducts = (authed, onAuthError) => {
-  const [products, setProducts] = useState([]);
-  const [stats, setStats] = useState({ total: 0, pending: 0, success: 0, error: 0, processing: 0 });
-  const [loading, setLoading] = useState(false);
-  const [totalProducts, setTotalProducts] = useState(0);
+/* Список App-уровня: первые 50 товаров с дефолтной сортировкой — нужен для
+ * фолбэка модалок (getProductById) и дашборда. Страница «Товары» ходит в тот
+ * же эндпоинт со своими фильтрами — это отдельная запись кэша под тем же
+ * префиксом ['products'], поэтому инвалидация префикса обновляет обе. */
+const APP_LIST_FILTERS = {
+  search: '',
+  status: '',
+  source: '',
+  sort_by: 'created_at',
+  sort_order: 'desc',
+  skip: 0,
+  limit: 50,
+};
 
-  // Состояния фильтров и пагинации
-  const [filters, setFilters] = useState({
-    search: '',
-    status: '',
-    source: '',
-    sort_by: 'created_at',
-    sort_order: 'desc',
-    skip: 0,
-    limit: 50,
+const DEFAULT_STATS = { total: 0, pending: 0, success: 0, error: 0, processing: 0 };
+
+/* 401 от сервера = кука протухла: ретраить бессмысленно */
+const isAuthError = (err) => {
+  const msg = String(err?.message || '');
+  return msg.includes('401') || msg.includes('Недействительный');
+};
+
+const retryPolicy = (failureCount, error) => !isAuthError(error) && failureCount < 2;
+
+/**
+ * Данные App-уровня (Round 7: переведён с ручного useState+useEffect на
+ * TanStack Query — кэш, дедуп и инвалидация вместо проброса refreshKey).
+ *
+ * Контракт прежний: products (первые 50), stats, loading, loadData (принудительный
+ * refetch), getProductById (фолбэк для модалек). 401 по-прежнему зовёт onAuthError.
+ */
+export const useProducts = (authed, onAuthError) => {
+  const queryClient = useQueryClient();
+
+  const statsQuery = useQuery({
+    queryKey: ['stats'],
+    queryFn: api.getStats,
+    enabled: authed,
+    retry: retryPolicy,
   });
 
-  const onAuthErrorRef = useRef(onAuthError);
+  const productsQuery = useQuery({
+    queryKey: ['products', 'app-list'],
+    queryFn: () => api.getProducts(APP_LIST_FILTERS),
+    enabled: authed,
+    retry: retryPolicy,
+    placeholderData: keepPreviousData,
+  });
+
+  // Разлогин по 401 (как в старом loadData) + очистка кэша при выходе:
+  // кэш живёт в едином QueryClient и переживёт смену пользователя, а старые
+  // товары не должны показываться следующему залогиненному.
+  useEffect(() => {
+    if (isAuthError(statsQuery.error) || isAuthError(productsQuery.error)) {
+      onAuthError?.();
+    }
+  }, [statsQuery.error, productsQuery.error, onAuthError]);
 
   useEffect(() => {
-    onAuthErrorRef.current = onAuthError;
-  }, [onAuthError]);
-
-  const loadData = useCallback(async () => {
     if (!authed) {
-      setProducts([]);
-      setStats({ total: 0, pending: 0, success: 0, error: 0, processing: 0 });
-      setTotalProducts(0);
-      return;
+      queryClient.clear();
     }
+  }, [authed, queryClient]);
 
-    setLoading(true);
-    try {
-      const [statsData, productsData] = await Promise.all([
-        api.getStats(),
-        api.getProducts(filters),
-      ]);
-      setStats(statsData);
-      setProducts(productsData.products || []);
-      setTotalProducts(productsData.total || 0);
-    } catch (err) {
-      if (err.message.includes('401') || err.message.includes('Недействительный')) {
-        onAuthErrorRef.current?.();
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [authed, filters]);
+  // Стабильная идентичность: [] пересоздавался бы каждый рендер и «дёргал» бы
+  // useCallback/useMemo вниз по дереву (react-hooks/exhaustive-deps)
+  const products = useMemo(() => productsQuery.data?.products ?? [], [productsQuery.data]);
+  const stats = statsQuery.data ?? DEFAULT_STATS;
+  const loading = authed && (statsQuery.isPending || productsQuery.isPending);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const availableForBatch = products.filter(
-    (p) => p.status !== 'success' && p.status !== 'processing'
-  ).length;
+  // Принудительный refetch — прежняя семантика loadData из useMigration/refreshAll
+  const loadData = useCallback(async () => {
+    await Promise.all([statsQuery.refetch(), productsQuery.refetch()]);
+  }, [statsQuery, productsQuery]);
 
   const getProductById = useCallback(
-    (id) => {
-      return products.find((p) => p.id === id);
-    },
+    (id) => products.find((p) => p.id === id),
     [products]
   );
-
-  const updateFilters = useCallback((newFilters) => {
-    setFilters((prev) => ({ ...prev, ...newFilters }));
-  }, []);
-
-  const setPage = useCallback((page) => {
-    setFilters((prev) => ({ ...prev, skip: (page - 1) * prev.limit }));
-  }, []);
 
   return {
     products,
     stats,
     loading,
     loadData,
-    setProducts,
-    availableForBatch,
     getProductById,
-    totalProducts,
-    filters,
-    updateFilters,
-    setPage,
   };
 };
