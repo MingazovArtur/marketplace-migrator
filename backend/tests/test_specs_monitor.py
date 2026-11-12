@@ -1,7 +1,11 @@
-"""Тесты реестра загрузок спеков (services/specs_monitor.py) — без Redis.
+"""Тесты реестра загрузок спеков (пакет services/specs_monitor/) — без Redis.
 
 FakeRedis эмулирует только те команды, которые использует specs_monitor:
 pipeline(setex/sadd/srem/lpush/ltrim/expire/execute), get, smembers, mget, lrange.
+
+После разбиения на пакет (Р9) redis_client импортирован отдельно в
+_lifecycle/_pause/_queries — клиент подменяем в этих модулях (helper
+_set_redis), а не на пакете; HISTORY_LEN — в _lifecycle.
 """
 
 import json
@@ -90,10 +94,18 @@ class FakeRedis:
         return lst[start : end + 1] if end >= 0 else lst[start:]
 
 
+def _set_redis(monkeypatch, client):
+    """Подменить redis_client во всех модулях пакета, которые ходят в Redis (Р9)."""
+    from services.specs_monitor import _lifecycle, _pause, _queries
+
+    for mod in (_lifecycle, _pause, _queries):
+        monkeypatch.setattr(mod, "redis_client", client)
+
+
 @pytest.fixture
 def fake_redis(monkeypatch):
     fake = FakeRedis()
-    monkeypatch.setattr(specs_monitor, "redis_client", fake)
+    _set_redis(monkeypatch, fake)
     return fake
 
 
@@ -145,7 +157,10 @@ def test_full_lifecycle_queued_running_done(fake_redis):
 
 
 def test_history_trimmed_to_limit(fake_redis, monkeypatch):
-    monkeypatch.setattr(specs_monitor, "HISTORY_LEN", 3)
+    # HISTORY_LEN читает finish() — после Р9 константа живёт в _lifecycle
+    from services.specs_monitor import _lifecycle
+
+    monkeypatch.setattr(_lifecycle, "HISTORY_LEN", 3)
     for i in range(5):
         specs_monitor.register(f"t{i}", platform="ozon", user_id=1)
         specs_monitor.finish(f"t{i}", status="success", total=1, success=1)
@@ -205,7 +220,7 @@ def test_is_stale_false_for_queued_and_recent(fake_redis, monkeypatch):
 
 
 def test_all_noop_without_redis(monkeypatch):
-    monkeypatch.setattr(specs_monitor, "redis_client", None)
+    _set_redis(monkeypatch, None)
     specs_monitor.register("x", platform="ozon", user_id=1)
     specs_monitor.set_running("x")
     specs_monitor.finish("x", status="success")
@@ -307,7 +322,7 @@ def test_mark_resumed_decorates_history_and_blocks_repeat(fake_redis):
 
 
 def test_pause_funcs_noop_without_redis(monkeypatch):
-    monkeypatch.setattr(specs_monitor, "redis_client", None)
+    _set_redis(monkeypatch, None)
     assert specs_monitor.request_pause("x") is False
     assert specs_monitor.pause_requested("x") is False
     specs_monitor.clear_pause("x")  # не падает
@@ -344,7 +359,7 @@ def test_sync_done_keys_ignored_for_done_or_missing(fake_redis):
 
 
 def test_sync_done_keys_noop_without_redis(monkeypatch):
-    monkeypatch.setattr(specs_monitor, "redis_client", None)
+    _set_redis(monkeypatch, None)
     specs_monitor.sync_done_keys("x", ["a"])  # не падает
 
 
@@ -399,7 +414,7 @@ def test_reconcile_clears_hung_pause_flag(fake_redis):
 
 
 def test_reconcile_noop_without_redis(monkeypatch):
-    monkeypatch.setattr(specs_monitor, "redis_client", None)
+    _set_redis(monkeypatch, None)
     assert specs_monitor.reconcile_on_startup() == 0  # не падает
 
 

@@ -93,7 +93,7 @@ pre-commit run --all-files
 
 ## 3. Структура кода (после недели 4)
 
-Семь монолитов разбиты на пакеты с сохранением публичного API импортов
+Девять монолитов разбиты на пакеты с сохранением публичного API импортов
 (ни один импортёр не менялся):
 
 | Было | Стало | Публичный API |
@@ -105,6 +105,8 @@ pre-commit run --all-files
 | `services/template_filler.py` (993) — Р2 | пакет `template_filler/`: `_common`, `_sheet_scan`, `_storage`, `_values`, `_filler` | `from services.template_filler import fill_official_template, ...` |
 | `services/category_service.py` (709) — Р6 | пакет `category_service/`: `_mocks`, `_api_loaders`, `_storage`, `_service` | `from services.category_service import category_service, CategoryService` |
 | `routers/categories.py` (687) — Р7 | пакет `routers/categories/`: `_support`, `specs_refresh`, `specs_admin`, `specs`, `catalog`, `mappings` | `from routers import categories; categories.router` |
+| `services/ozon_specs.py` (635) — Р8 | пакет `ozon_specs/`: `_http`, `_tree`, `_attributes`, `_storage`, `_refresh` | `from services.ozon_specs import refresh_ozon_specs` |
+| `services/specs_monitor.py` (419) — Р9 | пакет `specs_monitor/`: `_keys`, `_lifecycle`, `_pause`, `_queries` | `from services import specs_monitor` |
 
 Фронтенд (Р3–Р5): `pages/SpecsPage.jsx` (1115) → оркестрация 437 строк +
 `components/specs/`; `pages/ProductsPage.jsx` (1095) → 641 строка +
@@ -178,7 +180,12 @@ Push вместо polling + миниатюры (Round 8):
   `core/sse.py`, а не дефолты в сигнатуре: эндпоинты их не дублируют,
   тесты подменяют monkeypatch'ем (иначе SSE-тесты спят на реальных интервалах);
 - новые модули держим < 500 строк; следующие кандидаты на разбиение —
-  `services/ozon_specs.py` (635) и `services/specs_monitor.py` (при росте);
+  `routers/products.py` (791), `services/tnved_mapper.py` (694),
+  `services/spec_validator.py` (618), `routers/import_router.py` (611);
+- в `services/specs_monitor/` redis_client импортирован отдельно в
+  `_lifecycle`/`_pause`/`_queries` — тесты подменяют клиент в этих модулях
+  (helper `_set_redis` в tests/test_specs_monitor.py), патч на пакете
+  после разбиения больше не работает;
 - маппинг «модуль → домен» описан в docstring каждого пакета.
 
 ## 4. SSRF и DNS-rebinding (E-4)
