@@ -37,7 +37,7 @@ aiosqlite>=0.20.0                # локальная разработка бе�
 alembic>=1.13.0                  # миграции (CLI: alembic upgrade head в Dockerfile.prod)
 
 # ===== Очереди =====
-celery>=5.3.0
+celery>=5.7.0
 redis>=5.0.0
 kombu>=5.3.0                     # прямой импорт в celery_app.py
 
