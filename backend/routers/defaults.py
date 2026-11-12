@@ -1,6 +1,7 @@
 """
 Дефолты экспорта + массовое дозаполнение пропусков.
 ✅ v2 (AsyncSession + asyncpg): все эндпоинты переведены на неблокирующую работу с БД.
+✅ v4: дозаполнение тоже пишет undo-снапшот — «Отменить последнее изменение» откатывает и его.
 """
 
 import logging
@@ -15,6 +16,7 @@ from core.rate_limit import limiter
 from database.models import ExportDefault, Product, User
 from database.session import get_async_db
 from services import defaults_service
+from services.edit_history import write_edit_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +172,10 @@ async def apply_defaults(
 
     updated = 0
     field_counter: dict[str, int] = {}
+    # ✅ v4: сначала считаем ВСЕ обновления (до записи), пишем undo-снапшот
+    # прежних значений, и только потом применяем изменения.
+    planned: list[tuple[Product, dict]] = []
+    all_update_fields: list[str] = []
     for p in products:
         pdict = {
             "id": p.id,
@@ -186,10 +192,27 @@ async def apply_defaults(
         updates = defaults_service.build_updates_for_product(pdict, current_user.id)
         if not updates:
             continue
-        for k, v in updates.items():
-            setattr(p, k, v)
-            field_counter[k] = field_counter.get(k, 0) + 1
-        updated += 1
+        planned.append((p, updates))
+        for k in updates:
+            if k not in all_update_fields:
+                all_update_fields.append(k)
+
+    # ✅ v4: undo-снапшот ПРЕЖНИХ значений дозаполненных полей (до setattr!)
+    if planned:
+        await write_edit_snapshot(
+            db,
+            current_user.id,
+            [p for p, _ in planned],
+            all_update_fields,
+            action="defaults",
+            label=f"Дозаполнение дефолтами: {len(planned)} тов. ({', '.join(all_update_fields)})",
+        )
+
+        for p, updates in planned:
+            for k, v in updates.items():
+                setattr(p, k, v)
+                field_counter[k] = field_counter.get(k, 0) + 1
+            updated += 1
 
     if updated:
         await db.commit()

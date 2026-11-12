@@ -9,12 +9,36 @@ id, name, price, brand, mapped_category (ORM-модель Product подходи
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 # Ограничения повторяют валидацию в bulk-update на конце пользователя:
 # наценка -100% обнуляет цену (недопустимо), фикс-цена должна быть > 0.
 MIN_PRICE_PERCENT = -99.99  # softer guard; жёсткую проверку делает роутер
 MAX_PRICE_PERCENT = 10_000
+
+# ✅ v4 (аудит-лог + undo): колонки Product, которые умеет снапшотить undo.
+# Любая операция правки передаёт список РЕАЛЬНО затронутых полей — снапшот
+# сохраняет ровно их, undo восстанавливает ровно их.
+SNAPSHOT_FIELDS = (
+    "name",
+    "price",
+    "brand",
+    "mapped_category",
+    "vat_rate",
+    "okpd_code",
+    "barcode",
+    "weight_grams",
+    "package_weight_grams",
+    "package_width_mm",
+    "package_height_mm",
+    "package_length_mm",
+    "units_per_item",
+    "stock",
+)
+
+# Алиасы «имя поля в API» -> «колонка Product» (легаси и удобные названия)
+SNAPSHOT_ALIASES = {"category": "mapped_category", "okpd": "okpd_code"}
 
 
 def _new_price(base: float, price: float | None, price_percent: float | None) -> float | None:
@@ -83,30 +107,40 @@ def compute_preview(
 
 def build_snapshot_payload(products: list[Any], fields: list[str]) -> dict:
     """
-    Снапшот ТЕКУЩИХ значений перед изменением (для undo).
+    ✅ v4: снапшот ТЕКУЩИХ значений перечисленных полей перед изменением (для undo).
 
+    Поле "category" (из bulk-update) сохраняется как mapped_category.
+    Неизвестные поля (price_percent и пр.) пропускаются — их нечего откатывать.
     Decimal из ORM конвертируем в float — JSON не умеет Decimal.
     """
+    snap_fields: list[str] = []
+    for f in fields:
+        key = SNAPSHOT_ALIASES.get(f, f)
+        if key in SNAPSHOT_FIELDS and key not in snap_fields:
+            snap_fields.append(key)
+
     items = []
     for p in products:
-        items.append(
-            {
-                "id": p.id,
-                "price": float(p.price) if p.price is not None else None,
-                "brand": p.brand,
-                "mapped_category": p.mapped_category,
-            }
-        )
-    return {"fields": list(fields), "items": items}
+        item: dict[str, Any] = {"id": p.id}
+        for key in snap_fields:
+            val = getattr(p, key, None)
+            if isinstance(val, Decimal):
+                val = float(val)
+            item[key] = val
+        items.append(item)
+    return {"fields": snap_fields, "items": items}
 
 
 def apply_snapshot(products_by_id: dict[int, Any], snapshot: dict) -> dict:
     """
-    Восстановление значений из снапшота (undo).
+    ✅ v4: восстановление значений из снапшота (undo) — только тех полей,
+    что записаны в snapshot["fields"].
 
-    Товары, удалённые после снапшота, пропускаются (по ним не падаем).
-    Возвращает {"restored": N, "skipped_missing": M}.
+    Легаси-снапшоты (до v4) без списка fields восстанавливают цену/бренд/
+    категорию — как раньше. Товары, удалённые после снапшота, пропускаются.
+    Возвращает {"restored": N, "skipped_missing": M, "fields": [...]}.
     """
+    fields = snapshot.get("fields") or []
     restored = 0
     skipped = 0
     for item in snapshot.get("items", []):
@@ -114,12 +148,19 @@ def apply_snapshot(products_by_id: dict[int, Any], snapshot: dict) -> dict:
         if p is None:
             skipped += 1
             continue
-        price = item.get("price")
-        p.price = price if price is not None else None
-        p.brand = item.get("brand")
-        p.mapped_category = item.get("mapped_category")
+        if fields:
+            for f in fields:
+                key = SNAPSHOT_ALIASES.get(f, f)
+                if key in item:
+                    setattr(p, key, item[key])
+        else:
+            # Легаси-формат (до v4): три фиксированных поля
+            price = item.get("price")
+            p.price = price if price is not None else None
+            p.brand = item.get("brand")
+            p.mapped_category = item.get("mapped_category")
         restored += 1
-    return {"restored": restored, "skipped_missing": skipped}
+    return {"restored": restored, "skipped_missing": skipped, "fields": fields}
 
 
 def escape_like(q: str) -> str:

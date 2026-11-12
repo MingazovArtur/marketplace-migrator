@@ -18,14 +18,14 @@ import logging
 import os
 import re as _re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
 import redis
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -171,6 +171,10 @@ def _product_to_dict(p: Product) -> dict:
             {"sku": v.sku, "size": v.size, "color": v.color, "price": v.price}
             for v in (p.variants or [])
         ],
+        # ✅ v4: для инкрементального экспорта (сводка «новые/изменённые»)
+        "last_export_at": getattr(p, "last_export_at", None),
+        "last_export_platform": getattr(p, "last_export_platform", None),
+        "updated_at": getattr(p, "updated_at", None),
     }
 
 
@@ -180,8 +184,13 @@ async def _get_products_for_export_async(
     status: str,
     selected_ids: list[int] | None = None,
     limit: int = 10000,
+    changed_since: bool = False,
 ) -> list[dict]:
-    """Асинхронная выборка товаров для экспорта с неблокирующей подгрузкой атрибутов и вариаций."""
+    """Асинхронная выборка товаров для экспорта с неблокирующей подгрузкой атрибутов и вариаций.
+
+    ✅ v4: changed_since=True — только «инкремент»: товары, изменившиеся после
+    последней выгрузки (updated_at > last_export_at) или ещё не выгружавшиеся.
+    """
     is_admin = getattr(current_user, "role", "") == "admin"
     stmt = (
         select(Product)
@@ -200,9 +209,58 @@ async def _get_products_for_export_async(
     elif status and status != "all":
         stmt = stmt.where(Product.status == status)
 
+    if changed_since:
+        stmt = stmt.where(
+            (Product.last_export_at.is_(None))
+            | (Product.updated_at > Product.last_export_at)
+        )
+
     res = await db.execute(stmt)
     products = res.scalars().all()
     return [_product_to_dict(p) for p in products]
+
+
+async def _incremental_stats(products: list) -> dict:
+    """✅ v4: сводка для фильтра «только изменённые»: новые/изменённые/без изменений.
+
+    Принимает ORM-объекты или словари _product_to_dict (в словаре поля
+    last_export_at/updated_at добавлены v4).
+    """
+    def _get(p, key):
+        return p.get(key) if isinstance(p, dict) else getattr(p, key, None)
+
+    new = changed = unchanged = 0
+    for p in products:
+        last_exp = _get(p, "last_export_at")
+        updated = _get(p, "updated_at")
+        if last_exp is None:
+            new += 1
+        elif updated and updated > last_exp:
+            changed += 1
+        else:
+            unchanged += 1
+    return {"new": new, "changed": changed, "unchanged": unchanged}
+
+
+async def _mark_exported(db: AsyncSession, product_ids: list[int], platform: str) -> None:
+    """✅ v4: зафиксировать факт выгрузки (для последующих инкрементальных экспортов).
+
+    Не бросает исключений: пометка — вспомогательная операция, файл уже отдан.
+    """
+    if not product_ids:
+        return
+    try:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        res = await db.execute(
+            update(Product)
+            .where(Product.id.in_(product_ids))
+            .values(last_export_at=now, last_export_platform=platform)
+        )
+        await db.commit()
+        logger.info(f"📤 mark_exported: {res.rowcount} товаров помечены выгруженными на {platform}")
+    except Exception as e:  # noqa: BLE001
+        await db.rollback()
+        logger.warning(f"Не удалось пометить товары выгруженными: {e}")
 
 
 async def _load_specs_by_category_async(
@@ -398,6 +456,7 @@ async def export_preview(
     status: str = "success",
     product_id: int = Query(None),
     product_ids: str = Query(None),
+    changed_since: bool = Query(False, description="✅ v4: только изменённые с последней выгрузки"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -405,7 +464,9 @@ async def export_preview(
         raise HTTPException(status_code=404, detail=f"Платформа '{platform}' не найдена")
 
     ids = _parse_product_ids(product_id, product_ids)
-    products = await _get_products_for_export_async(db, current_user, status, selected_ids=ids)
+    products = await _get_products_for_export_async(
+        db, current_user, status, selected_ids=ids, changed_since=changed_since
+    )
     if not products:
         return {
             "success": True,
@@ -418,13 +479,25 @@ async def export_preview(
                 "with_errors": 0,
                 "issues": [],
             },
+            "incremental": {"new": 0, "changed": 0, "unchanged": 0, "enabled": changed_since},
         }
 
     validation = validate_products(products, platform)
     rows = build_rows(products[:10], platform)
     columns = list(rows[0].keys()) if rows else []
 
-    return {"success": True, "columns": columns, "rows": rows, "validation": validation}
+    # ✅ v4: сводка инкремента (новые/изменённые/без изменений) — для превью
+    all_match = await _get_products_for_export_async(db, current_user, status, selected_ids=ids)
+    incremental = await _incremental_stats(all_match)
+    incremental["enabled"] = changed_since
+
+    return {
+        "success": True,
+        "columns": columns,
+        "rows": rows,
+        "validation": validation,
+        "incremental": incremental,
+    }
 
 
 # ==================== ШАБЛОН ВЫГРУЗКИ ====================
@@ -518,6 +591,7 @@ async def export_for_platform(
     status: str = "success",
     product_id: int = Query(None),
     product_ids: str = Query(None),
+    changed_since: bool = Query(False, description="✅ v4: только изменённые с последней выгрузки"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -525,7 +599,15 @@ async def export_for_platform(
         raise HTTPException(status_code=404, detail=f"Платформа '{platform}' не найдена")
 
     ids = _parse_product_ids(product_id, product_ids)
-    products = await _get_products_for_export_async(db, current_user, status, selected_ids=ids)
+    products = await _get_products_for_export_async(
+        db, current_user, status, selected_ids=ids, changed_since=changed_since
+    )
+
+    if changed_since and not products:
+        raise HTTPException(
+            status_code=400,
+            detail="Нет новых/изменённых товаров с последней выгрузки — выгружать нечего",
+        )
 
     valid_products, skipped = [], []
     for p in products:
@@ -560,6 +642,10 @@ async def export_for_platform(
         failed=len(skipped),
         errors=[{"product_id": i, "error": "исключён: ошибки валидации"} for i in skipped[:10]],
     )
+
+    # ✅ v4: пометить выгруженные товары (для «только изменённые»)
+    await _mark_exported(db, [p["id"] for p in valid_products], platform)
+
     return StreamingResponse(
         output,
         media_type=XLSX_MIME,
@@ -576,6 +662,7 @@ async def validate_export(
     status: str = "all",
     product_id: int = Query(None),
     product_ids: str = Query(None),
+    changed_since: bool = Query(False, description="✅ v4: только изменённые с последней выгрузки"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -597,8 +684,27 @@ async def validate_export(
     res = await db.execute(stmt)
     products = res.scalars().all()
 
+    # ✅ v4: сводка инкремента до фильтрации — для чекбокса «только изменённые»
+    incremental = await _incremental_stats(products)
+    incremental["enabled"] = changed_since
+
+    if changed_since:
+        products = [
+            p
+            for p in products
+            if p.last_export_at is None
+            or (p.updated_at and p.updated_at > p.last_export_at)
+        ]
+
     if not products:
-        return {"total": 0, "errors": 0, "warnings": 0, "issues": [], "missing_specs": []}
+        return {
+            "total": 0,
+            "errors": 0,
+            "warnings": 0,
+            "issues": [],
+            "missing_specs": [],
+            "incremental": incremental,
+        }
 
     product_dicts = [_product_to_dict(p) for p in products]
 
@@ -620,6 +726,7 @@ async def validate_export(
 
     result = validate_products_by_specs(product_dicts, specs_by_category, platform)
     result["missing_specs"] = missing_specs
+    result["incremental"] = incremental
     return result
 
 
@@ -697,6 +804,7 @@ async def export_xlsx_v2(
     product_id: int = Query(None),
     product_ids: str = Query(None),
     use_celery: bool = Query(False, description="Принудительно собрать файл в очереди xlsx_export"),
+    changed_since: bool = Query(False, description="✅ v4: только изменённые с последней выгрузки"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -723,6 +831,13 @@ async def export_xlsx_v2(
     elif status != "all":
         stmt = stmt.where(Product.status == status)
 
+    # ✅ v4: инкрементальный фильтр — только новые/изменённые с прошлой выгрузки
+    if changed_since:
+        stmt = stmt.where(
+            (Product.last_export_at.is_(None))
+            | (Product.updated_at > Product.last_export_at)
+        )
+
     res = await db.execute(stmt)
     products = res.scalars().all()
 
@@ -730,7 +845,11 @@ async def export_xlsx_v2(
         detail = (
             f"Выбранные товары ({ids}) не найдены"
             if ids
-            else f"Нет товаров со статусом '{status}'. Импортируйте товары и выполните миграцию."
+            else (
+                "Нет новых/изменённых товаров с последней выгрузки — выгружать нечего"
+                if changed_since
+                else f"Нет товаров со статусом '{status}'. Импортируйте товары и выполните миграцию."
+            )
         )
         raise HTTPException(status_code=400, detail=detail)
 
@@ -758,6 +877,10 @@ async def export_xlsx_v2(
     )
 
     media = "application/zip" if filename.endswith(".zip") else XLSX_MIME
+
+    # ✅ v4: пометить выгруженные товары (для последующих «только изменённые»)
+    await _mark_exported(db, [p["id"] for p in product_dicts], platform)
+
     return Response(
         content=data,
         media_type=media,

@@ -6,7 +6,9 @@ import time
 
 from celery_app import celery_app
 from core.platforms import PLATFORM_CONFIG, PRICE_RULES
+from database.models import User
 from database.repository import op_log, repo, stats_repo
+from database.session import SessionLocal
 from services import defaults_service
 from services.platform_utils import detect_platform
 from tasks.matching import (
@@ -18,6 +20,50 @@ from tasks.matching import (
 from core.time import utcnow
 
 logger = logging.getLogger(__name__)
+
+
+def _notify_batch_done(
+    user_id: int,
+    target_platform: str,
+    total: int,
+    success_count: int,
+    error_count: int,
+    duration_ms: int,
+    errors: list,
+) -> None:
+    """
+    ✅ v5: письмо «пакетная миграция завершена» — если у пользователя включены
+    уведомления и подтверждён email. Ошибка отправки не роняет задачу.
+    """
+    try:
+        with SessionLocal() as db:
+            user = db.get(User, user_id)
+            if (
+                not user
+                or not user.email
+                or not user.email_verified_at
+                or user.notify_batch_done is False
+            ):
+                return
+            username = user.username
+            to_email = user.email
+
+        from services.email_service import send_batch_migration_email_sync
+
+        send_batch_migration_email_sync(
+            to_email=to_email,
+            username=username,
+            platform_name=PLATFORM_CONFIG.get(target_platform, {}).get(
+                "name", target_platform
+            ),
+            total=total,
+            success=success_count,
+            errors=error_count,
+            duration_ms=duration_ms,
+            error_sample=errors[:5],
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"📧 Уведомление о пакете не отправлено (user={user_id}): {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +506,17 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
         )
     except Exception as e:
         logger.warning(f"Не удалось записать статистику пакета: {e}")
+
+    # ✅ v5: email о завершении пакета (если включён у пользователя)
+    _notify_batch_done(
+        user_id=user_id,
+        target_platform=target_platform,
+        total=total,
+        success_count=success_count,
+        error_count=error_count,
+        duration_ms=duration_ms,
+        errors=errors,
+    )
 
     return {
         "status": "completed",

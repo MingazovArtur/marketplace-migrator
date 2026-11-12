@@ -11,6 +11,32 @@ const TYPE_META = {
   media: { label: 'Медиа', icon: 'photo' },
 };
 
+// ✅ v4: типы операций правки товаров (аудит-лог + undo)
+const EDIT_ACTION_META = {
+  bulk_update: { label: 'Массовое обновление', icon: 'edit' },
+  edit: { label: 'Правка товара', icon: 'edit' },
+  logistics: { label: 'Логистика', icon: 'edit' },
+  tnved: { label: 'ТН ВЭД', icon: 'search' },
+  defaults: { label: 'Дозаполнение дефолтами', icon: 'edit' },
+};
+
+const EDIT_FIELD_LABELS = {
+  name: 'Название',
+  price: 'Цена',
+  brand: 'Бренд',
+  mapped_category: 'Категория',
+  vat_rate: 'НДС',
+  okpd_code: 'ТН ВЭД',
+  barcode: 'Штрихкод',
+  weight_grams: 'Вес',
+  package_weight_grams: 'Вес упаковки',
+  package_width_mm: 'Ширина',
+  package_height_mm: 'Высота',
+  package_length_mm: 'Длина',
+  stock: 'Остаток',
+  units_per_item: 'Ед. в товаре',
+};
+
 const STATUS_META = {
   success: { label: 'Успешно', cls: 'badge-success' },
   partial: { label: 'Частично', cls: 'badge-pending' },
@@ -39,6 +65,40 @@ const HistoryView = () => {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
+  // ✅ v4: аудит-лог правок товаров + undo
+  const [editHistory, setEditHistory] = useState([]);
+  const [undoBusyId, setUndoBusyId] = useState(null);
+  const [editMsg, setEditMsg] = useState('');
+
+  const loadEditHistory = useCallback(async () => {
+    try {
+      const d = await api.getEditHistory(20);
+      setEditHistory(d.history || []);
+    } catch {
+      setEditHistory([]);
+    }
+  }, []);
+
+  const handleUndo = useCallback(
+    async (snapshotId) => {
+      if (undoBusyId) return;
+      setUndoBusyId(snapshotId);
+      setEditMsg('');
+      try {
+        const r = await api.bulkUndoProducts(snapshotId);
+        setEditMsg(
+          `↩ Отменено: восстановлено ${r.restored} из ${r.restored + (r.skipped_missing || 0)}` +
+            (r.label ? ` — ${r.label}` : '')
+        );
+        await loadEditHistory();
+      } catch (e) {
+        setEditMsg('❌ ' + e.message);
+      } finally {
+        setUndoBusyId(null);
+      }
+    },
+    [undoBusyId, loadEditHistory]
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -56,6 +116,10 @@ const HistoryView = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    loadEditHistory();
+  }, [loadEditHistory]);
 
   const renderEmptyState = () => {
     // Сценарий 1: фильтр активен, но по нему ничего не найдено
@@ -114,6 +178,85 @@ const HistoryView = () => {
           </Button>
         ))}
       </div>
+
+      {/* ✅ v4: аудит-лог правок товаров (undo доступен для неотменённых) */}
+      {editHistory.length > 0 && (
+        <div className="card" style={{ padding: '0.9rem 1rem', marginBottom: '0.9rem' }}>
+          <h4
+            style={{ margin: '0 0 0.6rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+          >
+            <Icon name="edit" size={16} /> История изменений товаров
+          </h4>
+          {editMsg && (
+            <div
+              className="alert alert-success"
+              style={{ marginBottom: '0.6rem', fontSize: '0.85rem' }}
+            >
+              <div>{editMsg}</div>
+            </div>
+          )}
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {editHistory.slice(0, 10).map((e) => {
+              const meta = EDIT_ACTION_META[e.action] || { label: e.action, icon: 'edit' };
+              return (
+                <li
+                  key={e.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6rem',
+                    padding: '0.45rem 0.6rem',
+                    marginBottom: '0.3rem',
+                    background: 'var(--bg-secondary)',
+                    borderRadius: '8px',
+                    opacity: e.undone ? 0.55 : 1,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <span className="type-badge" style={{ fontSize: '0.8rem' }}>
+                    <Icon name={meta.icon} size={14} /> {meta.label}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 200, fontSize: '0.85rem' }}>
+                    {e.label || (
+                      <>
+                        {(e.fields || []).map((f) => EDIT_FIELD_LABELS[f] || f).join(', ')} ·{' '}
+                        {e.items_count} тов.
+                      </>
+                    )}
+                  </span>
+                  <span
+                    style={{
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.8rem',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {formatDate(e.created_at)}
+                  </span>
+                  {e.undone ? (
+                    <span
+                      className="badge badge-pending"
+                      title="Значения восстановлены к состоянию до операции"
+                    >
+                      Отменено
+                    </span>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="small"
+                      onClick={() => handleUndo(e.id)}
+                      disabled={!!undoBusyId}
+                      title="Вернуть прежние значения полей"
+                    >
+                      ↩ Отменить
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {/* Таблица истории */}
       <div className="table-container">

@@ -27,8 +27,7 @@ const getHeaders = () => ({
 const getAuthHeaders = () => ({ ...csrfHeaders() });
 
 // fetch с куками (единая точка)
-const doFetch = (url, options = {}) =>
-  fetch(url, { credentials: 'include', ...options });
+const doFetch = (url, options = {}) => fetch(url, { credentials: 'include', ...options });
 
 function extractErrorMessage(data, fallback) {
   if (!data) return fallback;
@@ -114,6 +113,25 @@ export const api = {
     return res.json();
   },
 
+  /* ✅ v5: настройки уведомлений (письмо о завершении пакетной миграции) */
+  getNotifications: async () => {
+    const res = await doFetch(`${API_URL}/auth/notifications`, { headers: getHeaders() });
+    if (!res.ok)
+      throw new Error(await safeError(res, 'Не удалось загрузить настройки уведомлений'));
+    return res.json();
+  },
+
+  updateNotifications: async (payload) => {
+    const res = await doFetch(`${API_URL}/auth/notifications`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok)
+      throw new Error(await safeError(res, 'Не удалось сохранить настройки уведомлений'));
+    return res.json();
+  },
+
   logout: async () => {
     // Куки чистит backend (Set-Cookie с истечением); CSRF-заголовок обязателен
     try {
@@ -190,7 +208,9 @@ export const api = {
     if (params.limit !== undefined) q.append('limit', params.limit);
 
     const qs = q.toString();
-    const res = await doFetch(`${API_URL}/products${qs ? '?' + qs : ''}`, { headers: getHeaders() });
+    const res = await doFetch(`${API_URL}/products${qs ? '?' + qs : ''}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить товары'));
     return res.json();
   },
@@ -256,13 +276,81 @@ export const api = {
     return res.json();
   },
 
-  /* Отмена последнего массового обновления (undo из снапшота) */
-  bulkUndoProducts: async () => {
+  /* ✅ v4: отмена операции правки — последней или по snapshot_id (аудит-лог) */
+  bulkUndoProducts: async (snapshotId = null) => {
     const res = await doFetch(`${API_URL}/products/bulk-undo`, {
       method: 'POST',
       headers: getHeaders(),
+      body: JSON.stringify(snapshotId ? { snapshot_id: snapshotId } : {}),
     });
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось отменить обновление'));
+    return res.json();
+  },
+
+  /* ✅ v4: лента последних операций правки товаров (аудит-лог) */
+  getEditHistory: async (limit = 20) => {
+    const res = await doFetch(`${API_URL}/products/edit-history?limit=${enc(limit)}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить историю изменений'));
+    return res.json();
+  },
+
+  /* ✅ v4: массовый подбор ТН ВЭД — кандидаты по выбранным товарам */
+  tnvedBatchSuggest: async (productIds) => {
+    const res = await doFetch(`${API_URL}/tnved/batch-suggest`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ product_ids: productIds }),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось подобрать ТН ВЭД'));
+    return res.json();
+  },
+
+  /* ✅ v4: массовое применение кода ТН ВЭД к выбранным товарам (undo-able) */
+  tnvedBatchApply: async (productIds, code) => {
+    const res = await doFetch(`${API_URL}/tnved/batch-apply`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ product_ids: productIds, code }),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось применить код ТН ВЭД'));
+    return res.json();
+  },
+
+  /* ==================== ✅ v4: профили миграции ==================== */
+
+  getMigrationProfiles: async () => {
+    const res = await doFetch(`${API_URL}/migration-profiles`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить профили'));
+    return res.json();
+  },
+
+  saveMigrationProfile: async (payload) => {
+    const res = await doFetch(`${API_URL}/migration-profiles`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось сохранить профиль'));
+    return res.json();
+  },
+
+  deleteMigrationProfile: async (profileId) => {
+    const res = await doFetch(`${API_URL}/migration-profiles/${enc(profileId)}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось удалить профиль'));
+    return res.json();
+  },
+
+  applyMigrationProfile: async (profileId) => {
+    const res = await doFetch(`${API_URL}/migration-profiles/${enc(profileId)}/apply`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось применить профиль'));
     return res.json();
   },
 
@@ -558,9 +646,15 @@ export const api = {
     window.URL.revokeObjectURL(url);
   },
 
-  exportPreview: async (platform, status = 'success', productIdOrIds = null) => {
+  exportPreview: async (
+    platform,
+    status = 'success',
+    productIdOrIds = null,
+    changedSince = false
+  ) => {
     const q = new URLSearchParams();
     if (status) q.append('status', status);
+    if (changedSince) q.append('changed_since', 'true');
     if (Array.isArray(productIdOrIds) && productIdOrIds.length > 0) {
       q.append('product_ids', productIdOrIds.join(','));
     } else if (productIdOrIds) {
@@ -603,9 +697,10 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
-  validateExport: async (platform, status = 'all', productIdOrIds = null) => {
+  validateExport: async (platform, status = 'all', productIdOrIds = null, changedSince = false) => {
     const q = new URLSearchParams();
     if (status) q.append('status', status);
+    if (changedSince) q.append('changed_since', 'true');
     if (Array.isArray(productIdOrIds) && productIdOrIds.length > 0) {
       q.append('product_ids', productIdOrIds.join(','));
     } else if (productIdOrIds) {
@@ -618,9 +713,15 @@ export const api = {
     return res.json();
   },
 
-  exportXlsxV2: async (platform, status = 'success', productIdOrIds = null) => {
+  exportXlsxV2: async (
+    platform,
+    status = 'success',
+    productIdOrIds = null,
+    changedSince = false
+  ) => {
     const q = new URLSearchParams();
     if (status) q.append('status', status);
+    if (changedSince) q.append('changed_since', 'true');
     if (Array.isArray(productIdOrIds) && productIdOrIds.length > 0) {
       q.append('product_ids', productIdOrIds.join(','));
     } else if (productIdOrIds) {
@@ -729,10 +830,9 @@ export const api = {
   },
 
   listOzonTemplates: async (platform = 'ozon') => {
-    const res = await doFetch(
-      `${API_URL}/export/ozon-template/list?platform=${enc(platform)}`,
-      { headers: getHeaders() }
-    );
+    const res = await doFetch(`${API_URL}/export/ozon-template/list?platform=${enc(platform)}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) return { templates: [] };
     return res.json();
   },

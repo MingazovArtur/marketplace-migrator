@@ -39,6 +39,8 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     role = Column(String, default="user", nullable=False)  # "user" или "admin"
+    # ✅ v5: слать ли письмо о завершении пакетной миграции
+    notify_batch_done = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=utcnow)
 
     products = relationship("Product", back_populates="owner")
@@ -133,6 +135,12 @@ class Product(Base):
     sku_count = Column(Integer, default=1)
     stock = Column(Integer, nullable=True)  # ← ДОБАВЛЕНО
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)  # ← ДОБАВЛЕНО
+
+    # ✅ v4 (инкрементальный экспорт): когда и на какую площадку товар
+    # выгружался в последний раз. «Только изменённые» = updated_at > last_export_at
+    # либо товар ещё не выгружался вовсе.
+    last_export_at = Column(DateTime, nullable=True)
+    last_export_platform = Column(String, nullable=True)
 
     owner = relationship("User", back_populates="products")
     attributes = relationship(
@@ -329,16 +337,56 @@ class ExportDefault(Base):
     )
 
 
+class MigrationProfile(Base):
+    """
+    ✅ v4: профиль миграции — типовой набор «площадка + дефолты», чтобы
+    повторять частую миграцию в один клик.
+
+    Применение (POST /migration-profiles/{id}/apply) проставляет сохранённые
+    значения как ГЛОБАЛЬНЫЕ дефолты пользователя (ExportDefault, category=NULL)
+    и возвращает площадку — фронт подставляет её в окно миграции.
+    """
+
+    __tablename__ = "migration_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name = Column(String(200), nullable=False)
+    platform = Column(String, nullable=False)  # ozon | wildberries | yandex | ...
+    # Снимок дефолтов на момент создания профиля (те же поля, что ExportDefault)
+    vat_rate = Column(String, nullable=True)
+    okpd_code = Column(String, nullable=True)
+    package_weight_grams = Column(Integer, nullable=True)
+    package_width_mm = Column(Integer, nullable=True)
+    package_height_mm = Column(Integer, nullable=True)
+    package_length_mm = Column(Integer, nullable=True)
+    brand = Column(String, nullable=True)
+    marking = Column(String, nullable=True, default="Нет")
+    price_default = Column(Numeric(10, 2), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    user = relationship("User", backref="migration_profiles")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_migration_profile_user_name"),
+    )
+
+
 class BulkEditSnapshot(Base):
     """
-    Снапшот значений перед массовым обновлением (undo «Отменить последнее изменение»).
+    Снапшот значений перед операцией правки товаров (undo «Отменить»).
 
-    Пишется в bulk-update: для каждого затронутого товара сохраняются его прежние
-    цена/бренд/категория назначения. POST /products/bulk-undo восстанавливает
-    значения из ПОСЛЕДНЕГО снапшота пользователя.
+    ✅ v4 (аудит-лог + undo): пишется ЛЮБОЙ правкой — массовым обновлением,
+    одиночной правкой, логистикой, массовым подбором ТН ВЭД, дозаполнением
+    дефолтов. Для каждого затронутого товара сохраняются прежние значения
+    РОВНО тех полей, которые менялись (payload.fields). POST /products/undo
+    восстанавливает значения из выбранного (или последнего неотменённого)
+    снапшота.
 
-    Ротация: хранятся последние SNAPSHOTS_PER_USER (см. routers/products.py) —
-    старые удаляются, чтобы таблица не росла бесконечно.
+    Ротация: хранятся последние SNAPSHOTS_PER_USER (см. services/edit_history.py)
+    — старые удаляются, чтобы таблица не росла бесконечно.
     """
 
     __tablename__ = "bulk_edit_snapshots"
@@ -348,8 +396,14 @@ class BulkEditSnapshot(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     created_at = Column(DateTime, default=utcnow)
-    # {"fields": ["price", "brand", "category"], "items": [
-    #     {"id": 1, "price": 1200.0, "brand": "X", "mapped_category": "Y"}, ...]}
+    # Тип операции для истории: bulk_update | edit | logistics | tnved | defaults
+    action = Column(String(40), nullable=False, default="bulk_update")
+    # Человекочитаемое описание для списка «История изменений»
+    label = Column(String(300), nullable=True)
+    # Отменён ли снапшот (undo прошёл) — остаётся в истории как совершённый
+    undone = Column(Boolean, nullable=False, default=False)
+    # {"fields": ["price", "okpd_code"], "items": [
+    #     {"id": 1, "price": 1200.0, "okpd_code": "6109"}, ...]}
     payload = Column(JSON, nullable=False)
 
     user = relationship("User", backref="bulk_edit_snapshots")

@@ -200,3 +200,52 @@ async def send_welcome_email(user: User) -> bool:
         subject=f"Добро пожаловать в {settings.SMTP_FROM_NAME}!",
         html_body=html,
     )
+
+
+# ============================================================
+# ✅ v5: уведомление о завершении пакетной миграции
+# ============================================================
+
+async def send_batch_migration_email(
+    to_email: str,
+    username: str,
+    platform_name: str,
+    total: int,
+    success: int,
+    errors: int,
+    duration_ms: int,
+    error_sample: list[dict] | None = None,
+) -> bool:
+    """Письмо «пакетная миграция завершена» (итоги + первые ошибки)."""
+    html = _render(
+        "batch_done.html",
+        {
+            "username": username,
+            "platform_name": platform_name,
+            "total": total,
+            "success": success,
+            "errors": errors,
+            "duration_sec": max(1, round((duration_ms or 0) / 1000)),
+            "error_sample": (error_sample or [])[:5],
+            "login_url": f"{settings.PUBLIC_URL}/#/login",
+            "service_name": settings.SMTP_FROM_NAME,
+        },
+    )
+    status_word = "успешно" if errors == 0 else f"с ошибками ({errors})"
+    return await _send_email(
+        to_email=to_email,
+        subject=f"Пакетная миграция завершена: {success} из {total} — {settings.SMTP_FROM_NAME}",
+        html_body=html,
+    )
+
+
+def send_batch_migration_email_sync(**context) -> bool:
+    """
+    Синхронная обёртка для Celery-задач (worker — синхронный процесс).
+    Никогда не бросает исключений: письмо не должно ронять миграцию.
+    """
+    try:
+        return asyncio.run(send_batch_migration_email(**context))
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"📧 ❌ Не удалось отправить письмо о пакете: {e}")
+        return False

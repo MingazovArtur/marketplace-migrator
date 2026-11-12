@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Button from '../common/Button';
 import Icon from '../icons';
 import { PLATFORMS } from '../../utils/platformUtils';
+import { api } from '../../api';
 
 const normalize = (p) => {
   const total = p?.total ?? 0;
@@ -40,6 +41,93 @@ const BatchMigrateModal = ({
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
   const exportedRef = useRef(false);
+
+  // ✅ v4: профили миграции (площадка + дефолты)
+  const [profiles, setProfiles] = useState([]);
+  const [selectedProfileId, setSelectedProfileId] = useState('');
+  const [profileMsg, setProfileMsg] = useState('');
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [showSaveProfile, setShowSaveProfile] = useState(false);
+  const [newProfileName, setNewProfileName] = useState('');
+
+  // Загрузка профилей при открытии
+  useEffect(() => {
+    if (!isOpen) return;
+    setProfiles([]);
+    setSelectedProfileId('');
+    setProfileMsg('');
+    setShowSaveProfile(false);
+    setNewProfileName('');
+    api
+      .getMigrationProfiles()
+      .then((d) => setProfiles(d.profiles || []))
+      .catch(() => setProfiles([]));
+  }, [isOpen]);
+
+  const applyProfile = useCallback(async (id) => {
+    if (!id) {
+      setSelectedProfileId('');
+      setProfileMsg('');
+      return;
+    }
+    setProfileBusy(true);
+    setProfileMsg('');
+    try {
+      const res = await api.applyMigrationProfile(id);
+      setPlatform(res.platform);
+      setSelectedProfileId(id);
+      const filled = Object.entries(res.defaults || {}).filter(([, v]) => v != null).length;
+      setProfileMsg(
+        `Профиль применён: площадка ${res.platform}, дефолтов задано ${filled}. ` +
+          'Пустые поля товаров дозаполнит миграция.'
+      );
+    } catch (e) {
+      setProfileMsg('Не удалось применить профиль: ' + e.message);
+    } finally {
+      setProfileBusy(false);
+    }
+  }, []);
+
+  const saveProfile = useCallback(async () => {
+    const name = newProfileName.trim();
+    if (!name) return;
+    setProfileBusy(true);
+    try {
+      const res = await api.saveMigrationProfile({ name, platform });
+      setProfiles((prev) => {
+        const rest = prev.filter((p) => p.name !== name);
+        return [...rest, res.profile].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setSelectedProfileId(res.profile.id);
+      setShowSaveProfile(false);
+      setNewProfileName('');
+      setProfileMsg(
+        res.created
+          ? 'Профиль создан: текущая площадка + ваши глобальные дефолты.'
+          : 'Профиль обновлён.'
+      );
+    } catch (e) {
+      setProfileMsg('Не удалось сохранить профиль: ' + e.message);
+    } finally {
+      setProfileBusy(false);
+    }
+  }, [newProfileName, platform]);
+
+  const removeProfile = useCallback(
+    async (id) => {
+      setProfileBusy(true);
+      try {
+        await api.deleteMigrationProfile(id);
+        setProfiles((prev) => prev.filter((p) => p.id !== id));
+        if (selectedProfileId === id) setSelectedProfileId('');
+      } catch (e) {
+        setProfileMsg('Не удалось удалить профиль: ' + e.message);
+      } finally {
+        setProfileBusy(false);
+      }
+    },
+    [selectedProfileId]
+  );
 
   useEffect(() => {
     if (isOpen) {
@@ -137,6 +225,91 @@ const BatchMigrateModal = ({
         {/* Шаг 1: параметры */}
         {!batch && (
           <>
+            {/* ✅ v4: быстрый старт по профилю */}
+            <div className="card" style={{ padding: '0.8rem 1rem', marginBottom: '0.9rem' }}>
+              <h4
+                style={{
+                  margin: '0 0 0.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                <Icon name="migrate" size={16} /> Профиль миграции
+              </h4>
+              <div
+                style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}
+              >
+                <select
+                  className="form-input"
+                  style={{ maxWidth: 260 }}
+                  value={selectedProfileId}
+                  onChange={(e) => applyProfile(e.target.value)}
+                  disabled={profileBusy}
+                >
+                  <option value="">— без профиля —</option>
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} → {p.platform}
+                    </option>
+                  ))}
+                </select>
+                {selectedProfileId && (
+                  <Button
+                    variant="outline"
+                    size="small"
+                    onClick={() => removeProfile(selectedProfileId)}
+                    disabled={profileBusy}
+                    title="Удалить выбранный профиль"
+                  >
+                    <Icon name="trash" size={14} />
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="small"
+                  onClick={() => setShowSaveProfile((s) => !s)}
+                  disabled={profileBusy}
+                  title="Сохранить текущую площадку + ваши глобальные дефолты как профиль"
+                >
+                  <Icon name="template" size={14} /> Сохранить как профиль
+                </Button>
+              </div>
+              {showSaveProfile && (
+                <div
+                  style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}
+                >
+                  <input
+                    className="form-input"
+                    style={{ maxWidth: 260 }}
+                    type="text"
+                    placeholder="Название профиля (например: Распродажа на Ozon)"
+                    value={newProfileName}
+                    onChange={(e) => setNewProfileName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
+                  />
+                  <Button
+                    size="small"
+                    onClick={saveProfile}
+                    disabled={profileBusy || !newProfileName.trim()}
+                  >
+                    Сохранить
+                  </Button>
+                </div>
+              )}
+              {profileMsg && (
+                <p
+                  style={{
+                    margin: '0.5rem 0 0',
+                    color: 'var(--text-secondary)',
+                    fontSize: '0.8rem',
+                  }}
+                >
+                  {profileMsg}
+                </p>
+              )}
+            </div>
+
             <label className="form-label">Целевая площадка:</label>
             <div className="platform-selector">
               {PLATFORMS.map((p) => (

@@ -58,14 +58,31 @@ const canonFieldFor = (field) => {
   return field;
 };
 
-const ExportModal = ({
-  isOpen,
-  onClose,
-  onExport,
-  loading,
-  onOpenTemplates,
-  selectedIds = [],
-}) => {
+// Человекочитаемые подписи полей дефолтов (кнопка «Заполнить пропуски»)
+const DEFAULTS_FIELD_LABELS = {
+  vat_rate: 'НДС, %',
+  okpd_code: 'ТН ВЭД коды ЕАЭС',
+  package_weight_grams: 'Вес в упаковке, г',
+  package_width_mm: 'Ширина упаковки, мм',
+  package_height_mm: 'Высота упаковки, мм',
+  package_length_mm: 'Длина упаковки, мм',
+  price: 'Цена',
+  brand: 'Бренд',
+  marking: 'Код маркировки',
+};
+const formatDefaultsResult = (res) => {
+  if (!res || !res.updated)
+    return 'Нечего дозаполнять: пустых полей не найдено либо дефолты не заданы (кнопка «Дефолты» на странице «Товары»).';
+  const parts = Object.entries(res.fields || {}).map(
+    ([k, n]) => `${DEFAULTS_FIELD_LABELS[k] || k}: ${n}`
+  );
+  return (
+    `Дозаполнено ${res.updated} из ${res.total} товаров` +
+    (parts.length ? ` (${parts.join(', ')})` : '')
+  );
+};
+
+const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates, selectedIds = [] }) => {
   const [platform, setPlatform] = useState('ozon');
   const [status, setStatus] = useState('success');
   const [onlySelected, setOnlySelected] = useState(selectedIds.length > 0);
@@ -76,6 +93,11 @@ const ExportModal = ({
   const [validation, setValidation] = useState(null);
   const [categoryCounts, setCategoryCounts] = useState({});
   const [tplSet, setTplSet] = useState(new Set());
+  // ✅ Превалидация: кнопка «Заполнить пропуски дефолтами»
+  const [defaultsLoading, setDefaultsLoading] = useState(false);
+  const [defaultsResult, setDefaultsResult] = useState(null);
+  // ✅ v4: инкрементальный экспорт — только изменённые с последней выгрузки
+  const [changedSince, setChangedSince] = useState(false);
 
   const activeIds = useMemo(
     () => (onlySelected && selectedIds.length > 0 ? selectedIds : null),
@@ -87,10 +109,11 @@ const ExportModal = ({
     setPreviewError('');
     setPreview(null);
     setValidation(null);
+    setDefaultsResult(null);
     try {
       const [pv, vv, prods, tpls] = await Promise.all([
-        api.exportPreview(platform, status, activeIds),
-        api.validateExport(platform, status, activeIds).catch(() => null),
+        api.exportPreview(platform, status, activeIds, changedSince),
+        api.validateExport(platform, status, activeIds, changedSince).catch(() => null),
         api
           .getProducts({ status: status === 'all' ? undefined : status, limit: 10000 })
           .catch(() => ({ products: [] })),
@@ -114,17 +137,35 @@ const ExportModal = ({
     } finally {
       setPreviewLoading(false);
     }
-  }, [platform, status, activeIds]);
+  }, [platform, status, activeIds, changedSince]);
 
   const handleDownload = useCallback(() => {
     if (downloaded || loading) return;
     setDownloaded(true);
-    onExport(platform, status, activeIds);
-  }, [downloaded, loading, onExport, platform, status, activeIds]);
+    onExport(platform, status, activeIds, changedSince);
+  }, [downloaded, loading, onExport, platform, status, activeIds, changedSince]);
 
   const handleTemplate = useCallback(() => {
     api.exportTemplate(platform).catch((e) => setPreviewError(e.message));
   }, [platform]);
+
+  /* ✅ Превалидация: дозаполнить пустые поля дефолтами прямо из окна выгрузки.
+   * Бэкенд заполняет ТОЛЬКО пустые/нулевые поля (цена, НДС, ТН ВЭД, габариты),
+   * заполненные значения не перезаписываются. После — перезагружаем проверку. */
+  const handleApplyDefaults = useCallback(async () => {
+    setDefaultsLoading(true);
+    setPreviewError('');
+    try {
+      const payload = activeIds ? { product_ids: activeIds } : { status };
+      const res = await api.applyDefaults(payload);
+      setDefaultsResult(res);
+      await loadPreview();
+    } catch (e) {
+      setPreviewError('Не удалось заполнить пропуски: ' + e.message);
+    } finally {
+      setDefaultsLoading(false);
+    }
+  }, [activeIds, status, loadPreview]);
 
   const groupIssues = useCallback(
     (issues) => ({
@@ -138,6 +179,7 @@ const ExportModal = ({
     if (isOpen) {
       setOnlySelected(selectedIds.length > 0);
       setDownloaded(false);
+      setChangedSince(false);
     }
   }, [isOpen, selectedIds]);
 
@@ -149,15 +191,12 @@ const ExportModal = ({
 
   useEffect(() => {
     setDownloaded(false);
-  }, [platform, status, onlySelected]);
+  }, [platform, status, onlySelected, changedSince]);
 
   const v = validation || preview?.validation || {};
   const total = v.total ?? 0;
   const withErrors = v.products_with_errors ?? v.with_errors ?? 0;
-  const withWarnings = Math.max(
-    0,
-    (v.products_with_warnings ?? v.with_warnings ?? 0) - withErrors
-  );
+  const withWarnings = Math.max(0, (v.products_with_warnings ?? v.with_warnings ?? 0) - withErrors);
   const downloadable = total - withErrors;
 
   const errorCountByCanon = useMemo(() => {
@@ -177,6 +216,30 @@ const ExportModal = ({
     () => OZON_TEMPLATE_REQUIRED.map((f) => ({ ...f, count: errorCountByCanon[f.field] || 0 })),
     [errorCountByCanon]
   );
+
+  // ✅ Универсальный список блокирующих полей для ЛЮБОЙ площадки (не только Ozon)
+  const blockingFields = useMemo(() => {
+    const counts = {};
+    (v.issues || []).forEach((it) =>
+      (it.issues || []).forEach((i) => {
+        if ((i.severity || i.level) === 'error') {
+          const f = canonFieldFor(i.field);
+          counts[f] = (counts[f] || 0) + 1;
+        }
+      })
+    );
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([field, count]) => ({
+        field,
+        count,
+        label: field.startsWith('attr:')
+          ? field.slice(5).replace(/_/g, ' ')
+          : DEFAULTS_FIELD_LABELS[field] || field,
+      }));
+  }, [v]);
+
+  const readinessPercent = total > 0 ? Math.round((downloadable / total) * 100) : 0;
 
   const hasUniversalTemplate = useMemo(
     () => Array.from(tplSet).some((name) => UNIVERSAL_NAMES.has(String(name).trim().toLowerCase())),
@@ -237,7 +300,39 @@ const ExportModal = ({
               onChange={(e) => setOnlySelected(e.target.checked)}
             />
             <span>
-              Выгружать <strong>только выбранные в таблице товары ({selectedIds.length} шт.)</strong>
+              Выгружать{' '}
+              <strong>только выбранные в таблице товары ({selectedIds.length} шт.)</strong>
+            </span>
+          </label>
+        )}
+
+        {/* ✅ v4: инкрементальный экспорт — только изменённые с последней выгрузки */}
+        {!activeIds && (
+          <label
+            className="bulk-check"
+            style={{
+              display: 'flex',
+              marginBottom: '0.85rem',
+              padding: '0.6rem 0.85rem',
+              background: 'rgba(34,197,94,0.08)',
+              border: '1px solid rgba(34,197,94,0.35)',
+              borderRadius: '8px',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={changedSince}
+              onChange={(e) => setChangedSince(e.target.checked)}
+            />
+            <span>
+              <strong>Только новые/изменённые с последней выгрузки</strong>
+              {v.incremental && !changedSince && (
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 'normal' }}>
+                  {' '}
+                  — сейчас попадёт: новых {v.incremental.new ?? 0}, изменённых{' '}
+                  {v.incremental.changed ?? 0} (без изменений: {v.incremental.unchanged ?? 0})
+                </span>
+              )}
             </span>
           </label>
         )}
@@ -291,7 +386,8 @@ const ExportModal = ({
             <h4
               style={{ margin: '0 0 0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
             >
-              <Icon name="template" size={16} /> Эталонные шаблоны выгрузки ({currentPlatformMeta.name})
+              <Icon name="template" size={16} /> Эталонные шаблоны выгрузки (
+              {currentPlatformMeta.name})
             </h4>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
               {Object.entries(categoryCounts)
@@ -324,7 +420,9 @@ const ExportModal = ({
             {missingTemplates.length > 0 && (
               <div className="alert alert-error" style={{ marginTop: '0.6rem', marginBottom: 0 }}>
                 <div>
-                  ❌ Для «{currentPlatformMeta.name}» не загружен эталонный шаблон ({missingTemplates.join(', ')}). Выгрузка соберётся по встроенному шаблону и может отличаться от кабинета площадки.
+                  ❌ Для «{currentPlatformMeta.name}» не загружен эталонный шаблон (
+                  {missingTemplates.join(', ')}). Выгрузка соберётся по встроенному шаблону и может
+                  отличаться от кабинета площадки.
                   {onOpenTemplates && (
                     <>
                       {' '}
@@ -410,6 +508,95 @@ const ExportModal = ({
           </div>
         )}
 
+        {/* ✅ Превалидация: полоса готовности + дозаполнение дефолтами */}
+        {total > 0 && (
+          <div className="card" style={{ padding: '0.75rem 1rem', marginBottom: '0.75rem' }}>
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}
+            >
+              <div className="progress-bar-wrapper" style={{ flex: 1, minWidth: '160px' }}>
+                <div
+                  className="progress-bar-fill"
+                  style={{
+                    width: `${readinessPercent}%`,
+                    background:
+                      readinessPercent >= 80
+                        ? 'var(--success, #22c55e)'
+                        : readinessPercent >= 40
+                          ? 'var(--warning, #f59e0b)'
+                          : 'var(--danger, #ef4444)',
+                  }}
+                />
+                <span className="progress-bar-text">{readinessPercent}% готово</span>
+              </div>
+              <Button
+                variant="outline"
+                size="small"
+                onClick={handleApplyDefaults}
+                loading={defaultsLoading}
+                disabled={previewLoading || downloadable === total}
+                title="Заполнит пустые поля (НДС, ТН ВЭД, габариты, цена) из ваших дефолтов — заполненные значения не трогает"
+              >
+                <Icon name="edit" size={15} /> Заполнить пропуски дефолтами
+              </Button>
+            </div>
+            {defaultsResult && (
+              <div className="alert alert-success" style={{ marginTop: '0.6rem', marginBottom: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Icon name="check" size={15} /> {formatDefaultsResult(defaultsResult)}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ✅ Универсальный список блокирующих полей (любая площадка) */}
+        {total > 0 && blockingFields.length > 0 && (
+          <div className="card" style={{ padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
+            <h4
+              style={{ margin: '0 0 0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+            >
+              <Icon name="warning" size={16} /> Блокирующие поля ({currentPlatformMeta.name}): что
+              не даёт выгрузиться
+            </h4>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+              {blockingFields.slice(0, 10).map((f) => (
+                <span
+                  key={f.field}
+                  title={`Ошибка у ${f.count} товаров`}
+                  style={{
+                    padding: '0.2rem 0.6rem',
+                    borderRadius: 999,
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    background: 'rgba(239,68,68,0.12)',
+                    color: 'var(--danger, #ef4444)',
+                    border: '1px solid var(--danger, #ef4444)',
+                  }}
+                >
+                  {f.label} · {f.count}
+                </span>
+              ))}
+            </div>
+            {blockingFields.some(
+              (f) =>
+                ['vat_rate', 'okpd_code', 'price'].includes(f.field) ||
+                f.field.startsWith('package_')
+            ) && (
+              <p
+                style={{
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.8rem',
+                  margin: '0.5rem 0 0',
+                }}
+              >
+                Часть полей можно заполнить автоматически — кнопка «Заполнить пропуски дефолтами»
+                выше.
+              </p>
+            )}
+          </div>
+        )}
+
         {previewLoading && (
           <div
             className="progress-status"
@@ -437,7 +624,11 @@ const ExportModal = ({
             >
               <Icon name="products" size={48} />
             </div>
-            <p className="empty-state-text">Нет товаров с выбранным статусом.</p>
+            <p className="empty-state-text">
+              {changedSince
+                ? 'Новых/изменённых товаров с последней выгрузки нет.'
+                : 'Нет товаров с выбранным статусом.'}
+            </p>
           </div>
         )}
 
@@ -503,10 +694,7 @@ const ExportModal = ({
           <Button variant="outline" onClick={onClose}>
             Отмена
           </Button>
-          <Button
-            onClick={handleDownload}
-            disabled={downloaded || loading || downloadable === 0}
-          >
+          <Button onClick={handleDownload} disabled={downloaded || loading || downloadable === 0}>
             {downloaded ? (
               <>
                 <Icon name="check" size={16} /> Файл скачан

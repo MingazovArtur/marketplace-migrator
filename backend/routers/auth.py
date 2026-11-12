@@ -13,6 +13,8 @@ import secrets
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from core.auth import (
     create_access_token,
@@ -24,13 +26,19 @@ from core.config import settings
 from core.rate_limit import limiter
 from database.access_log import get_client_ip, log_access
 from database.models import User
-from database.session import SessionLocal
+from database.session import SessionLocal, get_db
 from models.schemas import Token, UserCreate, UserLogin, UserResponse
 from services.email_service import send_verification_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 security = HTTPBearer()
+
+
+class NotificationsUpdate(BaseModel):
+    """✅ v5: настройки уведомлений (пока одна — письмо о пакете)."""
+
+    notify_batch_done: bool | None = None
 
 
 # ============================================================
@@ -215,3 +223,29 @@ def logout(request: Request, response: Response, current_user: User = Depends(ge
 async def get_me(current_user: User = Depends(get_current_user)):
     """Текущий авторизованный пользователь"""
     return current_user
+
+
+@router.get("/notifications")
+async def get_notifications(current_user: User = Depends(get_current_user)):
+    """✅ v5: настройки уведомлений пользователя."""
+    return {
+        "notify_batch_done": bool(current_user.notify_batch_done),
+        "email": current_user.email,
+        "email_verified": bool(current_user.email_verified_at),
+    }
+
+
+@router.put("/notifications")
+async def update_notifications(
+    payload: NotificationsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """✅ v5: включить/выключить письмо о завершении пакетной миграции."""
+    if payload.notify_batch_done is None:
+        raise HTTPException(status_code=400, detail="Не указаны настройки для обновления")
+
+    current_user.notify_batch_done = bool(payload.notify_batch_done)
+    db.commit()
+    db.refresh(current_user)
+    return {"success": True, "notify_batch_done": bool(current_user.notify_batch_done)}

@@ -21,7 +21,6 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import get_current_user
-from database.models import BulkEditSnapshot
 from database.models import PlatformCategorySpec
 from database.models import Product as ProductORM
 from database.models import User
@@ -29,11 +28,10 @@ from database.repository import repo, stats_repo
 from database.session import get_async_db
 from models.schemas import ProductBulkUpdate, ProductLogisticsUpdate, Stats
 from services.bulk_ops import (
-    apply_snapshot,
-    build_snapshot_payload,
     compute_preview,
     escape_like,
 )
+from services.edit_history import list_edit_history, undo_snapshot, write_edit_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +47,8 @@ SORT_MAP = {
     "price_desc": ("price", "desc"),
 }
 
-# Сколько undo-снапшотов массового обновления храним на пользователя
-SNAPSHOTS_PER_USER = 5
+# Сколько undo-снапшотов храним на пользователя (ротация в services/edit_history.py)
+SNAPSHOTS_PER_USER = 20
 
 
 # ==================== Схемы запросов удаления ====================
@@ -154,8 +152,7 @@ async def bulk_update_products(
     res = await db.execute(stmt)
     products_by_id = {p.id: p for p in res.scalars().all()}
 
-    # ✅ Undo-снапшот: снимок ТЕКУЩИХ значений до изменения (одна строка на операцию).
-    #    Ротация: храним последние 5 снапшотов пользователя — старые удаляем.
+    # ✅ v4: undo-снапшот через сервис истории правок (ротация внутри)
     snapshot = None
     if products_by_id:
         changed_fields = [
@@ -163,11 +160,14 @@ async def bulk_update_products(
             for name in ("price", "price_percent", "brand", "category")
             if getattr(request, name, None) is not None
         ]
-        snapshot = BulkEditSnapshot(
-            user_id=user_id,
-            payload=build_snapshot_payload(products_by_id.values(), changed_fields),
+        snapshot = await write_edit_snapshot(
+            db,
+            user_id,
+            list(products_by_id.values()),
+            changed_fields,
+            action="bulk_update",
+            label=f"Массовое обновление: {', '.join(changed_fields)} ({len(products_by_id)} тов.)",
         )
-        db.add(snapshot)
 
     for pid in request.product_ids:
         p = products_by_id.get(pid)
@@ -205,21 +205,6 @@ async def bulk_update_products(
         await db.rollback()
     else:
         await db.commit()
-        if snapshot is not None and snapshot.id is not None:
-            # Ротация: оставляем последние 5 снапшотов пользователя
-            old_ids = (
-                await db.execute(
-                    select(BulkEditSnapshot.id)
-                    .where(BulkEditSnapshot.user_id == user_id)
-                    .order_by(BulkEditSnapshot.id.desc())
-                    .offset(SNAPSHOTS_PER_USER)
-                )
-            ).scalars().all()
-            if old_ids:
-                await db.execute(
-                    delete(BulkEditSnapshot).where(BulkEditSnapshot.id.in_(old_ids))
-                )
-                await db.commit()
 
     # ✅ Список изменённых полей считаем отдельно — выражения f-string
     #    не могут продолжаться в соседнем строковом литерале
@@ -320,50 +305,39 @@ async def categories_suggest(
     }
 
 
+class UndoRequest(BaseModel):
+    """Отмена операции правки: по id или последняя неотменённая."""
+
+    snapshot_id: int | None = None
+
+
 @router.post("/products/bulk-undo")
 async def bulk_undo_products(
+    payload: UndoRequest | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
     """
-    Отмена ПОСЛЕДНЕГО массового обновления: восстанавливает цену/бренд/
-    категорию назначения из undo-снапшота. Товары, удалённые после обновления,
-    пропускаются.
+    ✅ v4: отмена операции правки товаров (последней или по snapshot_id).
+    Восстанавливает прежние значения РОВНО тех полей, что менялись.
+    Товары, удалённые после правки, пропускаются.
     """
-    stmt = (
-        select(BulkEditSnapshot)
-        .where(BulkEditSnapshot.user_id == current_user.id)
-        .order_by(BulkEditSnapshot.id.desc())
-        .limit(1)
+    result = await undo_snapshot(
+        db, current_user.id, snapshot_id=payload.snapshot_id if payload else None
     )
-    snapshot = (await db.execute(stmt)).scalar_one_or_none()
-    if snapshot is None:
-        raise HTTPException(status_code=404, detail="Нет массовых изменений для отмены")
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("detail", "Нет изменений для отмены"))
 
-    ids = [item["id"] for item in snapshot.payload.get("items", [])]
-    products = (
-        await db.execute(
-            select(ProductORM).where(
-                ProductORM.id.in_(ids), ProductORM.user_id == current_user.id
-            )
-        )
-    ).scalars().all()
-
-    result = apply_snapshot({p.id: p for p in products}, snapshot.payload)
-    await db.delete(snapshot)
     await db.commit()
 
-    logger.info(
-        f"↩️ Bulk undo: user={current_user.id} "
-        f"restored={result['restored']} skipped_missing={result['skipped_missing']}"
-    )
+    total = result["restored"] + result["skipped_missing"]
     try:
         stats_repo.record(
             user_id=current_user.id,
             operation="bulk_undo",
             platform=None,
             status="success",
-            total_items=len(ids),
+            total_items=total,
             success_items=result["restored"],
             failed_items=result["skipped_missing"],
             duration_ms=0,
@@ -375,8 +349,20 @@ async def bulk_undo_products(
         "success": True,
         "restored": result["restored"],
         "skipped_missing": result["skipped_missing"],
-        "created_at": snapshot.created_at.isoformat() if snapshot.created_at else None,
+        "fields": result.get("fields", []),
+        "label": result.get("label"),
+        "snapshot_id": result.get("snapshot_id"),
     }
+
+
+@router.get("/products/edit-history")
+async def get_edit_history(
+    limit: int = Query(20, ge=1, le=50),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """✅ v4: лента последних операций правки товаров (аудит + undo-кнопки)."""
+    return await list_edit_history(db, current_user.id, limit=limit)
 
 
 @router.patch("/products/{product_id}")
@@ -410,6 +396,26 @@ async def update_product(
     p = (await db.execute(stmt)).scalar_one_or_none()
     if not p:
         raise HTTPException(status_code=404, detail="Товар не найден или не принадлежит вам")
+
+    # ✅ v4: какие поля РЕАЛЬНО изменятся (для undo-снапшота)
+    old_price = float(p.price or 0)
+    will_change = []
+    if payload.name is not None and payload.name.strip() != p.name:
+        will_change.append("name")
+    if payload.price is not None and float(payload.price) != old_price:
+        will_change.append("price")
+    if payload.category is not None and (payload.category.strip() or None) != p.mapped_category:
+        will_change.append("category")
+
+    if will_change:
+        await write_edit_snapshot(
+            db,
+            current_user.id,
+            [p],
+            will_change,
+            action="edit",
+            label=f"Правка товара #{p.id}: {', '.join(will_change)}",
+        )
 
     updated = []
     if payload.name is not None and payload.name.strip() != p.name:
@@ -647,6 +653,18 @@ async def update_product_logistics(
                 f"📦 logistics PUT id={product_id}: payload пустой — ничего не сохраняем"
             )
             return {"success": True, "product_id": product.id, "updated_fields": 0}
+
+        # ✅ v4: undo-снапшот прежней логистики (только реально затронутые поля)
+        snap_fields = [f for f in updates if hasattr(product, f)]
+        if snap_fields:
+            await write_edit_snapshot(
+                db,
+                current_user.id,
+                [product],
+                snap_fields,
+                action="logistics",
+                label=f"Логистика товара #{product.id}: {', '.join(snap_fields)}",
+            )
 
         for field, value in updates.items():
             if not hasattr(product, field):

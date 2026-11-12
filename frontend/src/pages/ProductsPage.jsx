@@ -5,6 +5,7 @@ import EmptyState from '../components/common/EmptyState';
 import DeleteConfirmModal from '../components/products/DeleteConfirmModal';
 import DefaultsModal from '../components/products/DefaultsModal';
 import BulkUpdateModal from '../components/products/BulkUpdateModal';
+import BatchTnvedModal from '../components/products/BatchTnvedModal';
 import { api } from '../api';
 import { GAP_LABELS, FILLED_LABELS, BLOCKING_GAP_FIELDS } from '../constants/gaps';
 
@@ -46,7 +47,6 @@ const fmtPrice = (v) => {
   return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 };
 
-
 const ProductsPage = ({
   isAdmin = false,
   refreshKey = 0,
@@ -81,6 +81,9 @@ const ProductsPage = ({
   const [bulkLoading, setBulkLoading] = useState(false);
   const [undoAvailable, setUndoAvailable] = useState(false); // после успешного bulk-update
   const [undoLoading, setUndoLoading] = useState(false);
+
+  // ✅ v4: массовый подбор ТН ВЭД для выделенных
+  const [showTnved, setShowTnved] = useState(false);
 
   const [showDefaults, setShowDefaults] = useState(false);
   const [gaps, setGaps] = useState(null);
@@ -156,6 +159,14 @@ const ProductsPage = ({
     loadSpecNames();
   }, [refreshKey, loadGaps, loadSpecNames]);
 
+  // ✅ v4: есть ли неотменённые операции правок (баннер «Отменить последнее изменение»)
+  useEffect(() => {
+    api
+      .getEditHistory(1)
+      .then((d) => setUndoAvailable(!!d.has_undo))
+      .catch(() => setUndoAvailable(false));
+  }, [refreshKey]);
+
   // ==================== Ресайз колонок ====================
   const resetCol = (key) => {
     setColWidths((prev) => {
@@ -221,9 +232,7 @@ const ProductsPage = ({
         setSelected([]);
       } else if (deleteMode === 'bulk') {
         const r = await api.bulkDeleteProducts(selected);
-        setMessage(
-          `Удалено: ${r.deleted}${r.skipped ? `, пропущено (чужие): ${r.skipped}` : ''}`
-        );
+        setMessage(`Удалено: ${r.deleted}${r.skipped ? `, пропущено (чужие): ${r.skipped}` : ''}`);
         setSelected([]);
       } else {
         await api.deleteProduct(deleteTargetId);
@@ -268,10 +277,12 @@ const ProductsPage = ({
     try {
       const r = await api.bulkUndoProducts();
       setMessage(
-        `↩ Отменено: значения до обновления восстановлены у ${r.restored} товаров` +
+        `↩ Отменено${r.label ? ` (${r.label})` : ''}: прежние значения восстановлены у ${r.restored} товаров` +
           (r.skipped_missing ? ` (пропущено удалённых: ${r.skipped_missing})` : '')
       );
-      setUndoAvailable(false);
+      // Могут остаться другие неотменённые операции — сверяемся с историей
+      const d = await api.getEditHistory(1).catch(() => ({ has_undo: false }));
+      setUndoAvailable(!!d.has_undo);
       await load();
     } catch (e) {
       setError(e.message);
@@ -294,6 +305,7 @@ const ProductsPage = ({
         `Дозаполнено товаров: ${r.updated} из ${r.total}` +
           (summary ? ` · подставлено: ${summary}` : '')
       );
+      if (r.updated > 0) setUndoAvailable(true); // ✅ v4: дозаполнение можно отменить
       if (mode === 'selected') setSelected([]);
       await loadGaps();
       await load();
@@ -431,7 +443,9 @@ const ProductsPage = ({
           style={{ marginBottom: '0.75rem' }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
+            <div
+              style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}
+            >
               <strong>
                 {hasBlockingGaps ? '❌ Не всё готово к выгрузке' : '⚠️ Не хватает полей'} —{' '}
                 {gaps.products_with_gaps ?? gaps.total} из {gaps.total} товаров:
@@ -552,7 +566,11 @@ const ProductsPage = ({
           size="small"
           className="btn-danger-outline"
           onClick={() => setDeleteMode('all')}
-          title={isAdmin ? 'Удалить ВСЕ товары в системе (с подтверждением)' : 'Удалить все мои товары (с подтверждением)'}
+          title={
+            isAdmin
+              ? 'Удалить ВСЕ товары в системе (с подтверждением)'
+              : 'Удалить все мои товары (с подтверждением)'
+          }
         >
           <Icon name="trash" size={15} /> Удалить все
         </Button>
@@ -571,11 +589,11 @@ const ProductsPage = ({
         </div>
       )}
 
-      {/* ✅ Undo последнего массового обновления */}
+      {/* ✅ Undo последней операции правки (масс. обновление / ТН ВЭД / правка / логистика) */}
       {undoAvailable && (
         <div className="alert alert-success bulk-undo-alert">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            <Icon name="refresh" size={16} /> Последнее массовое обновление можно отменить
+            <Icon name="refresh" size={16} /> Последнюю операцию правки можно отменить
           </div>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <Button size="small" onClick={handleBulkUndo} loading={undoLoading}>
@@ -652,6 +670,15 @@ const ProductsPage = ({
               <Icon name="edit" size={15} /> Заполнить пропуски выделенных ({selectedFillableTotal})
             </Button>
           )}
+          {/* ✅ v4: массовый подбор ТН ВЭД для выделенных */}
+          <Button
+            variant="secondary"
+            size="small"
+            onClick={() => setShowTnved(true)}
+            title="Подобрать код ТН ВЭД сразу всем выделенным (авто-подбор по названию или поиск по справочнику)"
+          >
+            <Icon name="search" size={15} /> Подобрать ТН ВЭД
+          </Button>
           <Button variant="secondary" size="small" onClick={() => setDeleteMode('bulk')}>
             <Icon name="trash" size={15} /> Удалить выбранные
           </Button>
@@ -678,7 +705,11 @@ const ProductsPage = ({
           onAction={onImport}
         />
       ) : (
-        <div className="card" style={{ padding: 0, overflowX: 'auto' }} data-onboarding="products-table">
+        <div
+          className="card"
+          style={{ padding: 0, overflowX: 'auto' }}
+          data-onboarding="products-table"
+        >
           <table
             style={{
               width: '100%',
@@ -1027,6 +1058,21 @@ const ProductsPage = ({
           loading={bulkLoading}
           onSubmit={handleBulkUpdate}
           onClose={() => setShowBulkUpdate(false)}
+        />
+      )}
+
+      {/* ✅ v4: массовый подбор ТН ВЭД */}
+      {showTnved && (
+        <BatchTnvedModal
+          isOpen
+          selectedIds={selected}
+          onClose={() => setShowTnved(false)}
+          onSaved={async () => {
+            setUndoAvailable(true);
+            setSelected([]);
+            await load();
+            await loadGaps();
+          }}
         />
       )}
 

@@ -34,6 +34,7 @@ from routers import (
     import_router,
     media as media_router,  # ✅ /media с авторизацией (замена StaticFiles)
     photos,  # ✅ ИСПРАВЛЕНО: подключен роутер фотографий
+    profiles,  # ✅ v4: профили миграции (площадка + дефолты)
     products,
     stats,
     templates,
@@ -166,6 +167,7 @@ app.include_router(categories.router)
 app.include_router(history.router)
 app.include_router(defaults_router.router)
 app.include_router(tnved.router)
+app.include_router(profiles.router)  # ✅ v4: профили миграции
 
 # ============================================================
 # Статика: раздача скачанных фото

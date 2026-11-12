@@ -40,7 +40,7 @@ function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
   const [authTab, setAuthTab] = useState(null);
   const [message, setMessage] = useState('');
-  
+
   // ✅ Сохранение текущей вкладки в localStorage с фоллбэком на 'products'
   const [currentView, setCurrentView] = useState(() => {
     return localStorage.getItem('marketplace_active_view') || 'products';
@@ -197,7 +197,7 @@ function App() {
     async (platform) => {
       try {
         const idsToExport = selectedProductIds.length > 0 ? selectedProductIds : null;
-        await api.exportXlsxV2(platform, 'success', idsToExport);
+        await api.exportXlsxV2(platform, 'success', idsToExport, false);
         setMessage(`✅ Файл для ${platform} скачан — загрузите его в кабинете площадки.`);
         await refreshAll();
       } catch (e) {
@@ -237,19 +237,25 @@ function App() {
   );
 
   // ==================== Обработчики экспорта ====================
-  const handleExportForPlatform = useCallback(async (platform, status, activeIds = null) => {
-    try {
-      const filename = await api.exportXlsxV2(platform, status, activeIds);
-      setMessage(
-        filename && filename.toLowerCase().endsWith('.zip')
-          ? `✅ Скачан ZIP из нескольких файлов. Загрузите каждый в кабинете ${platform}.`
-          : `✅ Файл по шаблону ${platform} скачан. Загрузите его в кабинете площадки.`
-      );
-      setShowExportModal(false);
-    } catch (e) {
-      setMessage(`❌ ${e.message}`);
-    }
-  }, []);
+  const handleExportForPlatform = useCallback(
+    async (platform, status, activeIds = null, changedSince = false) => {
+      try {
+        const filename = await api.exportXlsxV2(platform, status, activeIds, changedSince);
+        setMessage(
+          changedSince
+            ? `✅ Скачан файл с новыми/изменёнными товарами (${platform}). Загрузите его в кабинете площадки.`
+            : filename && filename.toLowerCase().endsWith('.zip')
+              ? `✅ Скачан ZIP из нескольких файлов. Загрузите каждый в кабинете ${platform}.`
+              : `✅ Файл по шаблону ${platform} скачан. Загрузите его в кабинете площадки.`
+        );
+        setShowExportModal(false);
+        await refreshAll();
+      } catch (e) {
+        setMessage(`❌ ${e.message}`);
+      }
+    },
+    [refreshAll]
+  );
 
   const handleOpenExport = useCallback((ids) => {
     if (Array.isArray(ids)) {
@@ -376,7 +382,13 @@ function App() {
       case 'history':
         return <HistoryView />;
       case 'specs':
-        return <SpecsPage user={user} onNotify={setMessage} onOpenMonitor={() => setCurrentView('specs-monitor')} />;
+        return (
+          <SpecsPage
+            user={user}
+            onNotify={setMessage}
+            onOpenMonitor={() => setCurrentView('specs-monitor')}
+          />
+        );
       case 'specs-monitor':
         return <SpecsMonitorPage user={user} />;
       case 'templates':

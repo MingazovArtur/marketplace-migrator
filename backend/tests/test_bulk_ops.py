@@ -23,18 +23,20 @@ from services.bulk_ops import (  # noqa: E402
 class FakeProduct:
     """Товароподобный объект: достаточно id/name/price/brand/mapped_category."""
 
-    def __init__(self, id, name, price, brand=None, mapped_category=None):  # noqa: A002
+    def __init__(self, id, name, price, brand=None, mapped_category=None, okpd_code=None, vat_rate=None):  # noqa: A002
         self.id = id
         self.name = name
         self.price = price
         self.brand = brand
         self.mapped_category = mapped_category
+        self.okpd_code = okpd_code
+        self.vat_rate = vat_rate
 
 
 PRODUCTS = [
-    FakeProduct(1, "Футболка", Decimal("1000.00"), brand="OldBrand", mapped_category="А / Б"),
-    FakeProduct(2, "Кроссовки", Decimal("2000.00"), brand=None, mapped_category=None),
-    FakeProduct(3, "Носки", Decimal("0"), brand="X", mapped_category=None),
+    FakeProduct(1, "Футболка", Decimal("1000.00"), brand="OldBrand", mapped_category="А / Б", okpd_code="6109"),
+    FakeProduct(2, "Кроссовки", Decimal("2000.00"), brand=None, mapped_category=None, okpd_code=None),
+    FakeProduct(3, "Носки", Decimal("0"), brand="X", mapped_category=None, okpd_code="6115"),
 ]
 
 
@@ -105,7 +107,8 @@ def test_preview_empty_products():
 
 def test_snapshot_payload_decimal_to_float():
     snap = build_snapshot_payload(PRODUCTS, ["price", "brand", "category"])
-    assert snap["fields"] == ["price", "brand", "category"]
+    # ✅ v4: alias "category" -> колонка "mapped_category"
+    assert snap["fields"] == ["price", "brand", "mapped_category"]
     items = {i["id"]: i for i in snap["items"]}
     assert items[1]["price"] == 1000.0  # Decimal -> float (JSON-сериализуемо)
     assert items[1]["brand"] == "OldBrand"
@@ -115,6 +118,21 @@ def test_snapshot_payload_decimal_to_float():
     import json
 
     json.dumps(snap)
+
+
+def test_snapshot_payload_only_listed_fields():
+    """v4: снапшот хранит РОВНО перечисленные поля (например, только ТН ВЭД)."""
+    snap = build_snapshot_payload(PRODUCTS, ["okpd_code"])
+    assert snap["fields"] == ["okpd_code"]
+    items = {i["id"]: i for i in snap["items"]}
+    assert items[1] == {"id": 1, "okpd_code": "6109"}
+    assert "price" not in items[1]
+
+
+def test_snapshot_payload_skips_unknown_fields():
+    """v4: price_percent и прочие не-колонки в снапшот не попадают."""
+    snap = build_snapshot_payload(PRODUCTS, ["price", "price_percent", "nosuchfield"])
+    assert snap["fields"] == ["price"]
 
 
 # ==================== apply_snapshot ====================
@@ -127,22 +145,57 @@ def test_apply_snapshot_restores_values():
     PRODUCTS[1].mapped_category = "Новая категория"
 
     result = apply_snapshot({p.id: p for p in PRODUCTS}, snap)
-    assert result == {"restored": 3, "skipped_missing": 0}
+    assert result["restored"] == 3
+    assert result["skipped_missing"] == 0
+    assert result["fields"] == ["price", "brand", "mapped_category"]
     assert PRODUCTS[0].price == 1000.0
     assert PRODUCTS[0].brand == "OldBrand"
     assert PRODUCTS[1].mapped_category is None
+
+
+def test_apply_snapshot_only_listed_fields_touched():
+    """v4: undo восстанавливает ТОЛЬКО поля из снапшота, остальное не трогает."""
+    snap = build_snapshot_payload(PRODUCTS, ["okpd_code"])
+    PRODUCTS[0].okpd_code = "9999"
+    PRODUCTS[0].brand = "ChangedButNotInSnapshot"
+    before_price = PRODUCTS[0].price
+
+    result = apply_snapshot({p.id: p for p in PRODUCTS}, snap)
+    assert result["restored"] == 3
+    assert PRODUCTS[0].okpd_code == "6109"
+    assert PRODUCTS[0].brand == "ChangedButNotInSnapshot"  # НЕ откачено
+    assert PRODUCTS[0].price == before_price  # НЕ откачено
+
+
+def test_apply_snapshot_legacy_format_without_fields():
+    """v4: легаси-снапшоты (без fields) восстанавливают цену/бренд/категорию."""
+    legacy = {
+        "items": [
+            {"id": 1, "price": 1000.0, "brand": "OldBrand", "mapped_category": "А / Б"},
+            {"id": 2, "price": 2000.0, "brand": None, "mapped_category": None},
+        ]
+    }
+    PRODUCTS[0].price = Decimal("777")
+    PRODUCTS[0].brand = "Wrong"
+
+    result = apply_snapshot({p.id: p for p in PRODUCTS}, legacy)
+    assert result["restored"] == 2
+    assert PRODUCTS[0].price == 1000.0
+    assert PRODUCTS[0].brand == "OldBrand"
 
 
 def test_apply_snapshot_skips_deleted_products():
     snap = build_snapshot_payload(PRODUCTS[:3], ["brand"])
     # товар 2 «удалён» — его нет в products_by_id
     result = apply_snapshot({p.id: p for p in PRODUCTS if p.id != 2}, snap)
-    assert result == {"restored": 2, "skipped_missing": 1}
+    assert result["restored"] == 2
+    assert result["skipped_missing"] == 1
 
 
 def test_apply_snapshot_empty_items():
     result = apply_snapshot({}, {"fields": [], "items": []})
-    assert result == {"restored": 0, "skipped_missing": 0}
+    assert result["restored"] == 0
+    assert result["skipped_missing"] == 0
 
 
 # ==================== escape_like / parse ====================

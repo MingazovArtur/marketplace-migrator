@@ -44,6 +44,8 @@ class UserResponse(BaseModel):
     role: str = "user"
     email_verified_at: datetime | None = None
     is_active: bool
+    # ✅ v5: письмо о завершении пакетной миграции (вкл/выкл в меню профиля)
+    notify_batch_done: bool = True
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
