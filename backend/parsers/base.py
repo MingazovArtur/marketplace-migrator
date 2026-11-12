@@ -13,7 +13,8 @@ class ParseResult:
     Стандартизированный результат парсинга.
     
     ✅ Совместим со словарным интерфейсом (result["products"], result.get(...)),
-    чтобы не ломать существующий код в import_router.py.
+    чтобы не ломать существующий код в routers/import_router/
+    (бывший import_router.py).
     """
     products: List[Dict[str, Any]] = field(default_factory=list)
     errors: List[Dict[str, Any]] = field(default_factory=list)

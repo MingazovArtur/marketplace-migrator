@@ -1,161 +1,32 @@
-"""
-Роутер импорта товаров (API-ключ, YML, Excel/CSV).
+"""Импорт по API-ключу, мок-ключу или YML-ссылке: POST /import.
 
-Режимы импорта файла:
-  - create  — только новые карточки
-  - upsert  — обновление совпадений по external_id / sku
+Пути: мок-импорт (демо/тесты) → YML-фид по ссылке → реальный API
+Яндекс Маркета (ACMA:... / businessId:ACMA:...) → отказ с подсказкой.
 
-Все операции логируются в file_operation_logs (журнал)
-и import_export_stats (статистика с замером времени).
-
-Rate-limits (на идентификатор: user_id или IP):
-  - /import/preview : 30/min
-  - /import (key/yml): 10/min, 100/day
-  - /import/file    : 10/min, 100/day
-
-B-1 (неделя 2): CPU-тяжёлый парсинг (openpyxl) и цикл записи в БД
-выносятся из async-роута в threadpool (asyncio.to_thread) —
-больше не блокируют event loop на весь импорт.
+Вынесено без изменений из монолита routers/import_router.py (Р13).
 """
 
 import asyncio
 import logging
-import os
 import time
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    File,
-    Form,
-    HTTPException,
-    Request,
-    UploadFile,
-)
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from connectors.yandex_seller import YandexSellerConnector
 from core.auth import get_current_user
 from core.platforms import PLATFORM_CONFIG
 from core.rate_limit import limiter
 from database.models import User
-from database.repository import op_log, repo, stats_repo
-from parsers import parse_file, preview_file
+from database.repository import op_log, stats_repo
 from parsers.yml_parser import YmlParser
+from routers.import_router._support import (
+    ImportRequest,
+    _parse_yandex_api_credentials,
+    _persist_imported_products,
+)
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api", tags=["Import"])
-
-MAX_IMPORT_FILE_SIZE = 15 * 1024 * 1024  # 15 МБ
-
-
-def _persist_imported_products(
-    user_id: int, source_label: str, mode: str, products_data: list
-) -> tuple[int, int]:
-    """
-    Синхронная запись распарсенных товаров в БД (create/upsert + варианты + атрибуты).
-    Вызывается через asyncio.to_thread из async-роута — синхронные repo-вызовы
-    не блокируют event loop (B-1). Возвращает (imported, updated).
-
-    P-2 (неделя 3): запись переведена на repo.bulk_import — одна сессия на весь
-    импорт, один commit на чанк (200 товаров), совпадения для upsert выбираются
-    одним запросом на чанк. Было: 4 сессии и 2-4 commit'а на каждый товар,
-    импорт 500 карточек = ~2000 сессий и ~1500 commit'ов.
-    """
-    return repo.bulk_import(
-        user_id=user_id,
-        source_label=source_label,
-        mode=mode,
-        products_data=products_data,
-    )
-
-
-class ImportRequest(BaseModel):
-    key: str = ""
-    full_key: str = ""
-    auth_key: str = ""
-    url: str = ""
-
-    def get_key(self) -> str:
-        """Единая точка получения ключа (поддерживает все варианты полей фронта)."""
-        return (self.key or self.full_key or self.auth_key).strip()
-
-
-def _source_label(platform: str) -> str:
-    """Каноническая метка источника импорта из файла."""
-    cfg = PLATFORM_CONFIG.get(platform) or {}
-    return f"{cfg.get('name', platform)} (Файл)"
-
-
-def _parse_yandex_api_credentials(raw_key: str) -> tuple[str, str] | None:
-    """
-    Разбирает строку ключа Яндекс Маркета.
-    Поддерживаемые форматы:
-      - 'yandex:217055223:ACMA:...'
-      - '217055223:ACMA:...'
-      - 'yandex:ACMA:...' (business_id берётся из YANDEX_BUSINESS_ID в .env)
-      - 'ACMA:...'        (business_id берётся из YANDEX_BUSINESS_ID в .env)
-    Возвращает (business_id, api_token) или None, если это не ключ Яндекса.
-    """
-    s = raw_key.strip()
-    if s.lower().startswith("yandex:"):
-        s = s[7:].strip()
-
-    default_biz_id = os.getenv("YANDEX_BUSINESS_ID", "217055223").strip()
-
-    # Вариант 1: сразу начинается с ACMA: или y0_
-    if s.startswith(("ACMA:", "y0_")):
-        if not default_biz_id:
-            raise ValueError(
-                "Укажите ID кабинета перед ключом через двоеточие: 'businessId:ACMA:...'"
-            )
-        return default_biz_id, s
-
-    # Вариант 2: '<business_id>:<token>' (где token может быть 'ACMA:...:...')
-    if ":" in s:
-        first, rest = s.split(":", 1)
-        if first.strip().isdigit() and (rest.startswith(("ACMA:", "y0_")) or len(rest) > 15):
-            return first.strip(), rest.strip()
-
-    return None
-
-
-# ==================== ПРЕДПРОСМОТР ФАЙЛА ====================
-@limiter.limit("30/minute")
-@router.post("/import/preview")
-async def preview_import(
-    request: Request,
-    platform: str = Form(...),
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-):
-    """Предпросмотр файла: первые строки + ошибки парсинга (без записи в БД)."""
-    if platform not in PLATFORM_CONFIG:
-        raise HTTPException(status_code=400, detail=f"Неизвестная платформа: {platform}")
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="Файл не выбран")
-
-    fname_lower = file.filename.lower()
-    if not (fname_lower.endswith(".csv") or fname_lower.endswith(".xlsx")):
-        raise HTTPException(status_code=400, detail="Поддерживаются только файлы .csv и .xlsx")
-    file_type = "csv" if fname_lower.endswith(".csv") else "xlsx"
-
-    try:
-        contents = await file.read()
-        if len(contents) > MAX_IMPORT_FILE_SIZE:
-            raise HTTPException(status_code=400, detail="Файл слишком большой (максимум 15 МБ)")
-        preview_data = await asyncio.to_thread(
-            preview_file, contents, platform, file_type, max_rows=10
-        )
-        return {"success": True, "preview": preview_data}
-    except HTTPException:
-        raise
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Ошибка предпросмотра: {e}")
-        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
-
+router = APIRouter()
 
 # ==================== ИМПОРТ ПО КЛЮЧУ / YML / МОК ====================
 @limiter.limit("10/minute;100/day")
@@ -463,150 +334,4 @@ async def import_products(
             "Для Яндекс Маркета укажите ключ в формате '217055223:ACMA:...' или YML-ссылку. "
             "Для демо-режима используйте 'test:test'."
         ),
-    }
-
-
-# ==================== ИМПОРТ ИЗ ФАЙЛА (XLSX / CSV) ====================
-@limiter.limit("10/minute;100/day")
-@router.post("/import/file")
-async def import_from_file(
-    request: Request,
-    platform: str = Form(...),
-    mode: str = Form("create"),  # create | upsert
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Импорт товаров из Excel (.xlsx) или CSV.
-    mode=upsert — обновляет существующие карточки по external_id/sku вместо дублей.
-    Варианты (SKU) и характеристики (attributes) из файла сохраняются в связанные таблицы.
-    """
-    t0 = time.perf_counter()
-
-    if platform not in PLATFORM_CONFIG:
-        raise HTTPException(status_code=400, detail=f"Неизвестная платформа: {platform}")
-    if mode not in ("create", "upsert"):
-        raise HTTPException(status_code=400, detail="Режим должен быть create или upsert")
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="Файл не выбран")
-
-    fname_lower = file.filename.lower()
-    if not (fname_lower.endswith(".csv") or fname_lower.endswith(".xlsx")):
-        raise HTTPException(status_code=400, detail="Поддерживаются только файлы .csv и .xlsx")
-    file_type = "csv" if fname_lower.endswith(".csv") else "xlsx"
-
-    # ---------- Парсинг ----------
-    try:
-        contents = await file.read()
-        if len(contents) > MAX_IMPORT_FILE_SIZE:
-            raise HTTPException(status_code=400, detail="Файл слишком большой (максимум 15 МБ)")
-        # openpyxl — CPU-bound, выносим в threadpool, чтобы не блокировать event loop (B-1)
-        result = await asyncio.to_thread(parse_file, contents, platform, file_type)
-    except HTTPException:
-        raise
-    except ValueError as e:
-        stats_repo.record(
-            user_id=current_user.id,
-            operation="import_file",
-            platform=platform,
-            status="error",
-            duration_ms=int((time.perf_counter() - t0) * 1000),
-        )
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Ошибка парсинга файла: {e}")
-        stats_repo.record(
-            user_id=current_user.id,
-            operation="import_file",
-            platform=platform,
-            status="error",
-            duration_ms=int((time.perf_counter() - t0) * 1000),
-        )
-        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера при обработке файла")
-
-    products_data = result["products"]
-    errors = result["errors"]
-
-    if not products_data:
-        op_log.log_file_operation(
-            user_id=current_user.id,
-            operation="import_file",
-            platform=platform,
-            filename=file.filename,
-            mode=mode,
-            status="error",
-            total_rows=result["total_rows"],
-            imported=0,
-            updated=0,
-            failed=len(errors),
-            errors=errors[:10],
-        )
-        stats_repo.record(
-            user_id=current_user.id,
-            operation="import_file",
-            platform=platform,
-            status="error",
-            total_items=result["total_rows"],
-            success_items=0,
-            failed_items=len(errors),
-            duration_ms=int((time.perf_counter() - t0) * 1000),
-        )
-        raise HTTPException(
-            status_code=400, detail="Не найдено валидных товаров в файле. Проверьте ошибки."
-        )
-
-    # ---------- Запись в БД ----------
-    # Синхронные repo-записи вынесены в threadpool: event loop не блокируется
-    # на время записи сотен товаров (B-1, неделя 2)
-    source_label = _source_label(platform)
-    imported, updated = await asyncio.to_thread(
-        _persist_imported_products, current_user.id, source_label, mode, products_data
-    )
-
-    logger.info(
-        f"✅ Импорт завершён: создано {imported}, обновлено {updated}, ошибок {len(errors)}",
-        extra={"user_id": current_user.id, "platform": platform},
-    )
-
-    # ---------- Логирование ----------
-    warnings = result.get("warnings", [])
-    message = f"Импорт завершён: создано {imported}, обновлено {updated}"
-    if warnings:
-        message += ". " + " ".join(w["message"] for w in warnings)
-
-    status_val = "success" if not errors else "partial"
-
-    op_log.log_file_operation(
-        user_id=current_user.id,
-        operation="import_file",
-        platform=platform,
-        filename=file.filename,
-        mode=mode,
-        status=status_val,
-        total_rows=result["total_rows"],
-        imported=imported,
-        updated=updated,
-        failed=len(errors),
-        errors=errors[:10],
-    )
-    stats_repo.record(
-        user_id=current_user.id,
-        operation="import_file",
-        platform=platform,
-        status=status_val,
-        total_items=result["total_rows"],
-        success_items=imported + updated,
-        failed_items=len(errors),
-        duration_ms=int((time.perf_counter() - t0) * 1000),
-    )
-
-    return {
-        "success": True,
-        "message": message,
-        "imported": imported,
-        "updated": updated,
-        "total_rows": result["total_rows"],
-        "failed": len(errors),
-        "errors": errors[:20],
-        "warnings": warnings,
     }

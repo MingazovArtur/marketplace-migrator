@@ -93,7 +93,7 @@ pre-commit run --all-files
 
 ## 3. Структура кода (после недели 4)
 
-Девять монолитов разбиты на пакеты с сохранением публичного API импортов
+Тринадцать монолитов разбиты на пакеты с сохранением публичного API импортов
 (ни один импортёр не менялся):
 
 | Было | Стало | Публичный API |
@@ -107,6 +107,10 @@ pre-commit run --all-files
 | `routers/categories.py` (687) — Р7 | пакет `routers/categories/`: `_support`, `specs_refresh`, `specs_admin`, `specs`, `catalog`, `mappings` | `from routers import categories; categories.router` |
 | `services/ozon_specs.py` (635) — Р8 | пакет `ozon_specs/`: `_http`, `_tree`, `_attributes`, `_storage`, `_refresh` | `from services.ozon_specs import refresh_ozon_specs` |
 | `services/specs_monitor.py` (419) — Р9 | пакет `specs_monitor/`: `_keys`, `_lifecycle`, `_pause`, `_queries` | `from services import specs_monitor` |
+| `routers/products.py` (791) — Р10 | пакет `routers/products/`: `_support`, `_bulk`, `_lists`, `_single`, `_delete` | `from routers import products; products.router`, `products.repo` (точки патчинга тестов) |
+| `services/tnved_mapper.py` (694) — Р11 | пакет `tnved_mapper/`: `_database_a`, `_database_b`, `_database` (склейка `{**A, **B}`), `_lookup` | `from services.tnved_mapper import suggest_tnved, get_tnved_description, search_tnved, TNVED_DATABASE` |
+| `services/spec_validator.py` (618) — Р12 | пакет `spec_validator/`: `_canon`, `_ozon_base`, `_attributes`, `_entry` | `from services.spec_validator import validate_product_by_spec, validate_products_by_specs` (импортёр routers/export/preview.py) |
+| `routers/import_router.py` (612) — Р13 | пакет `routers/import_router/`: `_support`, `_preview`, `_key_import`, `_file_import` | `from routers import import_router; import_router.router`, `import_router.repo`/`op_log`/`stats_repo` (точки патчинга) |
 
 Фронтенд (Р3–Р5): `pages/SpecsPage.jsx` (1115) → оркестрация 437 строк +
 `components/specs/`; `pages/ProductsPage.jsx` (1095) → 641 строка +
@@ -179,13 +183,39 @@ Push вместо polling + миниатюры (Round 8):
 - SSE-тайминги (POLL/HEARTBEAT/MAX_STREAM_SECONDS) — константы модуля
   `core/sse.py`, а не дефолты в сигнатуре: эндпоинты их не дублируют,
   тесты подменяют monkeypatch'ем (иначе SSE-тесты спят на реальных интервалах);
-- новые модули держим < 500 строк; следующие кандидаты на разбиение —
-  `routers/products.py` (791), `services/tnved_mapper.py` (694),
-  `services/spec_validator.py` (618), `routers/import_router.py` (611);
+- новые модули держим < 500 строк (справочник ТН ВЭД разбит на две части
+  именно поэтому); `spec_validator.py` (618) и `import_router.py` (612)
+  разбиты в Р12–Р13; следующие кандидаты — `services/xlsx_generator/
+  aliexpress.py` (604), `services/xlsx_generator/columns.py` (597),
+  `database/repository/products.py` (593), `tasks/migrate_tasks.py` (529);
+- в `services/tnved_mapper/` порядок ключей справочника МАТЕРИАЛЕН
+  (search_tnved отдаёт первые 10 совпадений в порядке справочника):
+  части `_database_a`/`_database_b` — последовательные строки монолита,
+  склейка `{**A, **B}` в `_database.py` воспроизводит порядок и значения
+  байт-в-байт (позиция дублированного ключа — из A, значение — из B;
+  тест test_key_order_and_cross_values);
 - в `services/specs_monitor/` redis_client импортирован отдельно в
   `_lifecycle`/`_pause`/`_queries` — тесты подменяют клиент в этих модулях
   (helper `_set_redis` в tests/test_specs_monitor.py), патч на пакете
   после разбиения больше не работает;
+- в `routers/products/` порядок include_router МАТЕРИАЛЕН: параметрические
+  GET/PATCH/DELETE `/products/{product_id}` (`_single`) включаются ПОСЛЕ
+  `_bulk` и `_lists`, где объявлены фиксированные GET-пути `/edit-history`,
+  `/category-counts`, `/categories-suggest` — иначе они ловятся как
+  product_id и отдают 422 (тест
+  test_fixed_get_paths_not_swallowed_by_parametric);
+- в `services/spec_validator/` канонические атрибуты (Бренд/Модель/Тип/
+  Маркировка) проверяются ОДИН раз в конце `_validate_attributes` через
+  filled_canons: пустой СИНОНИМ («Модель» при заполненном «Объединить
+  на одной карточке») ошибкой не считается; severity=error дают только
+  13 канонических колонок XLS-шаблона Ozon, прочие required-атрибуты —
+  warning (v3, согласование с XLS-шаблоном);
+- в `routers/import_router/` все 3 маршрута фиксированные — порядок
+  include_router на матчинг не влияет (сохранён как в монолите:
+  preview, import, file); точки патчинга `repo`/`op_log`/`stats_repo` —
+  модули database.repository, те же объекты, что в подмодулях; логгеры
+  подмодулей — иерархические дети `routers.import_router` (конфиг
+  логирования по имени родителя продолжает действовать);
 - маппинг «модуль → домен» описан в docstring каждого пакета.
 
 ## 4. SSRF и DNS-rebinding (E-4)
