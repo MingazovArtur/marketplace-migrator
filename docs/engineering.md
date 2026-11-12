@@ -93,7 +93,7 @@ pre-commit run --all-files
 
 ## 3. Структура кода (после недели 4)
 
-Пятнадцать монолитов разбиты на пакеты с сохранением публичного API импортов
+Девятнадцать монолитов разбиты на пакеты с сохранением публичного API импортов
 (ни один импортёр не менялся):
 
 | Было | Стало | Публичный API |
@@ -115,6 +115,8 @@ pre-commit run --all-files
 | `tasks/migrate_tasks.py` (529) — Р15 | пакет `migrate_tasks/`: `_notify`, `_single`, `_batch` | `from tasks.migrate_tasks import migrate_batch_task, migrate_product_task` (импортёр tasks/__init__.py); Celery-имена явные `tasks.*` |
 | `services/yandex_specs.py` (443) — Р16 | пакет `yandex_specs/`: `_http`, `_tree`, `_parameters`, `_storage`, `_refresh` | `from services.yandex_specs import refresh_yandex_specs` (импортёр tasks/catalog_tasks.py) |
 | `services/wb_specs.py` (313) — Р17 | пакет `wb_specs/`: `_http`, `_subjects`, `_characteristics`, `_storage`, `_refresh` | `from services.wb_specs import refresh_wildberries_specs` (импортёр tasks/catalog_tasks.py) |
+| `services/xlsx_generator/aliexpress.py` (604) — Р18 | под-пакет `xlsx_generator/aliexpress/`: `_layout`, `_rows`, `_workbook`, `_sheets`, `_utils` | `from services.xlsx_generator.aliexpress import build_aliexpress_workbook, ...` (импортёры export_builder.py, routers/export/files.py, routers/templates.py, xlsx_generator/__init__.py) |
+| `services/xlsx_generator/columns.py` (597) — Р19 | под-пакет `xlsx_generator/columns/`: `_styles`, `_ozon`, `_yandex` | `from services.xlsx_generator.columns import ...` (импортёры common/yandex/ozon/simple) |
 
 Фронтенд (Р3–Р5): `pages/SpecsPage.jsx` (1115) → оркестрация 437 строк +
 `components/specs/`; `pages/ProductsPage.jsx` (1095) → 641 строка +
@@ -192,9 +194,12 @@ Push вместо polling + миниатюры (Round 8):
   разбиты в Р12–Р13, `repository/products.py` (593) и `migrate_tasks.py`
   (529) — в Р14–Р15, `yandex_specs.py` (443) и `wb_specs.py` (313) — в
   Р16–Р17 (три sibling-сервиса спецификаций — ozon/yandex/wb — в
-  одинаковом пакетном виде); следующие кандидаты —
-  `services/xlsx_generator/aliexpress.py` (604),
-  `services/xlsx_generator/columns.py` (597);
+  одинаковом пакетном виде), `xlsx_generator/aliexpress.py` (604) и
+  `xlsx_generator/columns.py` (597) — в Р18–Р19 (под-пакеты внутри
+  пакета — прецедент `database/repository/products/`); все модули
+  xlsx_generator теперь < 500 строк; следующие кандидаты —
+  `tasks/matching.py` (459), `routers/photos.py` (298),
+  `tasks/catalog_tasks.py` (297);
 - в `database/repository/products/` класс собран из шести доменных
   миксинов (`_repository.py`), тела методов перенесены 1:1 без
   переопределений: и `self._to_dict` внутри методов, и статические
@@ -245,6 +250,12 @@ Push вместо polling + миниатюры (Round 8):
   спать на реальных интервалах); HTTP-запросы замокаются в тех подмодулях,
   где они используются (`_tree._post_ym`, `_parameters._post_ym`,
   `_subjects`/`_characteristics` — стаб-клиент), а не на пакете;
+- в `services/xlsx_generator/columns/` (Р19) данные шаблонов разложены по
+  площадкам (`_ozon`/`_yandex`), а общие тексты групп Ozon (G_*) и
+  подсказки — в `_styles`: `OZON_BASE_COLUMNS` ссылается на те же
+  объекты `G_NAME`/`G_PRICE`/…, что и монолит (реэкспорт через
+  `__init__` пакета), порядок кортежей перенесён 1:1 —
+  YANDEX_GROUP_MERGES (10 групп) покрывают все 48 колонок без дыр;
 - маппинг «модуль → домен» описан в docstring каждого пакета.
 
 ## 4. SSRF и DNS-rebinding (E-4)
