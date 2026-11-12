@@ -111,27 +111,23 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates, sele
     setValidation(null);
     setDefaultsResult(null);
     try {
-      const [pv, vv, prods, tpls] = await Promise.all([
+      // ✅ О3: счётчики категорий — лёгкий GROUP BY вместо выгрузки 10 000
+      // товаров с атрибутами и вариациями (было: api.getProducts({limit: 10000}))
+      const [pv, vv, countsRes, tpls] = await Promise.all([
         api.exportPreview(platform, status, activeIds, changedSince),
         api.validateExport(platform, status, activeIds, changedSince).catch(() => null),
         api
-          .getProducts({ status: status === 'all' ? undefined : status, limit: 10000 })
-          .catch(() => ({ products: [] })),
+          .getCategoryCounts({
+            status: status === 'all' ? undefined : status,
+            productIds: activeIds || undefined,
+          })
+          .catch(() => ({})),
         api.listOzonTemplates(platform).catch(() => ({ templates: [] })),
       ]);
       setPreview(pv);
       setValidation(vv);
       setTplSet(new Set(tpls.templates || []));
-
-      const counts = {};
-      const wanted = activeIds ? new Set(activeIds) : null;
-      (prods.products || [])
-        .filter((p) => (!wanted ? true : wanted.has(p.id)))
-        .forEach((p) => {
-          const c = p.mapped_category || p.category || 'Без категории';
-          counts[c] = (counts[c] || 0) + 1;
-        });
-      setCategoryCounts(counts);
+      setCategoryCounts(countsRes);
     } catch (e) {
       setPreviewError(e.message);
     } finally {

@@ -6,47 +6,27 @@ import DeleteConfirmModal from '../components/products/DeleteConfirmModal';
 import DefaultsModal from '../components/products/DefaultsModal';
 import BulkUpdateModal from '../components/products/BulkUpdateModal';
 import BatchTnvedModal from '../components/products/BatchTnvedModal';
+import ProductsTable from '../components/products/ProductsTable';
+import Pagination from '../components/products/Pagination';
+import GapsBanner from '../components/products/GapsBanner';
+import { useColumnResize } from '../components/products/useColumnResize';
+import { SORT_OPTIONS } from '../components/products/tableUtils';
+import {
+  computeSelectedGaps,
+  selectedBlockingTotal,
+  selectedFillableTotal,
+} from '../components/products/gapsHelpers';
 import { api } from '../api';
-import { GAP_LABELS, FILLED_LABELS, BLOCKING_GAP_FIELDS } from '../constants/gaps';
+import { FILLED_LABELS } from '../constants/gaps';
 
-const STATUS_META = {
-  pending: { label: 'Ожидает', cls: 'badge-pending' },
-  processing: { label: 'В работе', cls: 'badge-processing' },
-  success: { label: 'Успешно', cls: 'badge-success' },
-  error: { label: 'Ошибка', cls: 'badge-error' },
-};
-
-const SORT_OPTIONS = [
-  { value: 'newest', label: 'Сначала новые' },
-  { value: 'oldest', label: 'Сначала старые' },
-  { value: 'name_asc', label: 'Название А→Я' },
-  { value: 'name_desc', label: 'Название Я→А' },
-  { value: 'price_asc', label: 'Цена ↑' },
-  { value: 'price_desc', label: 'Цена ↓' },
-];
-
-// Ширины по умолчанию — ТОЛЬКО для компактных колонок. Колонка «Товар» (name)
-// без ширины: в table-layout:fixed она забирает всё свободное место, а остальные
-// колонки держатся по содержимому (раньше лишние пиксели распихивались
-// поровну и «Цена»/«Статус» раздувались втрое шире своего содержимого).
-const DEFAULT_WIDTHS = {
-  check: 36,
-  id: 56,
-  category: 190,
-  price: 96,
-  status: 100,
-  actions: 156,
-};
-
-const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
-
-// Цена в человеческом формате: 99.97 → «99,97», 1000 → «1 000»
-const fmtPrice = (v) => {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return '—';
-  return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
-};
-
+/* Страница «Товары».
+ *
+ * Р4: монолит ProductsPage.jsx (1095 строк) разбит — таблица в
+ * components/products/ProductsTable.jsx, пагинация в Pagination.jsx,
+ * баннер пропусков в GapsBanner.jsx (+ чистые gapsHelpers.js),
+ * ресайз колонок в useColumnResize.js, константы в tableUtils.js.
+ * Здесь осталась только оркестрация: состояние, CRUD-хендлеры, layout.
+ */
 const ProductsPage = ({
   isAdmin = false,
   refreshKey = 0,
@@ -70,7 +50,7 @@ const ProductsPage = ({
   const [skip, setSkip] = useState(0);
   const [limit, setLimit] = useState(50);
 
-  const [colWidths, setColWidths] = useState({});
+  const { colWidths, setColWidths, colStyle, Resizer } = useColumnResize();
 
   const [selected, setSelected] = useState([]);
   const [deleteMode, setDeleteMode] = useState(null);
@@ -166,52 +146,6 @@ const ProductsPage = ({
       .then((d) => setUndoAvailable(!!d.has_undo))
       .catch(() => setUndoAvailable(false));
   }, [refreshKey]);
-
-  // ==================== Ресайз колонок ====================
-  const resetCol = (key) => {
-    setColWidths((prev) => {
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-  };
-
-  const startResize = useCallback(
-    (key, e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const startX = e.pageX;
-      const th = e.target.closest('th');
-      const startW = colWidths[key] || th?.offsetWidth || DEFAULT_WIDTHS[key] || 120;
-
-      const onMove = (ev) => {
-        const w = Math.max(60, startW + (ev.pageX - startX));
-        setColWidths((prev) => ({ ...prev, [key]: w }));
-      };
-      const onUp = () => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    },
-    [colWidths]
-  );
-
-  const colStyle = (key) => ({ width: colWidths[key] || DEFAULT_WIDTHS[key] });
-
-  const Resizer = ({ colKey }) => (
-    <span
-      className="col-resizer"
-      onMouseDown={(e) => startResize(colKey, e)}
-      onDoubleClick={(e) => {
-        e.stopPropagation();
-        resetCol(colKey);
-      }}
-      onClick={(e) => e.stopPropagation()}
-      title="Тянуть — ширина, двойной клик — сброс"
-    />
-  );
 
   // ==================== Выделение ====================
   const toggleOne = (id) => {
@@ -355,62 +289,10 @@ const ProductsPage = ({
 
   const gapEntries = gaps ? Object.entries(gaps.gaps || {}).filter(([, n]) => n > 0) : [];
 
-  // Есть ли БЛОКИРУЮЩИЕ пропуски (цена 0 / нет фото) — от этого зависит цвет баннера:
-  // красный только когда миграция реально сломается, иначе — спокойное предупреждение
-  const hasBlockingGaps = gapEntries.some(([k]) => BLOCKING_GAP_FIELDS.includes(k));
-
-  // Чипы пропусков: три габарита (Ш×В×Д) с одинаковым счётчиком схлопываем
-  // в один «Габариты, мм — N», чтобы не читать три одинаковые строки
-  const gapChips = (() => {
-    const g = gaps?.gaps || {};
-    const dims = ['package_width_mm', 'package_height_mm', 'package_length_mm'];
-    const counts = dims.map((f) => g[f] || 0);
-    const same = counts[0] > 0 && counts.every((n) => n === counts[0]);
-    const out = [];
-    gapEntries.forEach(([k, n]) => {
-      if (dims.includes(k) && same) {
-        if (!out.some(([label]) => label === 'Габариты, мм')) out.push(['Габариты, мм', n]);
-      } else {
-        out.push([GAP_LABELS[k] || k, n]);
-      }
-    });
-    return out;
-  })();
-
-  // ✅ Пропуски в ВЫДЕЛЕННЫХ товарах (для badge и confirm)
-  const selectedGaps = useMemo(() => {
-    if (selected.length === 0) return null;
-    const selectedProducts = products.filter((p) => selected.includes(p.id));
-    const gapsLocal = {};
-    selectedProducts.forEach((p) => {
-      const price = Number(p.price);
-      if (!price || price <= 0 || isNaN(price)) gapsLocal.price = (gapsLocal.price || 0) + 1;
-      if (!p.photos || p.photos.length === 0)
-        gapsLocal.main_photo = (gapsLocal.main_photo || 0) + 1;
-      [
-        'vat_rate',
-        'okpd_code',
-        'package_weight_grams',
-        'package_width_mm',
-        'package_height_mm',
-        'package_length_mm',
-      ].forEach((f) => {
-        if (p[f] === null || p[f] === undefined || p[f] === '' || p[f] === 0) {
-          gapsLocal[f] = (gapsLocal[f] || 0) + 1;
-        }
-      });
-    });
-    return gapsLocal;
-  }, [selected, products]);
-
-  const selectedBlockingTotal = selectedGaps
-    ? BLOCKING_GAP_FIELDS.reduce((acc, k) => acc + (selectedGaps[k] || 0), 0)
-    : 0;
-  const selectedFillableTotal = selectedGaps
-    ? Object.entries(selectedGaps)
-        .filter(([k]) => !BLOCKING_GAP_FIELDS.includes(k))
-        .reduce((acc, [, n]) => acc + n, 0)
-    : 0;
+  // ✅ Пропуски в ВЫДЕЛЕННЫХ товарах (для панели массовых действий)
+  const selGaps = useMemo(() => computeSelectedGaps(products, selected), [products, selected]);
+  const selBlockingTotal = selectedBlockingTotal(selGaps);
+  const selFillableTotal = selectedFillableTotal(selGaps);
 
   const page = Math.floor(skip / limit) + 1;
   const pages = Math.max(1, Math.ceil(total / limit));
@@ -437,51 +319,14 @@ const ProductsPage = ({
       </header>
 
       {/* ==================== Баннер пропусков ==================== */}
-      {gaps && gaps.total > 0 && gapEntries.length > 0 && (
-        <div
-          className={`alert gaps-banner ${hasBlockingGaps ? 'alert-error' : 'alert-warning'}`}
-          style={{ marginBottom: '0.75rem' }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}
-            >
-              <strong>
-                {hasBlockingGaps ? '❌ Не всё готово к выгрузке' : '⚠️ Не хватает полей'} —{' '}
-                {gaps.products_with_gaps ?? gaps.total} из {gaps.total} товаров:
-              </strong>
-              {gapChips.map(([label, n]) => (
-                <span key={label} className="gap-chip">
-                  {label} <strong>{n}</strong>
-                </span>
-              ))}
-            </div>
-            {selected.length > 0 && selectedBlockingTotal + selectedFillableTotal > 0 && (
-              <div style={{ marginTop: '0.3rem', fontSize: '0.8rem', opacity: 0.9 }}>
-                В выделенных ({selected.length}):{' '}
-                {Object.entries(selectedGaps || {})
-                  .filter(([, n]) => n > 0)
-                  .map(([k, n]) => `${GAP_LABELS[k] || k} — ${n}`)
-                  .join('; ')}
-              </div>
-            )}
-            <div style={{ marginTop: '0.3rem', fontSize: '0.8rem', opacity: 0.75 }}>
-              {hasBlockingGaps
-                ? 'Цена 0 и отсутствие фото блокируют миграцию — заполните их. Остальные поля дозаполнятся из «Дефолтов».'
-                : 'Кнопка «Заполнить из дефолтов» допишет пустые НДС, ТН ВЭД, вес, габариты и цену по умолчанию.'}
-            </div>
-          </div>
-          <Button
-            size="small"
-            onClick={() => handleApplyDefaults('all')}
-            loading={applyLoading}
-            title="Дозаполнит пустые поля у всех товаров из глобальных дефолтов и дефолтов категорий"
-            style={{ alignSelf: 'center', whiteSpace: 'nowrap' }}
-          >
-            <Icon name="edit" size={15} /> Заполнить из дефолтов
-          </Button>
-        </div>
-      )}
+      <GapsBanner
+        gaps={gaps}
+        gapEntries={gapEntries}
+        products={products}
+        selected={selected}
+        applyLoading={applyLoading}
+        onApplyDefaults={handleApplyDefaults}
+      />
 
       {/* ==================== Фильтры + сброс ширины колонок ==================== */}
       <div
@@ -635,13 +480,13 @@ const ProductsPage = ({
               size="small"
               onClick={handleMigrateSelected}
               title={
-                selectedBlockingTotal > 0
-                  ? `⚠️ В ${selectedBlockingTotal} товарах есть блокирующие пропуски — миграция может завершиться с ошибками`
+                selBlockingTotal > 0
+                  ? `⚠️ В ${selBlockingTotal} товарах есть блокирующие пропуски — миграция может завершиться с ошибками`
                   : 'Запустить миграцию выделенных товаров'
               }
             >
               <Icon name="migrate" size={15} /> Мигрировать выбранные
-              {selectedBlockingTotal > 0 && (
+              {selBlockingTotal > 0 && (
                 <span
                   style={{
                     marginLeft: '0.4rem',
@@ -653,13 +498,13 @@ const ProductsPage = ({
                     fontWeight: 700,
                   }}
                 >
-                  ⚠ {selectedBlockingTotal}
+                  ⚠ {selBlockingTotal}
                 </span>
               )}
             </Button>
           )}
           {/* ✅ Кнопка дозаполнения ТОЛЬКО выделенных (независимо от баннера) */}
-          {selectedFillableTotal > 0 && (
+          {selFillableTotal > 0 && (
             <Button
               variant="outline"
               size="small"
@@ -667,7 +512,7 @@ const ProductsPage = ({
               loading={applyLoading}
               title="Дозаполнит пустые поля (НДС, ТН ВЭД, ОВХ, вес) из дефолтов только у выделенных товаров"
             >
-              <Icon name="edit" size={15} /> Заполнить пропуски выделенных ({selectedFillableTotal})
+              <Icon name="edit" size={15} /> Заполнить пропуски выделенных ({selFillableTotal})
             </Button>
           )}
           {/* ✅ v4: массовый подбор ТН ВЭД для выделенных */}
@@ -705,336 +550,37 @@ const ProductsPage = ({
           onAction={onImport}
         />
       ) : (
-        <div
-          className="card"
-          style={{ padding: 0, overflowX: 'auto' }}
-          data-onboarding="products-table"
-        >
-          <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: '0.85rem',
-              tableLayout: 'fixed',
-            }}
-          >
-            <thead style={{ background: 'var(--bg-secondary)' }}>
-              <tr>
-                <th className="th-resizable" style={{ padding: '0.6rem', ...colStyle('check') }}>
-                  <input
-                    type="checkbox"
-                    checked={products.length > 0 && products.every((p) => selected.includes(p.id))}
-                    onChange={toggleAll}
-                  />
-                  <Resizer colKey="check" />
-                </th>
-                <th
-                  className="th-resizable"
-                  style={{ textAlign: 'left', padding: '0.6rem', ...colStyle('id') }}
-                >
-                  ID <Resizer colKey="id" />
-                </th>
-                <th
-                  className="th-resizable"
-                  style={{ textAlign: 'left', padding: '0.6rem', ...colStyle('name') }}
-                >
-                  Товар <Resizer colKey="name" />
-                </th>
-                <th
-                  className="th-resizable"
-                  style={{ textAlign: 'left', padding: '0.6rem', ...colStyle('category') }}
-                >
-                  Категория → Ozon <Resizer colKey="category" />
-                </th>
-                <th
-                  className="th-resizable"
-                  style={{ textAlign: 'right', padding: '0.6rem', ...colStyle('price') }}
-                >
-                  Цена <Resizer colKey="price" />
-                </th>
-                <th
-                  className="th-resizable"
-                  style={{ textAlign: 'center', padding: '0.6rem', ...colStyle('status') }}
-                >
-                  Статус <Resizer colKey="status" />
-                </th>
-                <th
-                  className="th-resizable"
-                  style={{ textAlign: 'center', padding: '0.6rem', ...colStyle('actions') }}
-                >
-                  Действия <Resizer colKey="actions" />
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {products.map((p) => {
-                const st = STATUS_META[p.status] || STATUS_META.pending;
-                const price = Number(p.price);
-                const priceBad = !price || price <= 0 || isNaN(price);
-                const photoBad = !p.photos || p.photos.length === 0;
-                const hasBlocking = priceBad || photoBad;
-                return (
-                  <tr key={p.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                    <td style={{ padding: '0.6rem', overflow: 'hidden' }}>
-                      <input
-                        type="checkbox"
-                        checked={selected.includes(p.id)}
-                        onChange={() => toggleOne(p.id)}
-                      />
-                    </td>
-                    <td
-                      style={{
-                        padding: '0.6rem',
-                        color: 'var(--text-muted)',
-                        fontFamily: 'monospace',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {p.id}
-                    </td>
-                    <td style={{ padding: '0.6rem', overflow: 'hidden' }}>
-                      <div
-                        style={{
-                          fontWeight: 600,
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        }}
-                        title={p.name}
-                      >
-                        {p.name}
-                      </div>
-                      <div
-                        style={{
-                          color: 'var(--text-muted)',
-                          fontSize: '0.75rem',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        }}
-                      >
-                        {p.sku || p.external_id || 'без артикула'} · {p.source}
-                      </div>
-                    </td>
-                    <td
-                      style={{
-                        padding: '0.6rem',
-                        color: 'var(--text-secondary)',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        style={{
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        }}
-                      >
-                        {p.category || 'Не указана'}
-                      </div>
-                      {p.mapped_category && (
-                        <div
-                          style={{
-                            fontSize: '0.75rem',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                          }}
-                        >
-                          → {p.mapped_category}
-                        </div>
-                      )}
-                    </td>
-                    <td
-                      style={{
-                        padding: '0.6rem',
-                        textAlign: 'right',
-                        fontWeight: 600,
-                        overflow: 'hidden',
-                        color: priceBad ? 'var(--danger, #ef4444)' : undefined,
-                      }}
-                      title={
-                        priceBad
-                          ? '❌ Цена не указана или = 0 — миграция будет отклонена'
-                          : undefined
-                      }
-                    >
-                      {priceBad ? '❌ —' : `${fmtPrice(p.price)} ₽`}
-                    </td>
-                    <td style={{ padding: '0.6rem', textAlign: 'center', overflow: 'hidden' }}>
-                      <span className={`badge ${st.cls}`}>{st.label}</span>
-                    </td>
-                    <td style={{ padding: '0.45rem 0.6rem', overflow: 'hidden' }}>
-                      {/* Компактные иконки-кнопки: раньше у каждой было 16px
-                          горизонтального паддинга и кнопка была втрое шире иконки */}
-                      <div className="row-actions">
-                        {onLogistics && (
-                          <Button
-                            variant="secondary"
-                            size="small"
-                            className="btn-icon"
-                            title="Логистика: вес, габариты, НДС, ТН ВЭД"
-                            onClick={() => onLogistics(p)}
-                          >
-                            <Icon name="box" size={19} />
-                          </Button>
-                        )}
-                        {onAttributes && (
-                          <Button
-                            variant="secondary"
-                            size="small"
-                            className="btn-icon"
-                            title="Характеристики"
-                            onClick={() => onAttributes(p)}
-                          >
-                            <Icon name="tag" size={19} />
-                          </Button>
-                        )}
-                        {onVariants && (
-                          <Button
-                            variant="secondary"
-                            size="small"
-                            className="btn-icon"
-                            title="Варианты (SKU)"
-                            onClick={() => onVariants(p)}
-                          >
-                            <Icon name="variants" size={19} />
-                          </Button>
-                        )}
-                        {onPhotos && (
-                          <Button
-                            variant="secondary"
-                            size="small"
-                            className="btn-icon"
-                            title={
-                              photoBad ? '❌ Фото отсутствует — миграция будет отклонена' : 'Фото'
-                            }
-                            onClick={() => onPhotos(p)}
-                            style={
-                              photoBad
-                                ? { boxShadow: '0 0 0 2px var(--danger, #ef4444)' }
-                                : undefined
-                            }
-                          >
-                            <Icon name="photo" size={19} />
-                          </Button>
-                        )}
-                        {onMigrate && (
-                          <Button
-                            variant="secondary"
-                            size="small"
-                            className="btn-icon"
-                            data-onboarding="migrate-btn"
-                            title={
-                              hasBlocking ? '⚠️ Товар имеет блокирующие пропуски' : 'Мигрировать'
-                            }
-                            onClick={() => onMigrate(p)}
-                            style={
-                              hasBlocking
-                                ? { boxShadow: '0 0 0 2px var(--warning, #f59e0b)' }
-                                : undefined
-                            }
-                          >
-                            <Icon name="migrate" size={19} />
-                          </Button>
-                        )}
-                        <Button
-                          variant="secondary"
-                          size="small"
-                          className="btn-icon"
-                          title="Удалить товар"
-                          onClick={() => {
-                            setDeleteTargetId(p.id);
-                            setDeleteMode('single');
-                          }}
-                        >
-                          <Icon name="trash" size={19} />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <ProductsTable
+          products={products}
+          selected={selected}
+          onToggleOne={toggleOne}
+          onToggleAll={toggleAll}
+          onLogistics={onLogistics}
+          onAttributes={onAttributes}
+          onVariants={onVariants}
+          onPhotos={onPhotos}
+          onMigrate={onMigrate}
+          onDelete={(id) => {
+            setDeleteTargetId(id);
+            setDeleteMode('single');
+          }}
+          resize={{ colStyle, Resizer }}
+        />
       )}
 
       {/* ==================== Пагинация ==================== */}
-      {total > 0 && (
-        <div
-          style={{
-            display: 'flex',
-            gap: '0.5rem',
-            justifyContent: 'center',
-            alignItems: 'center',
-            marginTop: '0.75rem',
-            flexWrap: 'wrap',
-          }}
-        >
-          <Button
-            variant="secondary"
-            size="small"
-            disabled={skip === 0}
-            onClick={() => setSkip(0)}
-            title="Первая страница"
-          >
-            « В начало
-          </Button>
-          <Button
-            variant="secondary"
-            size="small"
-            disabled={skip === 0}
-            onClick={() => setSkip(Math.max(0, skip - limit))}
-          >
-            ← Назад
-          </Button>
-          <span
-            style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', padding: '0 0.25rem' }}
-          >
-            Стр. {page} из {pages} · всего {total}
-          </span>
-          <Button
-            variant="secondary"
-            size="small"
-            disabled={skip + limit >= total}
-            onClick={() => setSkip(skip + limit)}
-          >
-            Вперёд →
-          </Button>
-          <Button
-            variant="secondary"
-            size="small"
-            disabled={skip + limit >= total}
-            onClick={() => setSkip((pages - 1) * limit)}
-            title="Последняя страница"
-          >
-            В конец »
-          </Button>
-          <select
-            className="form-input"
-            style={{
-              width: 64,
-              padding: '0.25rem 0.4rem',
-              marginLeft: '0.5rem',
-              textAlign: 'center',
-              fontSize: '0.85rem',
-            }}
-            value={limit}
-            onChange={(e) => {
-              setLimit(Number(e.target.value));
-              setSkip(0);
-            }}
-            title="Товаров на странице"
-          >
-            {PAGE_SIZE_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+      <Pagination
+        total={total}
+        skip={skip}
+        limit={limit}
+        page={page}
+        pages={pages}
+        onSkipChange={setSkip}
+        onLimitChange={(n) => {
+          setLimit(n);
+          setSkip(0);
+        }}
+      />
 
       {/* ==================== Модалки ==================== */}
       {deleteMode && (

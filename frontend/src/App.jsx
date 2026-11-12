@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import CategoryMapping from './CategoryMapping';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { useProducts } from './hooks/useProducts';
 import { useMigration } from './hooks/useMigration';
@@ -18,21 +17,47 @@ import ExportModal from './components/export/ExportModal';
 import AttributesModal from './components/products/AttributesModal';
 import VariantsModal from './components/products/VariantsModal';
 import PhotosModal from './components/products/PhotosModal';
-import HistoryView from './components/history/HistoryView';
-import StatsDashboard from './components/dashboard/StatsDashboard';
 import EmailVerificationBanner from './components/layout/EmailVerificationBanner';
-import { PrivacyPolicyPage, TermsOfUsePage } from './pages/Legal';
-import { VerifyEmailPage, ForgotPasswordPage, ResetPasswordPage } from './pages/EmailPages';
-import HelpPage from './pages/HelpPage';
 import { api } from './api';
 import './App.css';
 import EmptyState from './components/common/EmptyState';
 import OnboardingTour from './components/onboarding/OnboardingTour';
 import LogisticsModal from './components/products/LogisticsModal';
-import SpecsPage from './pages/SpecsPage';
-import SpecsMonitorPage from './pages/SpecsMonitorPage';
 import ProductsPage from './pages/ProductsPage';
-import TemplatesPage from './pages/TemplatesPage';
+
+/* ✅ О4: code-splitting — редко открываемые страницы выгружаются в отдельные
+ * чанки и грузятся при первом заходе. Дефолтный вид «products» и модалки
+ * остаются в главном чанке: они нужны сразу после логина. */
+const CategoryMapping = lazy(() => import('./CategoryMapping'));
+const HistoryView = lazy(() => import('./components/history/HistoryView'));
+const StatsDashboard = lazy(() => import('./components/dashboard/StatsDashboard'));
+const SpecsPage = lazy(() => import('./pages/SpecsPage'));
+const SpecsMonitorPage = lazy(() => import('./pages/SpecsMonitorPage'));
+const TemplatesPage = lazy(() => import('./pages/TemplatesPage'));
+const HelpPage = lazy(() => import('./pages/HelpPage'));
+const PrivacyPolicyPage = lazy(() =>
+  import('./pages/Legal').then((m) => ({ default: m.PrivacyPolicyPage }))
+);
+const TermsOfUsePage = lazy(() => import('./pages/Legal').then((m) => ({ default: m.TermsOfUsePage })));
+const VerifyEmailPage = lazy(() =>
+  import('./pages/EmailPages').then((m) => ({ default: m.VerifyEmailPage }))
+);
+const ForgotPasswordPage = lazy(() =>
+  import('./pages/EmailPages').then((m) => ({ default: m.ForgotPasswordPage }))
+);
+const ResetPasswordPage = lazy(() =>
+  import('./pages/EmailPages').then((m) => ({ default: m.ResetPasswordPage }))
+);
+
+/* Заглушка Suspense: единый стиль с внутристранничными спиннерами */
+const ViewFallback = () => (
+  <div className="card">
+    <div className="loading-spinner">
+      <div className="spinner" />
+      <p style={{ color: 'var(--text-secondary)' }}>Загрузка...</p>
+    </div>
+  </div>
+);
 
 function App() {
   const [hash, setHash] = useState(window.location.hash);
@@ -292,12 +317,42 @@ function App() {
   const hashPath = hash.split('?')[0];
   const hashQuery = new URLSearchParams(hash.split('?')[1] || '');
 
-  if (hashPath === '#/privacy') return <PrivacyPolicyPage />;
-  if (hashPath === '#/terms') return <TermsOfUsePage />;
-  if (hashPath === '#/verify-email') return <VerifyEmailPage token={hashQuery.get('token')} />;
-  if (hashPath === '#/forgot-password') return <ForgotPasswordPage />;
-  if (hashPath === '#/reset-password') return <ResetPasswordPage token={hashQuery.get('token')} />;
-  if (hashPath === '#/help') return <HelpPage />;
+  if (hashPath === '#/privacy')
+    return (
+      <Suspense fallback={<ViewFallback />}>
+        <PrivacyPolicyPage />
+      </Suspense>
+    );
+  if (hashPath === '#/terms')
+    return (
+      <Suspense fallback={<ViewFallback />}>
+        <TermsOfUsePage />
+      </Suspense>
+    );
+  if (hashPath === '#/verify-email')
+    return (
+      <Suspense fallback={<ViewFallback />}>
+        <VerifyEmailPage token={hashQuery.get('token')} />
+      </Suspense>
+    );
+  if (hashPath === '#/forgot-password')
+    return (
+      <Suspense fallback={<ViewFallback />}>
+        <ForgotPasswordPage />
+      </Suspense>
+    );
+  if (hashPath === '#/reset-password')
+    return (
+      <Suspense fallback={<ViewFallback />}>
+        <ResetPasswordPage token={hashQuery.get('token')} />
+      </Suspense>
+    );
+  if (hashPath === '#/help')
+    return (
+      <Suspense fallback={<ViewFallback />}>
+        <HelpPage />
+      </Suspense>
+    );
 
   // ==================== Виды ====================
   const renderDashboard = () => {
@@ -313,7 +368,9 @@ function App() {
         {hasProducts ? (
           <>
             <StatsGrid stats={stats} />
-            <StatsDashboard />
+            <Suspense fallback={<ViewFallback />}>
+              <StatsDashboard />
+            </Suspense>
           </>
         ) : (
           <EmptyState
@@ -378,21 +435,39 @@ function App() {
       case 'import':
         return renderImport();
       case 'mapping':
-        return <CategoryMapping onBack={() => setCurrentView('products')} />;
+        return (
+          <Suspense fallback={<ViewFallback />}>
+            <CategoryMapping onBack={() => setCurrentView('products')} />
+          </Suspense>
+        );
       case 'history':
-        return <HistoryView />;
+        return (
+          <Suspense fallback={<ViewFallback />}>
+            <HistoryView />
+          </Suspense>
+        );
       case 'specs':
         return (
-          <SpecsPage
-            user={user}
-            onNotify={setMessage}
-            onOpenMonitor={() => setCurrentView('specs-monitor')}
-          />
+          <Suspense fallback={<ViewFallback />}>
+            <SpecsPage
+              user={user}
+              onNotify={setMessage}
+              onOpenMonitor={() => setCurrentView('specs-monitor')}
+            />
+          </Suspense>
         );
       case 'specs-monitor':
-        return <SpecsMonitorPage user={user} />;
+        return (
+          <Suspense fallback={<ViewFallback />}>
+            <SpecsMonitorPage user={user} />
+          </Suspense>
+        );
       case 'templates':
-        return <TemplatesPage onNotify={setMessage} />;
+        return (
+          <Suspense fallback={<ViewFallback />}>
+            <TemplatesPage onNotify={setMessage} />
+          </Suspense>
+        );
       case 'products':
         return (
           <ProductsPage

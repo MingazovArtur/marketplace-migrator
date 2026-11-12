@@ -89,7 +89,7 @@ pre-commit run --all-files
 
 ## 3. Структура кода (после недели 4)
 
-Три монолита разбиты на пакеты с сохранением публичного API импортов
+Пять монолитов разбиты на пакеты с сохранением публичного API импортов
 (ни один импортёр не менялся):
 
 | Было | Стало | Публичный API |
@@ -97,13 +97,21 @@ pre-commit run --all-files
 | `tasks.py` (1331 строк) | пакет `tasks/`: `recovery`, `matching`, `progress`, `migrate_tasks`, `media_tasks`, `catalog_tasks`, `export_tasks` | `from tasks import get_progress, migrate_product_task, ...` |
 | `database/repository.py` (1087) | пакет `repository/`: `products`, `operation_logs`, `attributes`, `variants`, `stats` | `from database.repository import repo, op_log, attr_repo, variant_repo, stats_repo` |
 | `services/xlsx_generator.py` (1455) | пакет `xlsx_generator/`: `columns`, `common`, `yandex`, `ozon`, `simple` | `from services.xlsx_generator import generate_export` |
+| `routers/export.py` (985) — Р1 | пакет `routers/export/`: `_support`, `_queries`, `_xlsx_dispatch`, `templates`, `preview`, `files`, `xlsx` | `from routers import export; export.router` |
+| `services/template_filler.py` (993) — Р2 | пакет `template_filler/`: `_common`, `_sheet_scan`, `_storage`, `_values`, `_filler` | `from services.template_filler import fill_official_template, ...` |
+
+Фронтенд (Р3–Р5): `pages/SpecsPage.jsx` (1115) → оркестрация 437 строк +
+`components/specs/`; `pages/ProductsPage.jsx` (1095) → 641 строка +
+`components/products/` (таблица/пагинация/баннер/хуки); `src/api.js` (1016,
+82 метода) → пакет `src/api/` из 10 доменных модулей с агрегатором
+`api/index.js` (`import { api } from '../api'` работает без изменений).
 
 Правила:
 
 - имена Celery-задач заданы явно (`name="tasks.*"`) и НЕ зависят от пути
   модуля — маршрутизация очередей в `celery_app.py` стабильна;
 - новые модули держим < 500 строк; следующий кандидат на разбиение —
-  `services/template_filler.py` (983 строки);
+  `services/category_service.py` (709) и `routers/categories.py` (687);
 - маппинг «модуль → домен» описан в docstring каждого пакета.
 
 ## 4. SSRF и DNS-rebinding (E-4)

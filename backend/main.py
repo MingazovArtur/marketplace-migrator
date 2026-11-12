@@ -2,7 +2,7 @@
 Главный файл приложения FastAPI
 
 Порядок обработки запроса (от внешнего к внутреннему):
-  Запрос → CORS (самый внешний) → SlowAPI → ban_check → роутер
+  Запрос → CORS (самый внешний) → GZip → SlowAPI → ban_check → роутер
 """
 
 import logging
@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -27,19 +28,23 @@ from routers import (
     attributes,
     auth,
     categories,
-    defaults as defaults_router,
     email_router,
     export,
     history,
     import_router,
-    media as media_router,  # ✅ /media с авторизацией (замена StaticFiles)
     photos,  # ✅ ИСПРАВЛЕНО: подключен роутер фотографий
-    profiles,  # ✅ v4: профили миграции (площадка + дефолты)
     products,
+    profiles,  # ✅ v4: профили миграции (площадка + дефолты)
     stats,
     templates,
     tnved,
     variants,
+)
+from routers import (
+    defaults as defaults_router,
+)
+from routers import (
+    media as media_router,  # ✅ /media с авторизацией (замена StaticFiles)
 )
 from routers.health import router as health_router
 from routers.migrate_router import router as migrate_router
@@ -112,7 +117,14 @@ async def ban_check_middleware(request: Request, call_next):
 
 
 # ============================================================
-# 2. SlowAPI — глобальный rate-limit
+# 2. GZip — сжатие API-ответов ≥1 КБ (списки товаров/спеков
+#    сжимаются в 5–10 раз; XLSX/ZIP уже сжаты и повторно не жмутся)
+# ============================================================
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+
+# ============================================================
+# 3. SlowAPI — глобальный rate-limit
 # ============================================================
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)

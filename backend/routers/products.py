@@ -275,6 +275,41 @@ async def bulk_preview_products(
     return {"success": True, "preview": preview, "category": category_info}
 
 
+@router.get("/products/category-counts")
+async def products_category_counts(
+    status: str = Query(None, description="Фильтр по статусу (all/None — без фильтра)"),
+    product_ids: str = Query(None, description="CSV id: считать только по этим товарам"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    ✅ О3: счётчики товаров по категориям назначения одним GROUP BY.
+    Замена выгрузки 10 000 товаров в окно экспорта ради «Недостающих шаблонов»:
+    один агрегатный SQL вместо полной выборки с атрибутами и вариациями.
+    """
+    # coalesce+nullif повторяет семантику JS `mapped_category || category || 'Без категории'`:
+    # пустая строка считается отсутствием значения, как на фронте
+    category_expr = func.coalesce(
+        func.nullif(ProductORM.mapped_category, ""),
+        func.nullif(ProductORM.category, ""),
+        "Без категории",
+    )
+    stmt = (
+        select(category_expr, func.count(ProductORM.id))
+        .where(ProductORM.user_id == current_user.id)
+        .group_by(category_expr)
+    )
+    if status and status not in ("all", ""):
+        stmt = stmt.where(ProductORM.status == status)
+    if product_ids:
+        id_list = [int(x) for x in product_ids.split(",") if x.strip().isdigit()]
+        if id_list:
+            stmt = stmt.where(ProductORM.id.in_(id_list))
+
+    rows = (await db.execute(stmt)).all()
+    return {"counts": dict(rows)}
+
+
 @router.get("/products/categories-suggest")
 async def categories_suggest(
     q: str = Query("", max_length=200),
