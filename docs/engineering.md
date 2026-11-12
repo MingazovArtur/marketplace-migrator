@@ -113,6 +113,8 @@ pre-commit run --all-files
 | `routers/import_router.py` (612) — Р13 | пакет `routers/import_router/`: `_support`, `_preview`, `_key_import`, `_file_import` | `from routers import import_router; import_router.router`, `import_router.repo`/`op_log`/`stats_repo` (точки патчинга) |
 | `database/repository/products.py` (593) — Р14 | пакет `repository/products/`: `_serialize`, `_filters`, `_async_reads`, `_sync_reads`, `_writes`, `_bulk_import`, сборка класса `_repository` (миксины) | `from database.repository.products import ProductRepository, repo`; статические `ProductRepository._to_dict/_variant_rows/_attr_rows` (через класс — variants.py/attributes.py/test_money_helpers.py) |
 | `tasks/migrate_tasks.py` (529) — Р15 | пакет `migrate_tasks/`: `_notify`, `_single`, `_batch` | `from tasks.migrate_tasks import migrate_batch_task, migrate_product_task` (импортёр tasks/__init__.py); Celery-имена явные `tasks.*` |
+| `services/yandex_specs.py` (443) — Р16 | пакет `yandex_specs/`: `_http`, `_tree`, `_parameters`, `_storage`, `_refresh` | `from services.yandex_specs import refresh_yandex_specs` (импортёр tasks/catalog_tasks.py) |
+| `services/wb_specs.py` (313) — Р17 | пакет `wb_specs/`: `_http`, `_subjects`, `_characteristics`, `_storage`, `_refresh` | `from services.wb_specs import refresh_wildberries_specs` (импортёр tasks/catalog_tasks.py) |
 
 Фронтенд (Р3–Р5): `pages/SpecsPage.jsx` (1115) → оркестрация 437 строк +
 `components/specs/`; `pages/ProductsPage.jsx` (1095) → 641 строка +
@@ -188,7 +190,9 @@ Push вместо polling + миниатюры (Round 8):
 - новые модули держим < 500 строк (справочник ТН ВЭД разбит на две части
   именно поэтому); `spec_validator.py` (618) и `import_router.py` (612)
   разбиты в Р12–Р13, `repository/products.py` (593) и `migrate_tasks.py`
-  (529) — в Р14–Р15; следующие кандидаты —
+  (529) — в Р14–Р15, `yandex_specs.py` (443) и `wb_specs.py` (313) — в
+  Р16–Р17 (три sibling-сервиса спецификаций — ozon/yandex/wb — в
+  одинаковом пакетном виде); следующие кандидаты —
   `services/xlsx_generator/aliexpress.py` (604),
   `services/xlsx_generator/columns.py` (597);
 - в `database/repository/products/` класс собран из шести доменных
@@ -232,6 +236,15 @@ Push вместо polling + миниатюры (Round 8):
   модули database.repository, те же объекты, что в подмодулях; логгеры
   подмодулей — иерархические дети `routers.import_router` (конфиг
   логирования по имени родителя продолжает действовать);
+- в `services/yandex_specs/` и `services/wb_specs/` (как и в `ozon_specs/`)
+  кооперативная пауза на разных границах: Яндекс — между чанками записи
+  (блок дообрабатывается и коммитится, `DB_CHUNK` в `_refresh` — тесты
+  подменяют его monkeypatch'ем), WB — перед каждым предметом (построчный
+  upsert, отклик почти мгновенный); задержка `WB_REQUEST_DELAY` между
+  предметами — константа `_refresh` (тесты подменяют её на 0, чтобы не
+  спать на реальных интервалах); HTTP-запросы замокаются в тех подмодулях,
+  где они используются (`_tree._post_ym`, `_parameters._post_ym`,
+  `_subjects`/`_characteristics` — стаб-клиент), а не на пакете;
 - маппинг «модуль → домен» описан в docstring каждого пакета.
 
 ## 4. SSRF и DNS-rebinding (E-4)
