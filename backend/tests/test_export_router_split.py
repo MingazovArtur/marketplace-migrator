@@ -4,29 +4,11 @@
 списком эндпоинтов монолита (15 маршрутов). Если после рефакторинга
 какой-то декоратор потерялся или путь изменился — тест упадёт.
 
-Маршруты собираем через OpenAPI-схему приложения, а не наивным обходом
-router.routes: в Starlette >= 1.10 include_router оборачивает вложенные
-роутеры в объекты _IncludedRouter (без methods), и плоский обход видел
-«пустой» роутер. OpenAPI показывает ровно то, что реально сервится,
-в любой версии FastAPI/Starlette.
+Маршруты собираем через OpenAPI-схему (хелпер served_routes из
+_route_helpers.py) — версионно-стойко для FastAPI/Starlette.
 """
 
-_HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head", "trace"}
-
-
-def _served_routes(router):
-    """Множество (path, method), которые FastAPI реально обслуживает для роутера."""
-    from fastapi import FastAPI
-
-    app = FastAPI()
-    app.include_router(router)
-    schema = app.openapi()
-    return {
-        (path, method.upper())
-        for path, ops in schema.get("paths", {}).items()
-        for method in ops
-        if method.lower() in _HTTP_METHODS
-    }
+from _route_helpers import served_routes
 
 EXPECTED_ROUTES = {
     ("/api/export/ozon-template/upload", "POST"),
@@ -50,7 +32,7 @@ EXPECTED_ROUTES = {
 def test_export_router_routes_preserved():
     from routers import export
 
-    actual = _served_routes(export.router)
+    actual = served_routes(export.router)
 
     missing = EXPECTED_ROUTES - actual
     extra = actual - EXPECTED_ROUTES
@@ -88,5 +70,5 @@ def test_category_counts_route_registered():
     """О3: лёгкий эндпоинт счётчиков категорий зарегистрирован в роутере товаров."""
     from routers import products as products_router
 
-    paths = {path for path, _ in _served_routes(products_router.router)}
+    paths = {path for path, _ in served_routes(products_router.router)}
     assert "/api/products/category-counts" in paths

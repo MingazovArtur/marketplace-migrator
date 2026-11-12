@@ -89,7 +89,7 @@ pre-commit run --all-files
 
 ## 3. Структура кода (после недели 4)
 
-Пять монолитов разбиты на пакеты с сохранением публичного API импортов
+Семь монолитов разбиты на пакеты с сохранением публичного API импортов
 (ни один импортёр не менялся):
 
 | Было | Стало | Публичный API |
@@ -99,6 +99,8 @@ pre-commit run --all-files
 | `services/xlsx_generator.py` (1455) | пакет `xlsx_generator/`: `columns`, `common`, `yandex`, `ozon`, `simple` | `from services.xlsx_generator import generate_export` |
 | `routers/export.py` (985) — Р1 | пакет `routers/export/`: `_support`, `_queries`, `_xlsx_dispatch`, `templates`, `preview`, `files`, `xlsx` | `from routers import export; export.router` |
 | `services/template_filler.py` (993) — Р2 | пакет `template_filler/`: `_common`, `_sheet_scan`, `_storage`, `_values`, `_filler` | `from services.template_filler import fill_official_template, ...` |
+| `services/category_service.py` (709) — Р6 | пакет `category_service/`: `_mocks`, `_api_loaders`, `_storage`, `_service` | `from services.category_service import category_service, CategoryService` |
+| `routers/categories.py` (687) — Р7 | пакет `routers/categories/`: `_support`, `specs_refresh`, `specs_admin`, `specs`, `catalog`, `mappings` | `from routers import categories; categories.router` |
 
 Фронтенд (Р3–Р5): `pages/SpecsPage.jsx` (1115) → оркестрация 437 строк +
 `components/specs/`; `pages/ProductsPage.jsx` (1095) → 641 строка +
@@ -110,8 +112,16 @@ pre-commit run --all-files
 
 - имена Celery-задач заданы явно (`name="tasks.*"`) и НЕ зависят от пути
   модуля — маршрутизация очередей в `celery_app.py` стабильна;
-- новые модули держим < 500 строк; следующий кандидат на разбиение —
-  `services/category_service.py` (709) и `routers/categories.py` (687);
+- порядок include_router в пакетах роутеров МАТЕРИАЛЕН: в
+  `routers/categories/` фиксированные пути (`/specs/{p}/names`,
+  `/key-source`, `/refresh/...`) регистрируются ДО catch-all
+  `/specs/{p}/{category_id:path}` — иначе они ловятся как category_id
+  (тест test_fixed_spec_paths_not_swallowed_by_catch_all);
+- тесты роутеров собирают маршруты через OpenAPI-схему
+  (`tests/_route_helpers.py::served_routes`) — плоский обход
+  `router.routes` ломается на Starlette >= 1.10;
+- новые модули держим < 500 строк; следующие кандидаты на разбиение —
+  `services/ozon_specs.py` (635) и `services/specs_monitor.py` (при росте);
 - маппинг «модуль → домен» описан в docstring каждого пакета.
 
 ## 4. SSRF и DNS-rebinding (E-4)
