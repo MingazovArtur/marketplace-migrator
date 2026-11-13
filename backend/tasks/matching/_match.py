@@ -11,7 +11,12 @@ from services.category_mapper import CategoryMapper
 from services.category_service import category_service
 from services.platform_utils import detect_platform
 from services.template_filler import has_official_template
-from tasks.matching._cache import _platform_has_any_specs, _spec_cache_load, _spec_cache_names, _spec_name_exists
+from tasks.matching._cache import (
+    _platform_has_any_specs,
+    _spec_cache_load,
+    _spec_cache_names,
+    _spec_name_exists,
+)
 from tasks.matching._text import _stem_ru
 
 logger = logging.getLogger(__name__)

@@ -8,8 +8,9 @@ Create Date: 2026-11-11 16:00:00.000000
 категория назначения каждого затронутого товара. POST /api/products/bulk-undo
 восстанавливает значения из последнего снапшота.
 """
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'a9b1c2d3e4f5'

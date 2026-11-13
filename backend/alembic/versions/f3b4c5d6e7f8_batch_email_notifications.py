@@ -7,8 +7,9 @@ Create Date: 2026-11-12 12:00:00.000000
 Переключатель «писать письмо о завершении пакетной миграции»
 (включён по умолчанию; отключается в меню профиля).
 """
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'f3b4c5d6e7f8'

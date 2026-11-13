@@ -12,6 +12,7 @@ Create Date: 2025-11-05
 import logging
 
 import sqlalchemy as sa
+
 from alembic import op
 
 logger = logging.getLogger(__name__)

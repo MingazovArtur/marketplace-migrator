@@ -164,6 +164,37 @@ Round 20 закрыл линию `tests/` (45 замечаний):
 `database/` (4), `tasks/`/`connectors/` (по 3), `models/`, `celery_app.py`
 (по 1) — последний эшелон, закрывается финальной линией.
 
+Round 21 закрыл остаток (28 замечаний в 7 каталогах) — **стилевой долг
+ruff по всему backend погашен полностью (447 → 0)**:
+
+- I001 (10) — сортировка импортов: 6 миграций alembic, core/auth.py,
+  database/models.py, database/repository/stats.py,
+  tasks/catalog_tasks/_reconcile.py, tasks/matching/_match.py,
+  tasks/recovery.py;
+- W292 (9) — EOF-newline (миграции, celery_app.py, core/, database/,
+  models/schemas.py, connectors/); W291 (1) — хвостовой пробел в
+  docstring baseline-миграции (внутри строки, ruff не чинит — вручную,
+  прецедент round19);
+- F401 — `datetime` в database/repository/stats.py (используется только
+  `timedelta`) удалён;
+- UP042 — `Platform(str, Enum)` → `Platform(StrEnum)` (Python 3.12):
+  единственное наблюдаемое различие — `str()`/f-string на самом члене
+  (`'Platform.OZON'` vs `'ozon'`); по коду члены Platform нигде не
+  форматируются в строки (роутеры принимают `platform: str`, ключи
+  dict-литералов в templates.py сравниваются по str-hash/eq,
+  `all_values()` возвращает `.value`), в тестах Platform не используется;
+- B904 (2) — core/auth.py (`from None`: except без переменной, причина
+  сознательно отброшена — невалидный sub), connectors/yandex_seller.py
+  (`from e`);
+- SIM102 — yandex_seller.py: вложенные `if` в цикле по commodityCodes
+  объединены (короткое замыкание `and` сохраняет порядок проверок);
+- E741 — error_handler.py: `l` → `part` в генераторе по `err["loc"]`.
+
+Стилевой долг полного набора ruff (`E,F,W,I,UP,B,C4,SIM` кроме `E501,B008`)
+после Round 21 — **0 замечаний во всём backend**. CI-гейт
+(`--select E9,F63,F7,F82`), compileall, pytest (338) и OpenAPI-снапшот
+(100 маршрутов, sha256 неизменен) — зелёные.
+
 ### Pre-commit
 
 ```bash

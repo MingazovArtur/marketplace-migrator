@@ -85,7 +85,7 @@ class YandexSellerConnector:
                     f"Ошибка API Яндекс Маркета ({resp.status_code}): {error_text[:250]}"
                 )
         except httpx.HTTPError as e:
-            raise ValueError(f"Ошибка сети при запросе к Яндекс Маркету: {e}")
+            raise ValueError(f"Ошибка сети при запросе к Яндекс Маркету: {e}") from e
 
     def parse_yandex_offer(self, item: dict) -> dict:
         """
@@ -126,10 +126,13 @@ class YandexSellerConnector:
 
         okpd_code = None
         for cc in offer.get("commodityCodes") or []:
-            if isinstance(cc, dict) and cc.get("code"):
-                if cc.get("type") in ("CUSTOMS_COMMODITY_CODE", None):
-                    okpd_code = str(cc["code"]).strip()
-                    break
+            if (
+                isinstance(cc, dict)
+                and cc.get("code")
+                and cc.get("type") in ("CUSTOMS_COMMODITY_CODE", None)
+            ):
+                okpd_code = str(cc["code"]).strip()
+                break
 
         category_name = (
             mapping.get("marketCategoryName")

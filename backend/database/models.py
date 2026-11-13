@@ -18,6 +18,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.orm import declarative_base, relationship
+
 from core.time import utcnow
 
 # P-1 (неделя 3): денежные поля хранятся как NUMERIC(12,2).

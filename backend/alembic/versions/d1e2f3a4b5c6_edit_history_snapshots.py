@@ -10,8 +10,9 @@ Create Date: 2026-11-12 10:00:00.000000
 строка остаётся в истории, повторный undo запрещён).
 Профили миграции: снимок «площадка + дефолты» для повторов в один клик.
 """
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'd1e2f3a4b5c6'

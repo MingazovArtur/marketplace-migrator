@@ -16,9 +16,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY
+from core.time import utcnow
 from database.models import User
 from database.session import get_async_db
-from core.time import utcnow
 
 security = HTTPBearer(auto_error=False)  # токен может прийти и из куки
 
@@ -121,7 +121,7 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Недействительный токен: некорректный sub",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from None
 
     stmt = select(User).where(User.id == user_id)
     res = await db.execute(stmt)

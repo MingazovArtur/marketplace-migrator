@@ -2,9 +2,9 @@
 
 from sqlalchemy import case, func
 
+from core.time import utcnow
 from database.models import ImportExportStats
 from database.session import SessionLocal
-from core.time import utcnow
 
 
 class StatsRepository:
@@ -44,7 +44,7 @@ class StatsRepository:
         и считались в Python. Для админа за 90 дней это десятки тысяч строк.
         Стало: 4 компактных GROUP BY-запроса к БД.
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         since = utcnow() - timedelta(days=days)
 

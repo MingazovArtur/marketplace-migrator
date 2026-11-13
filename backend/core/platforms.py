@@ -3,10 +3,10 @@
 ЕДИНСТВЕННОЕ место регистрации новой площадки (backend).
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Platform(str, Enum):
+class Platform(StrEnum):
     OZON = "ozon"
     WILDBERRIES = "wildberries"
     YANDEX = "yandex"

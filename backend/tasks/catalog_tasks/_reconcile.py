@@ -10,6 +10,7 @@ import logging
 import os
 
 from celery.signals import worker_ready
+
 from services import specs_monitor
 from tasks.progress import get_progress
 

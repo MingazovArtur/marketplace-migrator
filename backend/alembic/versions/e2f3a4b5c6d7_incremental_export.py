@@ -8,8 +8,9 @@ Create Date: 2026-11-12 11:00:00.000000
 выгружался в последний раз. Фильтр «только изменённые»:
 updated_at > last_export_at либо товар ещё не выгружался.
 """
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'e2f3a4b5c6d7'

@@ -15,6 +15,7 @@ Guard: xlsx-воркер (очередь xlsx_export) статусы товар�
 import logging
 
 from celery.signals import worker_ready
+
 from core.time import utcnow
 
 logger = logging.getLogger(__name__)
