@@ -348,6 +348,30 @@ Actions (Round 26), Docker (Round 27); PR #14 (eslint 10) —
 осознанная блокировка upstream до поддержки eslint-plugin-react
 (см. Round 25).
 
+Round 28 (hotfix сборки) — параметризуемый индекс PyPI. Инцидент:
+локальная сборка backend-образа после Round 27 падала на
+`pip install` — `SSLError(SSLEOFError(UNEXPECTED_EOF_WHILE_READING))`
+на `/simple/…/` при доступных Docker Hub (образ python:3.15-slim
+скачался), npm registry (frontend собрался) и GitHub (push прошёл).
+Причина — сетевая, не кода: pypi.org из сетей РФ обрывается на этапе
+TLS с 01.06.2026 (DPI; Habr/Meduza/vc.ru). CI GitHub собирает образы
+из чистой сети раннеров — репозиторий не затронут. Правка:
+`ARG PIP_INDEX_URL=https://pypi.org/simple` + проброс в ENV в
+backend/Dockerfile(.prod) (дефолт = официальный индекс, поведение
+1:1); в docker-compose.yml (backend — long-form build + args) и
+docker-compose.prod.yml (build.args) — `PIP_INDEX_URL:
+${PIP_INDEX_URL:-https://pypi.org/simple}`, чтобы `docker compose
+up --build` подхватывал env. Зеркала проверены полным резолвом
+prod-дерева на py3.15 (`pip download --only-binary=:all:` — 62 wheels,
+exit 0) и сверкой checksums с официальными колёсами: рекомендованное
+`https://mirrors.cloud.tencent.com/pypi/simple` (набор версий 1:1 с
+официальным), запасное `https://repo.huaweicloud.com/repository/pypi/simple`
+(отстаёт на минорные версии отдельных пакетов); зеркало Яндекса
+удалено (404), Tsinghua отдаёт 403 на скачивание файлов. Локальная
+сборка в сетях с блокировкой (PowerShell):
+`$env:PIP_INDEX_URL="https://mirrors.cloud.tencent.com/pypi/simple"`
++ `docker compose up --build`.
+
 ## 2. CI (GitHub Actions)
 
 `.github/workflows/ci.yml`, три job'а на каждый push/PR:
