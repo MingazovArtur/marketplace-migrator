@@ -113,10 +113,13 @@ pre-commit run --all-files
 | `routers/import_router.py` (612) — Р13 | пакет `routers/import_router/`: `_support`, `_preview`, `_key_import`, `_file_import` | `from routers import import_router; import_router.router`, `import_router.repo`/`op_log`/`stats_repo` (точки патчинга) |
 | `database/repository/products.py` (593) — Р14 | пакет `repository/products/`: `_serialize`, `_filters`, `_async_reads`, `_sync_reads`, `_writes`, `_bulk_import`, сборка класса `_repository` (миксины) | `from database.repository.products import ProductRepository, repo`; статические `ProductRepository._to_dict/_variant_rows/_attr_rows` (через класс — variants.py/attributes.py/test_money_helpers.py) |
 | `tasks/migrate_tasks.py` (529) — Р15 | пакет `migrate_tasks/`: `_notify`, `_single`, `_batch` | `from tasks.migrate_tasks import migrate_batch_task, migrate_product_task` (импортёр tasks/__init__.py); Celery-имена явные `tasks.*` |
-| `services/yandex_specs.py` (443) — Р16 | пакет `yandex_specs/`: `_http`, `_tree`, `_parameters`, `_storage`, `_refresh` | `from services.yandex_specs import refresh_yandex_specs` (импортёр tasks/catalog_tasks.py) |
-| `services/wb_specs.py` (313) — Р17 | пакет `wb_specs/`: `_http`, `_subjects`, `_characteristics`, `_storage`, `_refresh` | `from services.wb_specs import refresh_wildberries_specs` (импортёр tasks/catalog_tasks.py) |
+| `services/yandex_specs.py` (443) — Р16 | пакет `yandex_specs/`: `_http`, `_tree`, `_parameters`, `_storage`, `_refresh` | `from services.yandex_specs import refresh_yandex_specs` (импортёр tasks/catalog_tasks/_refresh.py — локальный импорт в теле задачи) |
+| `services/wb_specs.py` (313) — Р17 | пакет `wb_specs/`: `_http`, `_subjects`, `_characteristics`, `_storage`, `_refresh` | `from services.wb_specs import refresh_wildberries_specs` (импортёр tasks/catalog_tasks/_refresh.py — локальный импорт в теле задачи) |
 | `services/xlsx_generator/aliexpress.py` (604) — Р18 | под-пакет `xlsx_generator/aliexpress/`: `_layout`, `_rows`, `_workbook`, `_sheets`, `_utils` | `from services.xlsx_generator.aliexpress import build_aliexpress_workbook, ...` (импортёры export_builder.py, routers/export/files.py, routers/templates.py, xlsx_generator/__init__.py) |
 | `services/xlsx_generator/columns.py` (597) — Р19 | под-пакет `xlsx_generator/columns/`: `_styles`, `_ozon`, `_yandex` | `from services.xlsx_generator.columns import ...` (импортёры common/yandex/ozon/simple) |
+| `tasks/matching.py` (459) — Р20 | пакет `matching/`: `_text`, `_cache`, `_match`, `_attrs` | `from tasks.matching import _pick_target_category, _ensure_canonical_attributes, _base_source, _safe_float, _spec_cache_invalidate, _stem_ru` (импортёры tasks/migrate_tasks/_single+/_batch, tasks/catalog_tasks/_refresh, tests/test_money_helpers.py) |
+| `routers/photos.py` (298) — Р21 | пакет `routers/photos/`: `_support`, `_proxy`, `_manage`, `_upload`, `_download` | `from routers import photos; photos.router` (импортёр main.py не менялся); порядок include_router — как порядок объявления в монолите |
+| `tasks/catalog_tasks.py` (297) — Р22 | пакет `catalog_tasks/`: `_refresh`, `_reconcile` | `from tasks.catalog_tasks import refresh_specs_task` (импортёр tasks/__init__.py); Celery-имя явное `tasks.refresh_specs_task` |
 
 Фронтенд (Р3–Р5): `pages/SpecsPage.jsx` (1115) → оркестрация 437 строк +
 `components/specs/`; `pages/ProductsPage.jsx` (1095) → 641 строка +
@@ -196,10 +199,13 @@ Push вместо polling + миниатюры (Round 8):
   Р16–Р17 (три sibling-сервиса спецификаций — ozon/yandex/wb — в
   одинаковом пакетном виде), `xlsx_generator/aliexpress.py` (604) и
   `xlsx_generator/columns.py` (597) — в Р18–Р19 (под-пакеты внутри
-  пакета — прецедент `database/repository/products/`); все модули
-  xlsx_generator теперь < 500 строк; следующие кандидаты —
-  `tasks/matching.py` (459), `routers/photos.py` (298),
-  `tasks/catalog_tasks.py` (297);
+  пакета — прецедент `database/repository/products/`),
+  `tasks/matching.py` (459), `routers/photos.py` (298) и
+  `tasks/catalog_tasks.py` (297) — в Р20–Р22 (третий эшелон очереди);
+  все модули backend теперь < 500 строк — исключение только
+  `database/models.py` (409): единый файл моделей SQLAlchemy —
+  единственная точка truth для Alembic autogenerate, разбиение
+  нецелесообразно; линия разбиения монолитов закрыта;
 - в `database/repository/products/` класс собран из шести доменных
   миксинов (`_repository.py`), тела методов перенесены 1:1 без
   переопределений: и `self._to_dict` внутри методов, и статические
@@ -256,6 +262,35 @@ Push вместо polling + миниатюры (Round 8):
   объекты `G_NAME`/`G_PRICE`/…, что и монолит (реэкспорт через
   `__init__` пакета), порядок кортежей перенесён 1:1 —
   YANDEX_GROUP_MERGES (10 групп) покрывают все 48 колонок без дыр;
+- в `tasks/matching/` (Р20) P-3 кэш живёт в `_cache`, и тесты наполняют
+  оригинальные сторы напрямую (`_fill_cache` в test_matching_split.py)
+  со свежей TTL-меткой — `_spec_cache_load` выходит по метрике, не
+  открывая сессию БД; `_match.py` импортировал `_spec_cache_names`/
+  `_spec_name_exists`/… ПО ССЫЛКЕ (`from … import`), поэтому
+  `monkeypatch.setattr(cache_mod, "_spec_cache_names", …)` на него НЕ
+  действует — работаем с оригинальными словарями и чистим их
+  `_spec_cache_invalidate()`; точки патчинга
+  `_pick_target_category`/`_ensure_canonical_attributes` в тестах
+  миграций — подмодули tasks/migrate_tasks/_single и _batch (имена
+  импортированы туда), при разбиении не сдвинулись;
+- в `routers/photos/` (Р21) порядок include_router МАТЕРИАЛЕН:
+  фиксированный GET `/photos/proxy` подключается ПЕРЕД параметрическими
+  `/{product_id}/photos*` — как порядок объявления в монолите (тест
+  test_proxy_route_registered_before_parametric); rate-limiter
+  остаётся на эндпоинте `_proxy` (slowapi + Redis, тестовое окружение
+  без Redis — в сплит-тесте не вызывается, SSRF-фильтр покрыт
+  test_ssrf.py); `_build_public_media_url` — в `_support`: полный URL
+  нужен и `_upload`, и `_download` (dev-фронт :5173 не подставляется
+  в XLSX-экспорт);
+- в `tasks/catalog_tasks/` (Р22) тело `refresh_specs_task` перенесено
+  в `_refresh` 1:1, включая ЛОКАЛЬНЫЕ импорты загрузчиков спеков в теле
+  (`from services.ozon_specs import refresh_ozon_specs` и sibling):
+  точки патчинга тестов — модули services.* (строковые пути
+  `monkeypatch.setattr("services.ozon_specs.refresh_ozon_specs", …)`),
+  eager-вызов `.apply(throw=True)`; обработчик `worker_ready`
+  (`_reconcile_specs_registry_on_worker_start`) подключается к сигналу
+  при импорте `_reconcile` — `__init__` пакета импортирует его для
+  side-effect, как раньше при импорте монолита;
 - маппинг «модуль → домен» описан в docstring каждого пакета.
 
 ## 4. SSRF и DNS-rebinding (E-4)
