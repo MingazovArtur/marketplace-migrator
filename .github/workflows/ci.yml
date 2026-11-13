@@ -7,8 +7,14 @@ on:
 
 jobs:
   backend:
-    name: Backend — линт + тесты
+    name: Backend — линт + тесты (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    # Матрица: 3.12 — минимальная версия разработки, 3.15 — рантайм
+    # прод-образа backend/Dockerfile(.prod) (dependabot, Round 27)
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.15"]
     defaults:
       run:
         working-directory: backend
@@ -17,7 +23,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: |
             backend/requirements.txt
@@ -36,8 +42,14 @@ jobs:
         run: python -m pytest
 
   frontend:
-    name: Frontend — линт + тесты + сборка
+    name: Frontend — линт + тесты + сборка (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    # Матрица: 22 — текущая LTS-граница тулчейна, 26 — рантайм
+    # build-стейджа frontend/Dockerfile(.prod) (dependabot, Round 27)
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["22", "26"]
     defaults:
       run:
         working-directory: frontend
@@ -46,7 +58,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 

@@ -299,8 +299,54 @@ node24 требует runner v2.327.1+ (GitHub-hosted — свежие). Checkou
 `packageManager`-полю (в package.json его нет). CodeQL Action v3
 депрекация декабрь 2026 — v4 обязателен. Статическая верификация: YAML
 парсинг, actionlint 1.7.7 — 0 замечаний; полный прогон гейтов после
-правки зелёный (pytest 338, Vitest 34, lint/build). Остаток линии:
-Docker (PR #1 python 3.15-slim, #3 nginx 1.31-alpine, #6 node 26-alpine).
+правки зелёный (pytest 338, Vitest 34, lint/build).
+
+Round 27 закрыл Docker-часть (PR #1, #3, #6) — линия dependabot
+завершена. Прод-рантаймы подняты на актуальные мажорные: `python:3.12-slim`
+→ `3.15-slim` (backend/Dockerfile + Dockerfile.prod), `node:20-alpine` →
+`26-alpine` (frontend/Dockerfile + build-стейдж Dockerfile.prod),
+`nginx:1.27-alpine` → `1.31-alpine` (runtime-стейдж Dockerfile.prod).
+До правки выполнена верификация совместимости:
+
+- **python 3.15**: симуляция `pip install -r requirements.txt
+  -r requirements-dev.txt` на целевой версии (`pip download
+  --python-version 315 --only-binary=:all:`) — резолв всего дерева
+  успешен, 73 wheels, у всех скомпилированных пакетов есть cp315/abi3
+  (asyncpg 0.32.0, greenlet 3.5.6, pillow 13.0.0, psycopg2-binary
+  2.9.13, pydantic-core 2.50.4, markupsafe 3.0.4, cffi 2.1.1 — cp315;
+  bcrypt 5.0.0 — cp39-abi3, cryptography 50.0.2 — cp315-abi3), ни одна
+  нижняя граница requirements не занижена; grep по backend на модули,
+  удалённые в 3.13+ (PEP 594, lib2to3, distutils, pkg_resources) и
+  deprecated-вызовы (`datetime.utcnow`, `get_event_loop`) — 0
+  совпадений (`core/time.py`-хелпер уже на `datetime.now(UTC)`);
+  полный pytest на Python 3.13 (ближайший доступный к 3.15 в
+  dev-окружении) — 338 passed, exit 0;
+- **node 26**: engines всей тулчейны допускают 26 (vite 8.3.8 /
+  plugin-react 6.3.0 / oxlint 1.93.0 — `^20.19.0 || >=22.12.0`;
+  vitest 5.1.0 — `^22.12.0 || ^24.0.0 || >=26.0.0`; eslint 9.39.5,
+  react-hooks 7.1.1, prettier, testing-library — `>=18`), поле
+  `engines` в package.json проекта не задано;
+- **nginx 1.31**: конфиги (deploy/nginx) уже на современном синтаксисе
+  (`listen 443 ssl` + `http2 on`, без deprecated `listen … ssl http2`
+  и `ssl on`); изменённый с 1.27 на 1.31 комментарий в
+  https.conf.disabled.
+
+CI-покрытие прод-рантаймов: до раунда backend-гейт гонял pytest только
+на 3.12, frontend — только на Node 22, при этом docker-job проверяет
+сборку, но не тесты. Добавлены матрицы в ci.yml: backend
+Python [3.12, 3.15] (3.12 — минимальная версия разработки), frontend
+Node [22, 26]. Гейты раунда: ruff 0, black 223 unchanged, pytest 338
+(3.12) и 338 (3.13 — контрольный на промежуточной мажорной),
+OpenAPI-снапшот идентичен, ESLint 0/0, Vitest 34, build, prettier,
+`npm ci` на чистой копии, actionlint 0 замечаний. Образы локально не
+собираются (Docker недоступен в dev-окружении): финальное
+подтверждение — docker-job и матрицы CI на GitHub сразу после пуша.
+
+Линия dependabot (16 открытых PR инвентаризации Round 24) закрыта
+полностью: backend-pip (Round 24), frontend-npm (Round 25), GitHub
+Actions (Round 26), Docker (Round 27); PR #14 (eslint 10) —
+осознанная блокировка upstream до поддержки eslint-plugin-react
+(см. Round 25).
 
 ## 2. CI (GitHub Actions)
 
@@ -308,8 +354,8 @@ Docker (PR #1 python 3.15-slim, #3 nginx 1.31-alpine, #6 node 26-alpine).
 
 | Job | Что делает |
 |---|---|
-| **backend** | `ruff check --select E9,F63,F7,F82 .` + `python -m pytest` (Python 3.12) |
-| **frontend** | `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run build` (Node 22) |
+| **backend** | `ruff check --select E9,F63,F7,F82 .` + `python -m pytest` (матрица Python 3.12 / 3.15 — 3.15 = рантайм прод-образа, Round 27) |
+| **frontend** | `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run build` (матрица Node 22 / 26 — 26 = рантайм build-стейджа прод-образа, Round 27) |
 | **docker** | сборка `backend/Dockerfile.prod` и `frontend/Dockerfile.prod` |
 
 Требование: **main всегда зелёный**. Красный CI — блокер для мержа.
