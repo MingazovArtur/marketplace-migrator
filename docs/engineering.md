@@ -286,6 +286,22 @@ Round 25 закрыл frontend-npm часть (PR #12, #15, #16):
 OpenAPI-снапшот идентичен). Остаток линии: Actions (PR #2, #4, #5, #7),
 Docker (PR #1, #3, #6).
 
+Round 26 закрыл GitHub Actions часть (PR #2, #4, #5, #7) — ci.yml
+(`checkout` v4→v7 ×3, `setup-python` v5→v7, `setup-node` v4→v7) и
+codeql.yml (`checkout` v4→v7, `codeql-action` init/analyze v3→v4).
+Мажорные переходы проверены по action.yml целевых тегов: все используемые
+inputs (`python-version`/`node-version`, `cache`, `cache-dependency-path`,
+`languages`, `build-mode`, `queries`, `category`) сохранены; рантайм
+node24 требует runner v2.327.1+ (GitHub-hosted — свежие). Checkout v7
+отказывает pwn-паттернам `pull_request_target` по умолчанию — наши
+триггеры (`push`/`pull_request`) не затронуты; setup-node v7 удалил
+`NODE_AUTH_TOKEN`-fallback (registry-url не используем) и v6-кэш npm по
+`packageManager`-полю (в package.json его нет). CodeQL Action v3
+депрекация декабрь 2026 — v4 обязателен. Статическая верификация: YAML
+парсинг, actionlint 1.7.7 — 0 замечаний; полный прогон гейтов после
+правки зелёный (pytest 338, Vitest 34, lint/build). Остаток линии:
+Docker (PR #1 python 3.15-slim, #3 nginx 1.31-alpine, #6 node 26-alpine).
+
 ## 2. CI (GitHub Actions)
 
 `.github/workflows/ci.yml`, три job'а на каждый push/PR:
