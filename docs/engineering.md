@@ -120,6 +120,9 @@ pre-commit run --all-files
 | `tasks/matching.py` (459) — Р20 | пакет `matching/`: `_text`, `_cache`, `_match`, `_attrs` | `from tasks.matching import _pick_target_category, _ensure_canonical_attributes, _base_source, _safe_float, _spec_cache_invalidate, _stem_ru` (импортёры tasks/migrate_tasks/_single+/_batch, tasks/catalog_tasks/_refresh, tests/test_money_helpers.py) |
 | `routers/photos.py` (298) — Р21 | пакет `routers/photos/`: `_support`, `_proxy`, `_manage`, `_upload`, `_download` | `from routers import photos; photos.router` (импортёр main.py не менялся); порядок include_router — как порядок объявления в монолите |
 | `tasks/catalog_tasks.py` (297) — Р22 | пакет `catalog_tasks/`: `_refresh`, `_reconcile` | `from tasks.catalog_tasks import refresh_specs_task` (импортёр tasks/__init__.py); Celery-имя явное `tasks.refresh_specs_task` |
+| `services/xlsx_generator/yandex.py` (362) — Р23 | под-пакет `xlsx_generator/yandex/`: `_values`, `_instruction`, `_book` | `from services.xlsx_generator.yandex import build_yandex_workbook` (импортёр xlsx_generator/__init__.py, резервная ветка generate_export) |
+| `parsers/yandex.py` (342) — Р24 | пакет `parsers/yandex/`: `_support`, `_parser` | `from parsers.yandex import YandexFileParser` (импортёр parsers/factory/_registry.py) |
+| `parsers/factory.py` (334) — Р25 | пакет `parsers/factory/`: `_smart`, `_registry`, `_api` | `from parsers.factory import parse_file, preview_file, get_parser` (импортёр parsers/__init__.py); PARSERS и классы реэкспортированы |
 
 Фронтенд (Р3–Р5): `pages/SpecsPage.jsx` (1115) → оркестрация 437 строк +
 `components/specs/`; `pages/ProductsPage.jsx` (1095) → 641 строка +
@@ -201,11 +204,15 @@ Push вместо polling + миниатюры (Round 8):
   `xlsx_generator/columns.py` (597) — в Р18–Р19 (под-пакеты внутри
   пакета — прецедент `database/repository/products/`),
   `tasks/matching.py` (459), `routers/photos.py` (298) и
-  `tasks/catalog_tasks.py` (297) — в Р20–Р22 (третий эшелон очереди);
-  все модули backend теперь < 500 строк — исключение только
+  `tasks/catalog_tasks.py` (297) — в Р20–Р22,
+  `xlsx_generator/yandex.py` (362), `parsers/yandex.py` (342) и
+  `parsers/factory.py` (334) — в Р23–Р25 (последний эшелон: парсеры
+  и генераторы); все модули backend < 500 строк — исключение только
   `database/models.py` (409): единый файл моделей SQLAlchemy —
   единственная точка truth для Alembic autogenerate, разбиение
-  нецелесообразно; линия разбиения монолитов закрыта;
+  нецелесообразно; линия разбиения монолитов закрыта (последний
+  заметный не-пакетный сервис — `services/media_service.py`, 211,
+  ниже порога очереди);
 - в `database/repository/products/` класс собран из шести доменных
   миксинов (`_repository.py`), тела методов перенесены 1:1 без
   переопределений: и `self._to_dict` внутри методов, и статические
@@ -291,6 +298,25 @@ Push вместо polling + миниатюры (Round 8):
   (`_reconcile_specs_registry_on_worker_start`) подключается к сигналу
   при импорте `_reconcile` — `__init__` пакета импортирует его для
   side-effect, как раньше при импорте монолита;
+- в `xlsx_generator/yandex/` (Р23) правило категорий (17 групп по
+  ключевым словам имени) — в `_values`, а не в `_book`: сборщик
+  получает категорию только через `_yandex_cell_value(key="category")`;
+  мёртвый хвостовой комментарий монолита «===== Сборка книги Ozon =====»
+  (ниже него кода не было) удалён — на AST не влияет; эталонный шаблон
+  (has_official_template) по-прежнему приоритетнее резервного билдера —
+  ветка в xlsx_generator/__init__.py не менялась;
+- в `parsers/yandex/` (Р24) маркеры служебных строк шаблона
+  (YANDEX_SKIP_MARKERS: подсказки строки 3 + пример Makita строки 4) и
+  конвертеры единиц (см→мм, кг→г) — в `_support`, класс парсера —
+  в `_parser`: сборка XLSX-файлов в тестах (test_yandex_parser_split)
+  проверяет конец-в-конец выбор листа/шапки, пропуск примера,
+  карту колонок и единицы;
+- в `parsers/factory/` (Р25) `SmartMarketplaceParser` абстрактен
+  (BaseFileParser.platform без реализации) — инстанцируются только
+  подклассы из `_registry` (Megamarket/Holodilnik/Aliexpress — только
+  platform), как и в монолите; реестр PARSERS (7 площадок) и фасад
+  get_parser/parse_file/preview_file — в `_registry` и `_api`, импортёры
+  через `from parsers import …` не менялись;
 - маппинг «модуль → домен» описан в docstring каждого пакета.
 
 ## 4. SSRF и DNS-rebinding (E-4)

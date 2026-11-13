@@ -1,18 +1,20 @@
-"""
-Парсер файлов Яндекс Маркета (официальный XLSX-шаблон со строками групп/подсказок/примера + плоские CSV/XLSX).
+"""Парсер файлов Яндекс Маркета: официальный XLSX-шаблон и плоские CSV.
+
+Вынесено без изменений из монолита parsers/yandex.py (Р24). Методы класса
+перенесены 1:1: поиск листа и строки заголовков, карта колонок шаблона
+(точное совпадение без «*» → частичное), пропуск служебных строк и
+примера Makita, плоский CSV через find_column.
 """
 
 import io
 import logging
-import re
 from typing import Any
 
 import openpyxl
 
-from .tables import read_csv_table
-
-from .base import BaseFileParser, ParseResult
-from .utils import (
+from parsers.base import BaseFileParser, ParseResult
+from parsers.tables import read_csv_table
+from parsers.utils import (
     clean_okpd,
     clean_value,
     find_column,
@@ -21,65 +23,14 @@ from .utils import (
     parse_stock,
     split_photos,
 )
-
-logger = logging.getLogger(__name__)
-
-# Маркеры служебных строк и строки-примера Яндекс Маркета (строки 3 и 4)
-YANDEX_SKIP_MARKERS = (
-    "значение поля выгружено",
-    "заполняется автоматически",
-    "уникальный идентификатор товара, для которого",
-    "по схеме: тип товара + бренд",
-    "ссылка на изображение товара. можно указать",
-    "не более 6000 символов",
-    "это пример с заполненными полями",
-    "укажите свой товар или удалите строку",
-    "дрель makita 6413 безударная",
-    "http://example-shop.ru/",
-    "https://example.com/scheme.pdf",
+from parsers.yandex._support import (
+    YANDEX_SKIP_MARKERS,
+    _cm_to_mm,
+    _kg_to_grams,
+    _parse_yandex_characteristics,
 )
 
-
-def _cm_to_mm(val_str: str) -> int | None:
-    """Переводит сантиметры из шаблона Яндекса (65.55) в миллиметры (656)."""
-    if not val_str:
-        return None
-    try:
-        cm = float(str(val_str).replace(",", ".").replace(" ", ""))
-        return int(round(cm * 10)) if cm > 0 else None
-    except (ValueError, TypeError):
-        return None
-
-
-def _kg_to_grams(val_str: str) -> int | None:
-    """Переводит килограммы из шаблона Яндекса (1.001) в граммы (1001)."""
-    if not val_str:
-        return None
-    try:
-        kg = float(str(val_str).replace(",", ".").replace(" ", ""))
-        return int(round(kg * 1000)) if kg > 0 else None
-    except (ValueError, TypeError):
-        return None
-
-
-def _parse_yandex_characteristics(raw_str: str) -> list[dict[str, str]]:
-    """
-    Парсит колонку «Характеристики товара» формата Яндекс Маркета:
-      'Цвет|Красный;Длина|100|см' -> [{'name': 'Цвет', 'value': 'Красный'}, {'name': 'Длина', 'value': '100 см'}]
-    """
-    if not raw_str:
-        return []
-    attrs: list[dict[str, str]] = []
-    for item in str(raw_str).split(";"):
-        item = item.strip()
-        if not item or "|" not in item:
-            continue
-        parts = [p.strip() for p in item.split("|") if p.strip()]
-        if len(parts) >= 2:
-            name = parts[0]
-            value = f"{parts[1]} {parts[2]}".strip() if len(parts) >= 3 else parts[1]
-            attrs.append({"name": name, "value": value})
-    return attrs
+logger = logging.getLogger(__name__)
 
 
 class YandexFileParser(BaseFileParser):
