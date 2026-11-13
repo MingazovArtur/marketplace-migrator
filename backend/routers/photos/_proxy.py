@@ -95,9 +95,11 @@ def proxy_external_photo(
     except ValueError as e:
         # SSRF-защита: запрещённый адрес/редирект
         logger.warning(f"🚫 Прокси фото отклонён (SSRF): {url} — {e}")
-        raise HTTPException(status_code=400, detail="Адрес изображения не разрешён")
+        raise HTTPException(status_code=400, detail="Адрес изображения не разрешён") from e
     except HTTPException:
         raise
     except Exception as e:
         logger.warning(f"Не удалось проксировать фото {url}: {e}")
-        raise HTTPException(status_code=502, detail="Не удалось загрузить внешнее изображение")
+        raise HTTPException(
+            status_code=502, detail="Не удалось загрузить внешнее изображение"
+        ) from e

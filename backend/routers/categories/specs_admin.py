@@ -185,7 +185,7 @@ def admin_specs_task_resume(task_id: str, current_user: User = Depends(get_curre
         )
     except Exception as e:
         logger.error(f"❌ Не удалось поставить продолжение задачи {task_id}: {e}")
-        raise HTTPException(status_code=502, detail=f"Не удалось поставить задачу в очередь: {e}")
+        raise HTTPException(status_code=502, detail=f"Не удалось поставить задачу в очередь: {e}") from e
 
     specs_monitor.register(
         task.id,

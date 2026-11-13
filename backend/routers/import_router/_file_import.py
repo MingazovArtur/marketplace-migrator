@@ -82,7 +82,7 @@ async def import_from_file(
             status="error",
             duration_ms=int((time.perf_counter() - t0) * 1000),
         )
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Ошибка парсинга файла: {e}")
         stats_repo.record(
@@ -92,7 +92,9 @@ async def import_from_file(
             status="error",
             duration_ms=int((time.perf_counter() - t0) * 1000),
         )
-        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера при обработке файла")
+        raise HTTPException(
+            status_code=500, detail="Внутренняя ошибка сервера при обработке файла"
+        ) from e
 
     products_data = result["products"]
     errors = result["errors"]

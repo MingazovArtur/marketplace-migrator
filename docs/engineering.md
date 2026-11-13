@@ -51,15 +51,43 @@ npm run lint       # eslint
 npm run format     # prettier
 ```
 
-**Текущий долг по стилю** (полный набор ruff): ~400 замечаний в старом коде —
-в основном `W293/W292` (пробелы/переводы строк), `B008` (FastAPI `Depends()` в
-дефолтах — норма для FastAPI), `UP006/UP035` (старые аннотации), `I001`
-(сортировка импортов). План:
+**Текущий долг по стилю** (полный набор ruff): 447 замечаний в старом коде
+(замер до Round 17) — в основном `W293/W292` (пробелы/переводы строк),
+`B008` (FastAPI `Depends()` в дефолтах — норма для FastAPI), `UP006/UP035`
+(старые аннотации), `I001` (сортировка импортов). План:
 
 1. CI гейтится только на `E9,F63,F7,F82` (падения и критические ошибки);
 2. новые файлы обязаны проходить полный набор (все файлы недели 4 проходят);
 3. долг закрывается постепенно: `ruff check --fix` по каталогу за PR
    (`routers/`, затем `services/`, затем `parsers/`), один каталог — один PR.
+
+Round 17 закрыл линию `routers/` (п. 3): `backend/routers/` чист по полному
+набору. Что сделано:
+
+- `B008` исключён из набора (`pyproject.toml` → `ignore`): FastAPI
+  `Depends()` в дефолтах параметров — идиоматичный паттерн фреймворка
+  (см. выше), не долг;
+- B904: `raise ... from e` (или `from None`, где исключение не связано) —
+  20 мест: честная цепочка причин в traceback, API-ответы не изменились;
+- SIM105: `try/except: pass` вокруг необязательной записи статистики →
+  `with contextlib.suppress(Exception)` (5 мест, `_bulk`/`_delete`/`_single`);
+- F401/F841: мёртвый импорт `write_rows` удалён из `routers/templates.py`
+  (функция жива в `services/xlsx_io.py`); имя `total` в delete-all убрано —
+  COUNT-запрос сохранён (побочный эффект монолита), счётчик берётся из
+  rowcount;
+- F401-реэкспорты в `routers/import_router/__init__.py` и
+  `routers/products/__init__.py` объявлены через `__all__` (прецедент —
+  `routers/photos/__init__.py`, Р21): точки патчинга тестов
+  (`repo`/`stats_repo`/`op_log`) и публичный API пакетов — явно;
+- I001/W292: сортировка импортов (`photos/__init__.py`, `products/_lists.py`)
+  и перевод строки в конце файла (`defaults.py`, `templates.py`,
+  `import_router/_file_import.py`).
+
+Остаток долга после Round 17 — 249 замечаний: `parsers/` (145),
+`tests/` (45), `services/` (31), `alembic/` (9), `core/` (7), `database/` (4),
+`tasks/`, `connectors/` (по 3), `models/`, `celery_app.py` (по 1). Порядок
+дальше: `services/` → `parsers/` (план п. 3), затем остатки — один каталог —
+один PR.
 
 ### Pre-commit
 

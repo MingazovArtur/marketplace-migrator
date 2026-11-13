@@ -45,8 +45,13 @@ router.include_router(download_router)
 
 # Публичные имена монолита для импортёров и тестов (те же объекты,
 # что используют подмодули).
+from routers.photos._download import start_download_photos  # noqa: E402
 from routers.photos._manage import get_photos, set_photos  # noqa: E402
-from routers.photos._proxy import proxy_external_photo  # noqa: E402
+from routers.photos._proxy import (  # noqa: E402
+    PROXY_ALLOWED_CONTENT_TYPES,
+    PROXY_MAX_SIZE_BYTES,
+    proxy_external_photo,
+)
 from routers.photos._support import (  # noqa: E402
     ALLOWED_EXTENSIONS,
     MAX_FILE_SIZE_BYTES,
@@ -54,8 +59,6 @@ from routers.photos._support import (  # noqa: E402
     PhotosUpdate,
     _build_public_media_url,
 )
-from routers.photos._download import start_download_photos  # noqa: E402
-from routers.photos._proxy import PROXY_ALLOWED_CONTENT_TYPES, PROXY_MAX_SIZE_BYTES  # noqa: E402
 from routers.photos._upload import upload_photo_files  # noqa: E402
 
 __all__ = [

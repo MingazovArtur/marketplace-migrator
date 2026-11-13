@@ -108,6 +108,6 @@ def delete_category_mapping(
         raise
     except Exception:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Ошибка удаления маппинга")
+        raise HTTPException(status_code=500, detail="Ошибка удаления маппинга") from None
     finally:
         db.close()

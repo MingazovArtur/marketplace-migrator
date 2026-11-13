@@ -167,7 +167,7 @@ async def import_products(
                 failed_items=0,
                 duration_ms=duration_ms,
             )
-            raise HTTPException(status_code=400, detail=f"Ошибка парсинга YML: {e}")
+            raise HTTPException(status_code=400, detail=f"Ошибка парсинга YML: {e}") from e
 
         if not yml_products:
             raise HTTPException(status_code=400, detail="Не найдено товаров в YML-фиде")
@@ -240,7 +240,7 @@ async def import_products(
     try:
         ym_creds = _parse_yandex_api_credentials(auth_key)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     if ym_creds:
         business_id, api_token = ym_creds
@@ -248,10 +248,12 @@ async def import_products(
             connector = YandexSellerConnector(business_id=business_id, api_token=api_token)
             ym_offers = await connector.get_products(limit=200)
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
             logger.error(f"Ошибка импорта через API Яндекс Маркета: {e}")
-            raise HTTPException(status_code=502, detail=f"Ошибка API Яндекс Маркета: {e}")
+            raise HTTPException(
+                status_code=502, detail=f"Ошибка API Яндекс Маркета: {e}"
+            ) from e
 
         if not ym_offers:
             raise HTTPException(

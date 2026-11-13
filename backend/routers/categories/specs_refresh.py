@@ -105,12 +105,12 @@ async def refresh_specs(
         }
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except httpx.HTTPStatusError as e:
         raise HTTPException(
             status_code=502,
             detail=f"Ошибка API площадки: {e.response.status_code} — {e.response.text[:200]}",
-        )
+        ) from e
 
 
 @router.get("/specs/{platform}/refresh/{task_id}/progress")

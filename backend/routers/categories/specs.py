@@ -112,7 +112,7 @@ def delete_all_platform_specs(
     except Exception as e:
         db.rollback()
         logger.error(f"Ошибка удаления всех спеков {platform}: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка удаления спеков: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка удаления спеков: {e}") from e
     finally:
         db.close()
 
@@ -160,7 +160,7 @@ def delete_single_spec(
     except Exception as e:
         db.rollback()
         logger.error(f"Ошибка удаления спека {platform}/{decoded_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка удаления спека: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка удаления спека: {e}") from e
     finally:
         db.close()
 

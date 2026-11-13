@@ -19,7 +19,10 @@ target-version = "py312"
 # (см. также backend/Makefile и docs/engineering.md — план постепенного ужесточения)
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
-ignore = ["E501"] # Длину строки контролирует Black
+# E501: длину строки контролирует Black.
+# B008: FastAPI `Depends(...)` в дефолтах параметров — идиоматичный паттерн
+# фреймворка (engineering.md §1: «норма для FastAPI»), не долг.
+ignore = ["E501", "B008"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["core", "database", "routers", "services", "parsers", "models", "tasks"]

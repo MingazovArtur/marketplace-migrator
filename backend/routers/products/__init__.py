@@ -77,3 +77,32 @@ from routers.products._single import (  # noqa: E402
     update_product,
     update_product_logistics,
 )
+
+__all__ = [
+    "router",
+    # _support: схемы и константы
+    "SNAPSHOTS_PER_USER",
+    "SORT_MAP",
+    "BulkDeleteRequest",
+    "DeleteAllRequest",
+    "ProductUpdateRequest",
+    "UndoRequest",
+    # точки патчинга тестов (модули database.repository)
+    "repo",
+    "stats_repo",
+    # _bulk / _delete / _lists / _single: эндпоинты монолита
+    "bulk_preview_products",
+    "bulk_undo_products",
+    "bulk_update_products",
+    "get_edit_history",
+    "bulk_delete_products",
+    "delete_all_products",
+    "categories_suggest",
+    "get_products",
+    "get_stats",
+    "products_category_counts",
+    "delete_product",
+    "get_product_by_id",
+    "update_product",
+    "update_product_logistics",
+]

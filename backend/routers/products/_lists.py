@@ -9,9 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import get_current_user
-from database.models import PlatformCategorySpec
+from database.models import PlatformCategorySpec, User
 from database.models import Product as ProductORM
-from database.models import User
 from database.repository import repo
 from database.session import get_async_db
 from models.schemas import Stats

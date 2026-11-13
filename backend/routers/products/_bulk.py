@@ -4,6 +4,7 @@ edit-history (undo-снапшоты пишутся через services/edit_hist
 Вынесено без изменений из монолита routers/products.py (Р10).
 """
 
+import contextlib
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -136,7 +137,7 @@ async def bulk_update_products(
         f"updated={updated}/{len(request.product_ids)} fields={changed_fields}"
     )
 
-    try:
+    with contextlib.suppress(Exception):
         stats_repo.record(
             user_id=current_user.id,
             operation="bulk_update",
@@ -147,8 +148,6 @@ async def bulk_update_products(
             failed_items=len(request.product_ids) - updated,
             duration_ms=0,
         )
-    except Exception:
-        pass
 
     return {
         "success": True,
@@ -217,7 +216,7 @@ async def bulk_undo_products(
     await db.commit()
 
     total = result["restored"] + result["skipped_missing"]
-    try:
+    with contextlib.suppress(Exception):
         stats_repo.record(
             user_id=current_user.id,
             operation="bulk_undo",
@@ -228,8 +227,6 @@ async def bulk_undo_products(
             failed_items=result["skipped_missing"],
             duration_ms=0,
         )
-    except Exception:
-        pass
 
     return {
         "success": True,

@@ -4,6 +4,7 @@
 Вынесено без изменений из монолита routers/products.py (Р10).
 """
 
+import contextlib
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -171,7 +172,7 @@ async def update_product_logistics(
     except Exception as e:
         await db.rollback()
         logger.error(f"❌ Ошибка обновления логистики товара {product_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Ошибка обновления логистики: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка обновления логистики: {e}") from e
 
 
 @router.get("/products/{product_id}")
@@ -217,7 +218,7 @@ async def delete_product(
         await db.delete(product)
         await db.commit()
         logger.warning(f"🗑 Delete product {product_id} by user={current_user.id}")
-        try:
+        with contextlib.suppress(Exception):
             stats_repo.record(
                 user_id=current_user.id,
                 operation="delete",
@@ -228,8 +229,6 @@ async def delete_product(
                 failed_items=0,
                 duration_ms=0,
             )
-        except Exception:
-            pass
         return {"success": True}
 
     raise HTTPException(status_code=404, detail="Товар не найден или не принадлежит вам")

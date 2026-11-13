@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl.utils import get_column_letter
 
 from core.platforms import PLATFORM_CONFIG, Platform
-from services.xlsx_io import rows_workbook, write_columns, write_rows
+from services.xlsx_io import rows_workbook, write_columns
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Templates"])

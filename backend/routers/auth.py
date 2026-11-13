@@ -136,7 +136,7 @@ def register(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Ошибка при регистрации",
-        )
+        ) from e
     finally:
         db.close()
 

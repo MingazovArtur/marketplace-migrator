@@ -4,6 +4,7 @@ P-5) и delete-all (требует confirm=true).
 Вынесено без изменений из монолита routers/products.py (Р10).
 """
 
+import contextlib
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -53,7 +54,7 @@ async def bulk_delete_products(
             f"🗑 Bulk delete: user={current_user.id} deleted={deleted} "
             f"requested={len(payload.product_ids)} skipped={skipped}"
         )
-        try:
+        with contextlib.suppress(Exception):
             stats_repo.record(
                 user_id=current_user.id,
                 operation="delete",
@@ -64,8 +65,6 @@ async def bulk_delete_products(
                 failed_items=skipped,
                 duration_ms=0,
             )
-        except Exception:
-            pass
 
         return {"success": True, "deleted": deleted, "skipped": skipped}
     except HTTPException:
@@ -73,7 +72,7 @@ async def bulk_delete_products(
     except Exception as e:
         await db.rollback()
         logger.error(f"Ошибка bulk-удаления: {e}")
-        raise HTTPException(status_code=500, detail="Ошибка удаления товаров")
+        raise HTTPException(status_code=500, detail="Ошибка удаления товаров") from e
 
 
 @router.post("/products/delete-all")
@@ -107,7 +106,9 @@ async def delete_all_products(
             count_stmt = count_stmt.where(user_cond)
             del_stmt = del_stmt.where(user_cond)
 
-        total = (await db.execute(count_stmt)).scalar() or 0
+        # COUNT-запрос монолита сохранён (результат не используется с P-5:
+        # счётчик берётся из rowcount), F841: имя total убрано
+        await db.execute(count_stmt)
         res = await db.execute(del_stmt)
         await db.commit()
 
@@ -117,7 +118,7 @@ async def delete_all_products(
             f"🗑 DELETE ALL: user={current_user.id} role={current_user.role} "
             f"deleted={deleted}"
         )
-        try:
+        with contextlib.suppress(Exception):
             stats_repo.record(
                 user_id=current_user.id,
                 operation="delete_all",
@@ -128,8 +129,6 @@ async def delete_all_products(
                 failed_items=0,
                 duration_ms=0,
             )
-        except Exception:
-            pass
 
         return {"success": True, "deleted": deleted}
     except HTTPException:
@@ -137,4 +136,4 @@ async def delete_all_products(
     except Exception as e:
         await db.rollback()
         logger.error(f"Ошибка полного удаления: {e}")
-        raise HTTPException(status_code=500, detail="Ошибка удаления товаров")
+        raise HTTPException(status_code=500, detail="Ошибка удаления товаров") from e
