@@ -2,6 +2,7 @@
 Парсер файлов Ozon (XLSX).
 Объединяет логику из file_parser.py, ozon_parser.py и ozon_import_parser.py.
 """
+
 import io
 import logging
 
@@ -57,7 +58,10 @@ class OzonFileParser(BaseFileParser):
 
         # 2. Маппинг колонок
         header_cells = list(ws[header_row_idx])
-        headers = [str(cell.value).strip() if cell.value else f"col_{i}" for i, cell in enumerate(header_cells)]
+        headers = [
+            str(cell.value).strip() if cell.value else f"col_{i}"
+            for i, cell in enumerate(header_cells)
+        ]
 
         ozon_mapping = {
             "name": ["название товара", "название"],
@@ -92,7 +96,9 @@ class OzonFileParser(BaseFileParser):
         errors = []
 
         # 3. Чтение данных
-        for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
+        for row_idx, row in enumerate(
+            ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1
+        ):
             row_text = " ".join(str(cell).lower() for cell in row if cell is not None)
 
             if is_service_row(row_text) or not any(cell for cell in row):

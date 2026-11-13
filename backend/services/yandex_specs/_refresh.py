@@ -60,8 +60,7 @@ async def refresh_yandex_specs(
             leaves = [
                 leaf
                 for leaf in leaves
-                if leaf["id"] in wanted
-                or leaf["name"].lower() in {w.lower() for w in wanted}
+                if leaf["id"] in wanted or leaf["name"].lower() in {w.lower() for w in wanted}
             ]
 
         # Продолжение после паузы: пропускаем уже сохранённые категории
@@ -70,12 +69,12 @@ async def refresh_yandex_specs(
             before = len(leaves)
             leaves = [leaf for leaf in leaves if str(leaf["id"]) not in skip]
             if before != len(leaves):
-                logger.info(f"⏩ Яндекс: пропущено {before - len(leaves)} категорий из прошлой загрузки")
+                logger.info(
+                    f"⏩ Яндекс: пропущено {before - len(leaves)} категорий из прошлой загрузки"
+                )
 
         total = len(leaves)
-        logger.info(
-            f"🚀 Яндекс Маркет: к загрузке {total} категорий (business_id={business_id})"
-        )
+        logger.info(f"🚀 Яндекс Маркет: к загрузке {total} категорий (business_id={business_id})")
 
         if progress_cb:
             progress_cb({"total": total, "fetched": 0, "errors": 0})

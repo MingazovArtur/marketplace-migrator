@@ -44,9 +44,7 @@ def _notify_batch_done(
         send_batch_migration_email_sync(
             to_email=to_email,
             username=username,
-            platform_name=PLATFORM_CONFIG.get(target_platform, {}).get(
-                "name", target_platform
-            ),
+            platform_name=PLATFORM_CONFIG.get(target_platform, {}).get("name", target_platform),
             total=total,
             success=success_count,
             errors=error_count,

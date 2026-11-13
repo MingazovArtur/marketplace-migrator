@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 YANDEX_API_BASE = "https://api.partner.market.yandex.ru"
 
-CONCURRENCY = 4          # одновременных запросов параметров категорий
-TIMEOUT = 60.0           # таймаут одного HTTP-запроса
+CONCURRENCY = 4  # одновременных запросов параметров категорий
+TIMEOUT = 60.0  # таймаут одного HTTP-запроса
 MAX_RETRIES = 3
 
 

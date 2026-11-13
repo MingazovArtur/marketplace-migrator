@@ -206,6 +206,7 @@ async def send_welcome_email(user: User) -> bool:
 # ✅ v5: уведомление о завершении пакетной миграции
 # ============================================================
 
+
 async def send_batch_migration_email(
     to_email: str,
     username: str,

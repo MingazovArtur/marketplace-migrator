@@ -77,10 +77,7 @@ export const useProducts = (authed, onAuthError) => {
     await Promise.all([statsQuery.refetch(), productsQuery.refetch()]);
   }, [statsQuery, productsQuery]);
 
-  const getProductById = useCallback(
-    (id) => products.find((p) => p.id === id),
-    [products]
-  );
+  const getProductById = useCallback((id) => products.find((p) => p.id === id), [products]);
 
   return {
     products,

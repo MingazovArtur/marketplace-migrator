@@ -7,7 +7,24 @@ def _stem_ru(word: str) -> str:
     w = word.lower().strip()
     if len(w) <= 3:
         return w
-    for suffix in ("ами", "ями", "ев", "ов", "ей", "ам", "ям", "ах", "ях", "ую", "юю", "ые", "ие", "ой", "ий", "ый"):
+    for suffix in (
+        "ами",
+        "ями",
+        "ев",
+        "ов",
+        "ей",
+        "ам",
+        "ям",
+        "ах",
+        "ях",
+        "ую",
+        "юю",
+        "ые",
+        "ие",
+        "ой",
+        "ий",
+        "ый",
+    ):
         if w.endswith(suffix) and len(w) - len(suffix) >= 3:
             return w[: -len(suffix)]
     for suffix in ("а", "я", "ы", "и", "е", "о", "у", "ю", "ь"):
@@ -70,9 +87,7 @@ class CategoryMapper:
                 score += 50
             else:
                 parent_stems = {
-                    _stem_ru(w)
-                    for w in re.findall(r"[a-zа-яё0-9]+", parent_part)
-                    if len(w) >= 3
+                    _stem_ru(w) for w in re.findall(r"[a-zа-яё0-9]+", parent_part) if len(w) >= 3
                 }
                 if parent_stems & stemmed_tokens:
                     score += 30

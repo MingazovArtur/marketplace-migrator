@@ -46,7 +46,9 @@ def set_photos(
             photos.append(u)
 
     if len(photos) > MAX_PHOTOS_PER_PRODUCT:
-        raise HTTPException(status_code=400, detail=f"Максимум {MAX_PHOTOS_PER_PRODUCT} фото на товар")
+        raise HTTPException(
+            status_code=400, detail=f"Максимум {MAX_PHOTOS_PER_PRODUCT} фото на товар"
+        )
 
     repo.update(
         product_id,

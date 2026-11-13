@@ -18,9 +18,7 @@ router = APIRouter(prefix="/api", tags=["Templates"])
 
 
 def _safe_disposition(filename: str) -> str:
-    ascii_name = (
-        "".join(c if ord(c) < 128 else "_" for c in filename).strip("_") or "template.xlsx"
-    )
+    ascii_name = "".join(c if ord(c) < 128 else "_" for c in filename).strip("_") or "template.xlsx"
     encoded = quote(filename, safe="")
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
 

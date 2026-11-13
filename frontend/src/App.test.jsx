@@ -73,7 +73,9 @@ describe('App (smoke: маршруты + TanStack Query)', () => {
     renderApp('/');
 
     // Дефолтный вид — «Товары»: страница запросила список
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Товары' })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Товары' })).toBeInTheDocument()
+    );
     expect(api.getProducts).toHaveBeenCalled();
     expect(screen.getByRole('link', { name: /Дашборд/ })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Товары/ })).toBeInTheDocument();
@@ -82,12 +84,12 @@ describe('App (smoke: маршруты + TanStack Query)', () => {
   it('навигация по сайдбару переключает маршруты без перезагрузки', async () => {
     renderApp('/');
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Товары' })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Товары' })).toBeInTheDocument()
+    );
 
     fireEvent.click(screen.getByRole('link', { name: /Дашборд/ }));
-    await waitFor(() =>
-      expect(screen.getByText('Обзор миграции товаров')).toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.getByText('Обзор миграции товаров')).toBeInTheDocument());
     expect(screen.getByRole('heading', { name: 'Дашборд' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('link', { name: /Импорт/ }));
@@ -100,6 +102,8 @@ describe('App (smoke: маршруты + TanStack Query)', () => {
     renderApp('/specs-monitor');
 
     // Не админ → тихий редирект на «Товары»
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Товары' })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Товары' })).toBeInTheDocument()
+    );
   });
 });

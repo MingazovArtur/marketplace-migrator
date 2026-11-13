@@ -189,8 +189,20 @@ def test_build_validation_rules_enums_only_for_valued_attrs():
     from services.yandex_specs._parameters import _build_validation_rules
 
     attrs = [
-        {"id": "10", "values": ["Красный"], "case_sensitive": False, "type": "select", "separator": ";"},
-        {"id": "11", "values": ["a", "b"], "case_sensitive": False, "type": "multiselect", "separator": ";"},
+        {
+            "id": "10",
+            "values": ["Красный"],
+            "case_sensitive": False,
+            "type": "select",
+            "separator": ";",
+        },
+        {
+            "id": "11",
+            "values": ["a", "b"],
+            "case_sensitive": False,
+            "type": "multiselect",
+            "separator": ";",
+        },
         {"id": "12", "values": None, "type": "text", "separator": ";"},
     ]
     rules = _build_validation_rules(attrs)
@@ -225,7 +237,9 @@ def test_refresh_orchestrator_pause_between_chunks(monkeypatch):
         return [dict(leaf) for leaf in leaves]
 
     async def fake_params(client, sem, headers, category_id):
-        return [{"id": "10", "name": "Цвет", "type": "select", "required": True, "values": ["Красный"]}]
+        return [
+            {"id": "10", "name": "Цвет", "type": "select", "required": True, "values": ["Красный"]}
+        ]
 
     flushed = []
 

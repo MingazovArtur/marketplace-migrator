@@ -134,9 +134,7 @@ class OperationLogRepository:
                 elif operation == "export":
                     q = q.filter(FileOperationLog.operation == "export")
                 for e in (
-                    q.order_by(
-                        FileOperationLog.created_at.desc(), FileOperationLog.id.desc()
-                    )
+                    q.order_by(FileOperationLog.created_at.desc(), FileOperationLog.id.desc())
                     .limit(window)
                     .all()
                 ):

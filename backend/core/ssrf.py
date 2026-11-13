@@ -177,9 +177,7 @@ def _validate_and_resolve(url: str) -> tuple[str, list[str]]:
         for item in addr_info:
             ip_str = item[4][0]
             if _is_forbidden_ip(ipaddress.ip_address(ip_str)):
-                raise ValueError(
-                    f"хост {hostname} резолвится во внутренний IP {ip_str}"
-                )
+                raise ValueError(f"хост {hostname} резолвится во внутренний IP {ip_str}")
             if ip_str not in seen:
                 seen.add(ip_str)
                 ips.append(ip_str)
@@ -247,9 +245,7 @@ def safe_get(
         try:
             hostname, ips = _validate_and_resolve(current_url)
         except ValueError as e:
-            raise ValueError(
-                f"Запрещённый адрес (SSRF-защита): {current_url} — {e}"
-            ) from e
+            raise ValueError(f"Запрещённый адрес (SSRF-защита): {current_url} — {e}") from e
 
         if resp is not None:
             resp.close()

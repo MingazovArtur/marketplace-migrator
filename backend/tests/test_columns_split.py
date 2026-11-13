@@ -28,20 +28,39 @@ def test_public_api_preserved():
     public = {n for n in dir(pkg) if not n.startswith("_")}
     assert public == {
         # стили
-        "RED_FILL", "GRAY_FILL", "YM_HINT_FILL", "HEADER_FONT",
-        "RED_HEADER_FONT", "GROUP_FONT", "HINT_FONT", "DATA_FONT",
-        "THIN_SIDE", "CELL_BORDER",
+        "RED_FILL",
+        "GRAY_FILL",
+        "YM_HINT_FILL",
+        "HEADER_FONT",
+        "RED_HEADER_FONT",
+        "GROUP_FONT",
+        "HINT_FONT",
+        "DATA_FONT",
+        "THIN_SIDE",
+        "CELL_BORDER",
         # общие константы
-        "DICT_LIMIT", "DATA_START_ROW", "VAT_LABELS",
+        "DICT_LIMIT",
+        "DATA_START_ROW",
+        "VAT_LABELS",
         # группы Ozon
-        "G_NAME", "G_PRICE", "G_PROMO", "G_SKU", "G_EXTRA",
-        "G_UNION", "G_VARIANT", "G_ATTRS",
+        "G_NAME",
+        "G_PRICE",
+        "G_PROMO",
+        "G_SKU",
+        "G_EXTRA",
+        "G_UNION",
+        "G_VARIANT",
+        "G_ATTRS",
         # справочники
-        "BRAND_NAMES", "RECOMMENDED_ONLY",
+        "BRAND_NAMES",
+        "RECOMMENDED_ONLY",
         # подсказки
-        "HINT_MAIN_PHOTO", "HINT_EXTRA_PHOTOS",
+        "HINT_MAIN_PHOTO",
+        "HINT_EXTRA_PHOTOS",
         # колонки
-        "OZON_BASE_COLUMNS", "YANDEX_TEMPLATE_COLUMNS", "YANDEX_GROUP_MERGES",
+        "OZON_BASE_COLUMNS",
+        "YANDEX_TEMPLATE_COLUMNS",
+        "YANDEX_GROUP_MERGES",
     }
 
 
@@ -152,8 +171,15 @@ def test_yandex_group_merges():
 
 def test_group_texts_are_strings_with_hints():
     # тексты групп Ozon: «заголовок\nподсказка» (G_NAME — только заголовок)
-    for g in (pkg.G_PRICE, pkg.G_PROMO, pkg.G_SKU, pkg.G_EXTRA,
-              pkg.G_UNION, pkg.G_VARIANT, pkg.G_ATTRS):
+    for g in (
+        pkg.G_PRICE,
+        pkg.G_PROMO,
+        pkg.G_SKU,
+        pkg.G_EXTRA,
+        pkg.G_UNION,
+        pkg.G_VARIANT,
+        pkg.G_ATTRS,
+    ):
         assert isinstance(g, str) and "\n" in g
     # G_NAME — короткий заголовок без подсказки
     assert pkg.G_NAME == "Название"

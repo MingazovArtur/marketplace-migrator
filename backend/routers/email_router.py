@@ -56,9 +56,7 @@ async def verify_email(
     user_id = data.get("sub")
     email = data.get("email")
 
-    res = await db.execute(
-        select(User).where(User.id == int(user_id), User.email == email)
-    )
+    res = await db.execute(select(User).where(User.id == int(user_id), User.email == email))
     user = res.scalars().first()
     if not user:
         raise HTTPException(status_code=400, detail="Недействительная или просроченная ссылка")
@@ -74,7 +72,11 @@ async def verify_email(
     # log_access пишет в БД синхронно (автономная session) — в threadpool
     await asyncio.to_thread(
         log_access,
-        user_id=user.id, username=user.username, action="email_verified", ip=ip, user_agent=ua,
+        user_id=user.id,
+        username=user.username,
+        action="email_verified",
+        ip=ip,
+        user_agent=ua,
     )
     logger.info(f"✅ Email подтверждён: {user.username}")
 

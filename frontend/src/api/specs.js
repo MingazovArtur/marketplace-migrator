@@ -83,11 +83,7 @@ export const specsApi = {
 
   /* ✅ Round 8: прогресс фоновой загрузки спеков пушем (SSE), polling — резерв.
    * paused — терминальный: продолжение — на странице мониторинга. */
-  streamSpecsRefresh: async (
-    platform,
-    taskId,
-    { onUpdate, onError, signal, timeoutMs } = {}
-  ) => {
+  streamSpecsRefresh: async (platform, taskId, { onUpdate, onError, signal, timeoutMs } = {}) => {
     return await watchTask(`${API_URL}/specs/${enc(platform)}/refresh/${enc(taskId)}/events`, {
       onEvent: onUpdate,
       onError,

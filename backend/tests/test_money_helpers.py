@@ -36,9 +36,7 @@ def test_product_price_serialized_as_float():
 
 
 def test_product_variant_price_serialized_as_float():
-    p = _make_product(
-        variants=[ProductVariant(sku="T-1", price=Decimal("9.99"), stock=3)]
-    )
+    p = _make_product(variants=[ProductVariant(sku="T-1", price=Decimal("9.99"), stock=3)])
     d = ProductRepository._to_dict(p)
     assert d["variants"][0]["price"] == 9.99
     assert isinstance(d["variants"][0]["price"], float)

@@ -2,7 +2,6 @@
 Модели базы данных SQLAlchemy
 """
 
-
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -370,9 +369,7 @@ class MigrationProfile(Base):
 
     user = relationship("User", backref="migration_profiles")
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "name", name="uq_migration_profile_user_name"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_migration_profile_user_name"),)
 
 
 class BulkEditSnapshot(Base):

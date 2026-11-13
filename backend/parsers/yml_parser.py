@@ -63,7 +63,9 @@ class YmlParser:
                     or ip_obj.is_multicast
                     or ip_obj.is_reserved
                 ):
-                    logger.warning(f"🚫 SSRF block: хост {hostname} резолвится во внутренний IP {ip_str}")
+                    logger.warning(
+                        f"🚫 SSRF block: хост {hostname} резолвится во внутренний IP {ip_str}"
+                    )
                     return False
 
             return True
@@ -91,11 +93,14 @@ class YmlParser:
         logger.info(f"📡 Скачиваем YML-фид: {url}")
 
         try:
-            with httpx.Client(
-                timeout=30,
-                # follow_redirects по умолчанию выключен — защита от SSRF-редиректа на внутренний IP
-                headers={"User-Agent": "Mozilla/5.0 (Marketplace Migrator Bot)"},
-            ) as client, client.stream("GET", url) as response:
+            with (
+                httpx.Client(
+                    timeout=30,
+                    # follow_redirects по умолчанию выключен — защита от SSRF-редиректа на внутренний IP
+                    headers={"User-Agent": "Mozilla/5.0 (Marketplace Migrator Bot)"},
+                ) as client,
+                client.stream("GET", url) as response,
+            ):
                 if response.is_redirect or response.status_code in (301, 302, 303, 307, 308):
                     redirect_url = response.headers.get("Location", "")
                     if not self.validate_url(redirect_url):
@@ -138,7 +143,9 @@ class YmlParser:
         # Защита от Billion Laughs / XXE: запрещаем объявления <!ENTITY в XML
         head_sample = content[:4096].upper()
         if b"<!ENTITY" in head_sample:
-            raise ValueError("XML содержит запрещённые конструкции <!ENTITY> (защита от XXE/XML Bomb)")
+            raise ValueError(
+                "XML содержит запрещённые конструкции <!ENTITY> (защита от XXE/XML Bomb)"
+            )
 
         try:
             root = ElementTree.fromstring(content)

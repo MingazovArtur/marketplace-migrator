@@ -57,7 +57,9 @@ def test_task_registration_on_celery_app():
     assert registered.name == "tasks.migrate_product_task"
     assert registered.run.__module__ == "tasks.migrate_tasks._single"
     assert celery_app.tasks["tasks.migrate_batch_task"].name == "tasks.migrate_batch_task"
-    assert celery_app.tasks["tasks.migrate_batch_task"].run.__module__ == "tasks.migrate_tasks._batch"
+    assert (
+        celery_app.tasks["tasks.migrate_batch_task"].run.__module__ == "tasks.migrate_tasks._batch"
+    )
     assert pkg.migrate_product_task.name == registered.name
 
 
@@ -191,12 +193,12 @@ def _patch_single(monkeypatch, products, *, category=("Одежда / Футбо
     monkeypatch.setattr(single_mod, "repo", repo)
     monkeypatch.setattr(single_mod, "stats_repo", stats)
     monkeypatch.setattr(single_mod, "op_log", op_log)
-    monkeypatch.setattr(single_mod, "defaults_service", types.SimpleNamespace(
-        build_updates_for_product=lambda p, u: dict(defaults or {})
-    ))
     monkeypatch.setattr(
-        single_mod, "_pick_target_category", lambda *a, **k: category
+        single_mod,
+        "defaults_service",
+        types.SimpleNamespace(build_updates_for_product=lambda p, u: dict(defaults or {})),
     )
+    monkeypatch.setattr(single_mod, "_pick_target_category", lambda *a, **k: category)
     ensured = []
     monkeypatch.setattr(
         single_mod,
@@ -223,19 +225,13 @@ def _product(product_id=1, **over):
 
 def test_single_task_product_not_found(monkeypatch):
     _patch_single(monkeypatch, products={})
-    res = single_mod.migrate_product_task.apply(
-        args=(999, "ozon", 7), throw=True
-    ).get()
+    res = single_mod.migrate_product_task.apply(args=(999, "ozon", 7), throw=True).get()
     assert res == {"status": "error", "message": "Товар не найден или не принадлежит вам"}
 
 
 def test_single_task_zero_price_rejected(monkeypatch):
-    repo, _, logged, _ = _patch_single(
-        monkeypatch, products={1: _product(price=0)}
-    )
-    res = single_mod.migrate_product_task.apply(
-        args=(1, "ozon", 7), throw=True
-    ).get()
+    repo, _, logged, _ = _patch_single(monkeypatch, products={1: _product(price=0)})
+    res = single_mod.migrate_product_task.apply(args=(1, "ozon", 7), throw=True).get()
     assert res["status"] == "error"
     assert "Цена товара = 0" in res["message"]
     # статус ошибки записан
@@ -246,12 +242,11 @@ def test_single_task_zero_price_rejected(monkeypatch):
 
 def test_single_task_no_category_rejected(monkeypatch):
     repo, _, _, _ = _patch_single(
-        monkeypatch, products={1: _product(mapped_category="Старая кат.")},
+        monkeypatch,
+        products={1: _product(mapped_category="Старая кат.")},
         category=(None, "spec"),
     )
-    res = single_mod.migrate_product_task.apply(
-        args=(1, "ozon", 7), throw=True
-    ).get()
+    res = single_mod.migrate_product_task.apply(args=(1, "ozon", 7), throw=True).get()
     assert res["status"] == "error"
     assert "Не найдена точная категория" in res["message"]
     # прежняя категория сохраняется, не сбрасывается
@@ -265,18 +260,14 @@ def test_single_task_success_flow(monkeypatch):
         monkeypatch, products={1: _product(price=1000.0)}
     )
     monkeypatch.setattr(single_mod, "PRICE_RULES", {"ozon": 1.5})
-    monkeypatch.setattr(
-        single_mod, "PLATFORM_CONFIG", {"ozon": {"name": "Ozon"}}
-    )
+    monkeypatch.setattr(single_mod, "PLATFORM_CONFIG", {"ozon": {"name": "Ozon"}})
 
-    res = single_mod.migrate_product_task.apply(
-        args=(1, "ozon", 7), throw=True
-    ).get()
+    res = single_mod.migrate_product_task.apply(args=(1, "ozon", 7), throw=True).get()
 
     assert res == {"status": "completed", "product_id": 1}
     final = repo.updates[-1][1]
     assert final["status"] == "success"
-    assert final["price"] == 1500.0            # 1000 × 1.5 (PRICE_RULES)
+    assert final["price"] == 1500.0  # 1000 × 1.5 (PRICE_RULES)
     assert final["source"] == "Магнит Маркет (Файл) → Ozon"
     assert final["mapped_category"] == "Одежда / Футболки"
     # канонические атрибуты дозаполнены ДО финального статуса
@@ -298,7 +289,7 @@ def test_single_task_edited_price_overrides(monkeypatch):
 
     assert res["status"] == "completed"
     final = repo.updates[-1][1]
-    assert final["price"] == 100.0            # отредактированная 50 × 2.0
+    assert final["price"] == 100.0  # отредактированная 50 × 2.0
     assert final["name"] == "Новое имя"
 
 
@@ -309,16 +300,14 @@ def test_single_task_exception_returns_error(monkeypatch):
 
     monkeypatch.setattr(single_mod, "repo", _BoomRepo({1: _product()}))
     recorded = []
-    monkeypatch.setattr(single_mod, "stats_repo", types.SimpleNamespace(
-        record=lambda **kw: recorded.append(kw)
-    ))
-    monkeypatch.setattr(single_mod, "op_log", types.SimpleNamespace(
-        log_migration=lambda **kw: None
-    ))
+    monkeypatch.setattr(
+        single_mod, "stats_repo", types.SimpleNamespace(record=lambda **kw: recorded.append(kw))
+    )
+    monkeypatch.setattr(
+        single_mod, "op_log", types.SimpleNamespace(log_migration=lambda **kw: None)
+    )
 
-    res = single_mod.migrate_product_task.apply(
-        args=(1, "ozon", 7), throw=True
-    ).get()
+    res = single_mod.migrate_product_task.apply(args=(1, "ozon", 7), throw=True).get()
     assert res["status"] == "error"
     assert "БД упала" in res["message"]
     # suppress-ветки не роняют: ошибочная статистика тоже записана
@@ -353,30 +342,30 @@ def _patch_batch(monkeypatch, products, *, category=("Одежда / Футбо�
     repo = _BatchRepoStub(products)
     recorded = []
     monkeypatch.setattr(batch_mod, "repo", repo)
-    monkeypatch.setattr(batch_mod, "stats_repo", types.SimpleNamespace(
-        record=lambda **kw: recorded.append(kw)
-    ))
+    monkeypatch.setattr(
+        batch_mod, "stats_repo", types.SimpleNamespace(record=lambda **kw: recorded.append(kw))
+    )
     log_chunks = []
-    monkeypatch.setattr(batch_mod, "op_log", types.SimpleNamespace(
-        log_migration_batch=lambda chunk: log_chunks.append(chunk)
-    ))
-    monkeypatch.setattr(batch_mod, "defaults_service", types.SimpleNamespace(
-        build_updates_for_product=lambda p, u: {}
-    ))
+    monkeypatch.setattr(
+        batch_mod,
+        "op_log",
+        types.SimpleNamespace(log_migration_batch=lambda chunk: log_chunks.append(chunk)),
+    )
+    monkeypatch.setattr(
+        batch_mod,
+        "defaults_service",
+        types.SimpleNamespace(build_updates_for_product=lambda p, u: {}),
+    )
     monkeypatch.setattr(batch_mod, "_pick_target_category", lambda *a, **k: category)
     monkeypatch.setattr(batch_mod, "_ensure_canonical_attributes", lambda **kw: None)
     notified = []
-    monkeypatch.setattr(
-        batch_mod, "_notify_batch_done", lambda **kw: notified.append(kw)
-    )
+    monkeypatch.setattr(batch_mod, "_notify_batch_done", lambda **kw: notified.append(kw))
     return repo, recorded, log_chunks, notified
 
 
 def test_batch_task_empty_package(monkeypatch):
     repo, recorded, log_chunks, notified = _patch_batch(monkeypatch, products={})
-    res = batch_mod.migrate_batch_task.apply(
-        args=([], "ozon", 7), throw=True
-    ).get()
+    res = batch_mod.migrate_batch_task.apply(args=([], "ozon", 7), throw=True).get()
 
     assert res["status"] == "completed"
     assert res["total"] == 0 and res["success"] == 0 and res["errors"] == 0
@@ -384,7 +373,7 @@ def test_batch_task_empty_package(monkeypatch):
     # пустой пакет не апдейтится повторно, но processing-метка ставится
     assert repo.bulk_updates == [([], {"status": "processing", "error_message": None})]
     assert log_chunks == []
-    assert recorded[0]["status"] == "success"      # error_count == 0 → success
+    assert recorded[0]["status"] == "success"  # error_count == 0 → success
     assert notified[0]["total"] == 0
 
 
@@ -400,9 +389,7 @@ def test_batch_task_mixed_package(monkeypatch):
     monkeypatch.setattr(batch_mod, "PRICE_RULES", {"ozon": 1.0})
     monkeypatch.setattr(batch_mod, "PLATFORM_CONFIG", {"ozon": {"name": "Ozon"}})
 
-    res = batch_mod.migrate_batch_task.apply(
-        args=([1, 2, 3], "ozon", 7), throw=True
-    ).get()
+    res = batch_mod.migrate_batch_task.apply(args=([1, 2, 3], "ozon", 7), throw=True).get()
 
     assert res["status"] == "completed"
     assert res["total"] == 3
@@ -442,9 +429,7 @@ def test_batch_task_unknown_product_counted_as_error(monkeypatch):
     repo, recorded, log_chunks, notified = _patch_batch(
         monkeypatch, products={1: _product(product_id=1, price=100.0)}
     )
-    res = batch_mod.migrate_batch_task.apply(
-        args=([1, 99], "ozon", 7), throw=True
-    ).get()
+    res = batch_mod.migrate_batch_task.apply(args=([1, 99], "ozon", 7), throw=True).get()
 
     assert res["success"] == 1
     assert res["errors"] == 1

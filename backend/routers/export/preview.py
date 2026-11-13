@@ -109,8 +109,7 @@ async def validate_export(
         products = [
             p
             for p in products
-            if p.last_export_at is None
-            or (p.updated_at and p.updated_at > p.last_export_at)
+            if p.last_export_at is None or (p.updated_at and p.updated_at > p.last_export_at)
         ]
 
     if not products:
@@ -136,9 +135,7 @@ async def _specs_for_products(
     db: AsyncSession, product_dicts: list[dict], platform: str
 ) -> tuple[dict[str, dict | None], list[str]]:
     """Спеки по категориям выборки + отсортированный список категорий без спек."""
-    categories = {
-        (p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts
-    }
+    categories = {(p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts}
     spec_stmt = select(PlatformCategorySpec).where(
         PlatformCategorySpec.platform == platform,
         PlatformCategorySpec.category_name.in_(categories),

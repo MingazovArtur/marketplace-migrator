@@ -190,7 +190,8 @@ const TemplatesPage = ({ onNotify }) => {
         <div>
           <h1 className="header-title">Шаблоны площадок</h1>
           <p className="header-subtitle">
-            Эталонные XLSX-шаблоны Яндекс Маркета, Ozon, Wildberries, Магнит Маркета, Мегамаркета, Холодильник.ру и AliExpress: выгрузка 1:1 с кабинетом площадки
+            Эталонные XLSX-шаблоны Яндекс Маркета, Ozon, Wildberries, Магнит Маркета, Мегамаркета,
+            Холодильник.ру и AliExpress: выгрузка 1:1 с кабинетом площадки
           </p>
         </div>
         <div className="header-actions">
@@ -336,10 +337,10 @@ const TemplatesPage = ({ onNotify }) => {
         </div>
 
         <p className="form-hint" style={{ marginTop: '0.6rem', marginBottom: 0 }}>
-          💡 Если указано <strong>«{UNIVERSAL_LABEL}»</strong> (или если это единственный загруженный
-          шаблон для площадки), система будет автоматически использовать его при выгрузке любых
-          товаров на <strong>{currentPlatformMeta.name}</strong>: удалит пример из шаблона и запишет
-          ваши товары в оригинальные столбцы.
+          💡 Если указано <strong>«{UNIVERSAL_LABEL}»</strong> (или если это единственный
+          загруженный шаблон для площадки), система будет автоматически использовать его при
+          выгрузке любых товаров на <strong>{currentPlatformMeta.name}</strong>: удалит пример из
+          шаблона и запишет ваши товары в оригинальные столбцы.
         </p>
       </form>
 
@@ -405,8 +406,7 @@ const TemplatesPage = ({ onNotify }) => {
               <tbody>
                 {visibleTemplates.map((t) => {
                   const pl = t.platform || 'ozon';
-                  const pMeta =
-                    PLATFORM_OPTIONS.find((p) => p.id === pl) || PLATFORM_OPTIONS[1];
+                  const pMeta = PLATFORM_OPTIONS.find((p) => p.id === pl) || PLATFORM_OPTIONS[1];
                   return (
                     <tr key={`${pl}::${t.category_name}`}>
                       <td>

@@ -54,7 +54,8 @@ def get_progress(task_id: str) -> dict:
                         "success": r.get("success", 0),
                         "errors": r.get("errors", 0),
                         "percent": 0,
-                        "message": r.get("message") or "Загрузка поставлена на паузу администратором",
+                        "message": r.get("message")
+                        or "Загрузка поставлена на паузу администратором",
                     }
                 total = r.get("total") or (r.get("fetched", 0) + r.get("errors", 0))
                 success = r.get("success") or r.get("fetched", 0)

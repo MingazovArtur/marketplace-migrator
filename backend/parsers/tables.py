@@ -131,6 +131,7 @@ class _ILoc:
 # Чтение CSV
 # ---------------------------------------------------------------------------
 
+
 def read_csv_table(content: bytes) -> Table:
     """CSV -> Table. Кодировки: utf-8(-sig) -> windows-1251 -> utf-8/replace."""
     try:
@@ -161,6 +162,7 @@ def read_csv_table(content: bytes) -> Table:
 # ---------------------------------------------------------------------------
 # Чтение XLSX
 # ---------------------------------------------------------------------------
+
 
 class ExcelBook:
     """Аналог pd.ExcelFile: список листов + parse() с выбором шапки."""
@@ -195,7 +197,7 @@ class ExcelBook:
         columns = _mangle_columns(
             [c if c is not None else f"Unnamed: {i}" for i, c in enumerate(rows[header])]
         )
-        return Table(columns, rows[header + 1:])
+        return Table(columns, rows[header + 1 :])
 
 
 def read_excel_table(content: bytes, sheet_name=None, header: int | None = 0) -> Table:

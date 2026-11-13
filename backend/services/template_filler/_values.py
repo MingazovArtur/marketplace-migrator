@@ -54,10 +54,7 @@ def _row_values(
 
     # Бренд
     raw_brand = (
-        product.get("brand")
-        or attr_map.get("бренд")
-        or attr_map.get("брендводеждеиобуви")
-        or ""
+        product.get("brand") or attr_map.get("бренд") or attr_map.get("брендводеждеиобуви") or ""
     ).strip()
     if not raw_brand or raw_brand.lower() in (
         "отсутствует бренд",
@@ -118,9 +115,7 @@ def _row_values(
     width_cm = round(float(w_mm) / 10.0, 2) if w_mm else None
     height_cm = round(float(h_mm) / 10.0, 2) if h_mm else None
     dims_slash_cm = (
-        f"{length_cm}/{width_cm}/{height_cm}"
-        if (length_cm and width_cm and height_cm)
-        else None
+        f"{length_cm}/{width_cm}/{height_cm}" if (length_cm and width_cm and height_cm) else None
     )
 
     okpd = product.get("okpd_code") or attr_map.get("тнвэдкодыеаэс") or attr_map.get("тнвэд")
@@ -139,10 +134,7 @@ def _row_values(
         or "Разноцветный"
     )
     var_size = (
-        product.get("_variant_size")
-        or attr_map.get("размер")
-        or attr_map.get("размеродежды")
-        or ""
+        product.get("_variant_size") or attr_map.get("размер") or attr_map.get("размеродежды") or ""
     )
 
     # Сборка колонки «Характеристики товара» для Яндекс Маркета (Имя|Значение;Имя|Значение)
@@ -239,9 +231,11 @@ def _row_values(
         "высотаупаковки": int(round(height_cm)) if height_cm else None,
         # --- Яндекс Маркет / Холодильник.ру / Магнит ---
         "ссылканаизображение": ", ".join(photos[:30]) if photos else None,
-        "ссылканафото": "; ".join(photos[:15])
-        if platform != "yandex"
-        else (", ".join(photos[:30]) if photos else None),
+        "ссылканафото": (
+            "; ".join(photos[:15])
+            if platform != "yandex"
+            else (", ".join(photos[:30]) if photos else None)
+        ),
         "ссылкинафото": "; ".join(photos[:15]) if photos else None,
         "фотоurl": "; ".join(photos[:10]) if photos else None,
         "urlкартинки": photos[0] if photos else None,
@@ -254,37 +248,37 @@ def _row_values(
         "бренд": brand_val,
         "производитель": brand_val,
         "производительбренд": brand_val,
-        "штрихкод": barcode_comma
-        if platform == "yandex"
-        else (main_gtin if platform == "megamarket" else barcode_semi),
+        "штрихкод": (
+            barcode_comma
+            if platform == "yandex"
+            else (main_gtin if platform == "megamarket" else barcode_semi)
+        ),
         "баркод": barcode_comma if platform == "yandex" else barcode_semi,
         "странапроизводства": attr_map.get("странапроизводства")
         or attr_map.get("странаизготовитель")
         or "Россия",
         "артикулпроизводителя": article,
         "вескг": _format_comma_decimal(weight_kg) if platform == "megamarket" else weight_kg,
-        "весвупаковкекг": _format_comma_decimal(weight_kg)
-        if platform == "megamarket"
-        else weight_kg,
-        "вессупаковкойкг": _format_comma_decimal(weight_kg)
-        if platform == "megamarket"
-        else weight_kg,
+        "весвупаковкекг": (
+            _format_comma_decimal(weight_kg) if platform == "megamarket" else weight_kg
+        ),
+        "вессупаковкойкг": (
+            _format_comma_decimal(weight_kg) if platform == "megamarket" else weight_kg
+        ),
         "длинасм": _format_comma_decimal(length_cm) if platform == "megamarket" else length_cm,
-        "длинаупаковкисм": _format_comma_decimal(length_cm)
-        if platform == "megamarket"
-        else length_cm,
+        "длинаупаковкисм": (
+            _format_comma_decimal(length_cm) if platform == "megamarket" else length_cm
+        ),
         "ширинасм": _format_comma_decimal(width_cm) if platform == "megamarket" else width_cm,
-        "ширинаупаковкисм": _format_comma_decimal(width_cm)
-        if platform == "megamarket"
-        else width_cm,
+        "ширинаупаковкисм": (
+            _format_comma_decimal(width_cm) if platform == "megamarket" else width_cm
+        ),
         "высотасм": _format_comma_decimal(height_cm) if platform == "megamarket" else height_cm,
-        "высотаупаковкисм": _format_comma_decimal(height_cm)
-        if platform == "megamarket"
-        else height_cm,
+        "высотаупаковкисм": (
+            _format_comma_decimal(height_cm) if platform == "megamarket" else height_cm
+        ),
         "габаритысупаковкойсм": dims_slash_cm,
-        "товардоставляетсявнесколькихупаковках": int(units)
-        if units and int(units) > 1
-        else None,
+        "товардоставляетсявнесколькихупаковках": int(units) if units and int(units) > 1 else None,
         "цена": product.get("price"),
         "ценаруб": product.get("price"),
         "ценасучетомскидок": product.get("price"),
@@ -310,11 +304,7 @@ def _row_values(
             values[m] = spu_id if platform == "aliexpress" else product.get("name")
     if not any(values.get(m) for m in MARKING_SYNONYMS):
         values[MARKING_SYNONYMS[0]] = "Нет"
-    if (
-        not values.get("количествовупаковке")
-        and not values.get("количествовупаковкешт")
-        and units
-    ):
+    if not values.get("количествовупаковке") and not values.get("количествовупаковкешт") and units:
         values["количествовупаковке"] = units
 
     # Приведение значений к регистру словаря площадки и очистка разделителей

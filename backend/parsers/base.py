@@ -2,6 +2,7 @@
 Абстрактный базовый класс для всех парсеров файлов.
 Единый интерфейс для парсинга файлов разных площадок.
 """
+
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -16,6 +17,7 @@ class ParseResult:
     чтобы не ломать существующий код в routers/import_router/
     (бывший import_router.py).
     """
+
     products: list[dict[str, Any]] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[dict[str, Any]] = field(default_factory=list)

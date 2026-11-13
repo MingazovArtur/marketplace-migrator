@@ -30,7 +30,7 @@ def test_double_encrypt_is_idempotent():
 
 def test_tampered_token_raises_value_error():
     encrypted = encrypt_str("value")
-    token_part = encrypted[len("enc1:"):]
+    token_part = encrypted[len("enc1:") :]
     tampered = encrypted[: len("enc1:")] + ("A" if token_part[-1] != "A" else "B") + token_part[:-1]
     assert tampered != encrypted
     with pytest.raises(ValueError, match="расшифровать"):

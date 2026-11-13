@@ -150,10 +150,13 @@ export async function watchTask(url, opts = {}) {
   }
   let timeoutId = null;
   if (Number.isFinite(deadline)) {
-    timeoutId = setTimeout(() => {
-      timedOut = true;
-      internal.abort();
-    }, Math.max(0, deadline - Date.now()));
+    timeoutId = setTimeout(
+      () => {
+        timedOut = true;
+        internal.abort();
+      },
+      Math.max(0, deadline - Date.now())
+    );
   }
 
   const handleEvent = (payload) => {

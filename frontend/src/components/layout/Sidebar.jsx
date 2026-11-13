@@ -21,9 +21,7 @@ const NAV = [
 const ADMIN_NAV_ITEM = { to: '/specs-monitor', label: 'Мониторинг спеков', icon: 'report' };
 
 const Sidebar = ({ theme, setTheme, isAdmin = false }) => {
-  const items = isAdmin
-    ? [...NAV.slice(0, 5), ADMIN_NAV_ITEM, ...NAV.slice(5)]
-    : NAV;
+  const items = isAdmin ? [...NAV.slice(0, 5), ADMIN_NAV_ITEM, ...NAV.slice(5)] : NAV;
 
   return (
     <aside className="sidebar">

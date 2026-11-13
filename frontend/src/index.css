@@ -21,7 +21,7 @@ body {
   box-sizing: border-box;
 }
 
-code{
+code {
   font-family: var(--mono);
   display: inline-flex;
   border-radius: 4px;

@@ -41,7 +41,13 @@ describe('useProducts (TanStack Query)', () => {
     expect(api.getProducts).not.toHaveBeenCalled();
     expect(api.getStats).not.toHaveBeenCalled();
     expect(result.current.products).toEqual([]);
-    expect(result.current.stats).toEqual({ total: 0, pending: 0, success: 0, error: 0, processing: 0 });
+    expect(result.current.stats).toEqual({
+      total: 0,
+      pending: 0,
+      success: 0,
+      error: 0,
+      processing: 0,
+    });
   });
 
   it('загружает список и статистику, отдаёт их наружу', async () => {
@@ -71,9 +77,7 @@ describe('useProducts (TanStack Query)', () => {
 
   it('статистика доступна, даже если список ещё грузится', async () => {
     let resolveList;
-    api.getProducts.mockImplementation(
-      () => new Promise((r) => (resolveList = () => r(LIST)))
-    );
+    api.getProducts.mockImplementation(() => new Promise((r) => (resolveList = () => r(LIST))));
 
     const { result } = renderHook(() => useProducts(true, undefined), {
       wrapper: createWrapper(),

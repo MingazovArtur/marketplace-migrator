@@ -134,11 +134,7 @@ class YandexSellerConnector:
                 okpd_code = str(cc["code"]).strip()
                 break
 
-        category_name = (
-            mapping.get("marketCategoryName")
-            or offer.get("category")
-            or "Не указана"
-        )
+        category_name = mapping.get("marketCategoryName") or offer.get("category") or "Не указана"
         market_sku = mapping.get("marketSku")
 
         return {

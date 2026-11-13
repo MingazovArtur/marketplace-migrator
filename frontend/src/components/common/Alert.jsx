@@ -34,12 +34,7 @@ const Alert = ({ message, onClose, autoClose = false }) => {
         ))}
       </div>
       {onClose && (
-        <button 
-          type="button" 
-          onClick={handleClose} 
-          className="alert-close" 
-          title="Закрыть"
-        >
+        <button type="button" onClick={handleClose} className="alert-close" title="Закрыть">
           ✕
         </button>
       )}

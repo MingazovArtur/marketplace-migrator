@@ -59,9 +59,7 @@ class UndoRequest(BaseModel):
 # ==================== Хелпер: валидация категории по спекам ====================
 
 
-async def _validate_category_against_specs_async(
-    db: AsyncSession, category_name: str
-) -> dict:
+async def _validate_category_against_specs_async(db: AsyncSession, category_name: str) -> dict:
     """
     Неблокирующая проверка: существует ли ТОЧНОЕ имя категории в platform_category_specs
     хотя бы для одной из площадок.

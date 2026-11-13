@@ -96,9 +96,7 @@ async def delete_all_products(
         )
 
     try:
-        user_cond = (
-            None if current_user.role == "admin" else ProductORM.user_id == current_user.id
-        )
+        user_cond = None if current_user.role == "admin" else ProductORM.user_id == current_user.id
 
         count_stmt = select(func.count(ProductORM.id))
         del_stmt = delete(ProductORM)
@@ -115,8 +113,7 @@ async def delete_all_products(
         deleted = res.rowcount
 
         logger.warning(
-            f"🗑 DELETE ALL: user={current_user.id} role={current_user.role} "
-            f"deleted={deleted}"
+            f"🗑 DELETE ALL: user={current_user.id} role={current_user.role} " f"deleted={deleted}"
         )
         with contextlib.suppress(Exception):
             stats_repo.record(

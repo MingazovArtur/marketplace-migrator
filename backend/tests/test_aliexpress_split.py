@@ -70,7 +70,12 @@ def test_public_api_preserved():
 
 def test_layout_constants():
     # строки шапки шаблона: блоки / подсказки / заголовки / данные
-    assert (_layout.BLOCK_ROW, _layout.HINT_ROW, _layout.HEADER_ROW, _layout.DATA_START_ROW) == (1, 2, 3, 4)
+    assert (_layout.BLOCK_ROW, _layout.HINT_ROW, _layout.HEADER_ROW, _layout.DATA_START_ROW) == (
+        1,
+        2,
+        3,
+        4,
+    )
     assert _layout.CUSTOM_ATTR_COUNT == 5
     assert _layout.AE_MAIN_BLOCK == "Основные характеристики"
     # блоки заливаются разными цветами
@@ -95,10 +100,10 @@ def test_custom_attr_names_filters_standard_and_dedupes():
     products = [
         {
             "attributes": [
-                {"name": "Бренд", "value": "Nike"},          # стандартная колонка
-                {"name": "  Сезон  ", "value": "Лето"},      # произвольная, strip
-                {"name": "Сезон", "value": "Зима"},          # дубль по норме
-                {"name": "", "value": "пустое имя"},         # пустое имя
+                {"name": "Бренд", "value": "Nike"},  # стандартная колонка
+                {"name": "  Сезон  ", "value": "Лето"},  # произвольная, strip
+                {"name": "Сезон", "value": "Зима"},  # дубль по норме
+                {"name": "", "value": "пустое имя"},  # пустое имя
             ]
         },
         {"attributes": [{"name": f"Хар-{i}", "value": "x"} for i in range(7)]},

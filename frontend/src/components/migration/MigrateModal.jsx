@@ -137,7 +137,17 @@ const MigrateModal = ({
       setLocalError(e.message);
       setProgress(null);
     }
-  }, [form, product, platform, autoExport, onConfirm, onSaved, onClose, trackProgress, productTitle]);
+  }, [
+    form,
+    product,
+    platform,
+    autoExport,
+    onConfirm,
+    onSaved,
+    onClose,
+    trackProgress,
+    productTitle,
+  ]);
 
   // Сохранить изменения (название/цена/категория) в товаре БЕЗ запуска миграции —
   // товары из файлов часто приходят с ценой 0, раньше её было негде сохранить,
@@ -200,7 +210,9 @@ const MigrateModal = ({
           setFetched(fresh);
         }
       })
-      .catch(() => {/* сеть недоступна — остаёмся на данных пропса */});
+      .catch(() => {
+        /* сеть недоступна — остаёмся на данных пропса */
+      });
     return () => {
       cancelled = true;
     };
@@ -325,8 +337,8 @@ const MigrateModal = ({
             style={{ marginTop: '0.4rem', padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}
           >
             <div>
-              ❌ Цена должна быть больше 0 ₽ — без цены площадка отклонит карточку, и товар не попадёт в
-              выгрузку. Укажите цену в поле выше.
+              ❌ Цена должна быть больше 0 ₽ — без цены площадка отклонит карточку, и товар не
+              попадёт в выгрузку. Укажите цену в поле выше.
             </div>
           </div>
         )}

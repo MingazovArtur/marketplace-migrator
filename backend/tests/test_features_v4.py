@@ -19,6 +19,7 @@ from routers.tnved import BATCH_LIMIT, _aggregate_codes  # noqa: E402
 
 # ==================== _aggregate_codes (массовый ТН ВЭД) ====================
 
+
 def test_aggregate_codes_counts_and_orders():
     results = [
         {
@@ -51,6 +52,7 @@ def test_aggregate_codes_capped_at_15():
 
 
 # ==================== Валидация профилей миграции ====================
+
 
 def test_profile_payload_ok():
     p = MigrationProfilePayload(name="  Распродажа Ozon  ", platform="OZON", vat_rate="10")

@@ -93,7 +93,9 @@ def _pick_target_category(product: dict, edited_category, target_platform: str, 
     if manual_name:
         if _spec_name_exists(target_platform, manual_name):
             return manual_name, "ручной маппинг"
-        logger.warning(f"⚠️ Ручной маппинг указывает на '{manual_name}', но её нет в спеках — игнорирую")
+        logger.warning(
+            f"⚠️ Ручной маппинг указывает на '{manual_name}', но её нет в спеках — игнорирую"
+        )
 
     # 4) Авто-маппинг + проверка
     category_name = product.get("category")
@@ -130,7 +132,11 @@ def _pick_target_category(product: dict, edited_category, target_platform: str, 
             (str(edited_category).strip() if edited_category else None)
             or manual_name
             or (existing if existing and existing not in ("Не указана", "—") else None)
-            or (category_name if category_name and category_name not in ("Не указана", "—") else None)
+            or (
+                category_name
+                if category_name and category_name not in ("Не указана", "—")
+                else None
+            )
             or auto_name
             or "Товары для дома"
         )

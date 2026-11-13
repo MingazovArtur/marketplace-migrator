@@ -277,7 +277,11 @@ const SpecsPage = ({ user, onNotify, onOpenMonitor }) => {
         </div>
         <div className="header-actions">
           {isAdmin && onOpenMonitor && (
-            <Button variant="outline" onClick={onOpenMonitor} title="Очередь и прогресс всех загрузок спеков">
+            <Button
+              variant="outline"
+              onClick={onOpenMonitor}
+              title="Очередь и прогресс всех загрузок спеков"
+            >
               <Icon name="report" size={16} /> Мониторинг загрузок
             </Button>
           )}

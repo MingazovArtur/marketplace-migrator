@@ -16,12 +16,12 @@ _load_spec_for_category открывали СВОЮ сессию БД и выг�
 import time
 
 _SPEC_CACHE_TTL = 300.0  # секунд
-_spec_cache_names: dict = {}       # platform -> [category_name, ...]
+_spec_cache_names: dict = {}  # platform -> [category_name, ...]
 _spec_cache_names_set: dict = {}  # platform -> {нормализованное имя, ...}
-_spec_cache_specs: dict = {}      # platform -> {имя -> spec JSON}
-_spec_cache_has: dict = {}        # platform -> bool (есть ли хоть один спек)
-_spec_cache_ts: dict = {}         # platform -> время загрузки (monotonic)
-_SPEC_CACHE_MAX_SPECS = 512       # предохранитель по памяти на площадку
+_spec_cache_specs: dict = {}  # platform -> {имя -> spec JSON}
+_spec_cache_has: dict = {}  # platform -> bool (есть ли хоть один спек)
+_spec_cache_ts: dict = {}  # platform -> время загрузки (monotonic)
+_SPEC_CACHE_MAX_SPECS = 512  # предохранитель по памяти на площадку
 
 
 def _spec_cache_invalidate(platform: str = None):

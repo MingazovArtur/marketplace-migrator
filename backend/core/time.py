@@ -6,6 +6,7 @@
 семантику записи (psycopg2 конвертирует aware-значения через TimeZone
 сессии). Хелпер ниже сохраняет старую семантику, убирая deprecation.
 """
+
 from datetime import UTC, datetime
 
 

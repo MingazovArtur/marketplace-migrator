@@ -50,8 +50,7 @@ def build_aliexpress_workbook(products: list, spec: dict | None = None) -> Workb
     custom_names = aliexpress_custom_attr_names(products)
 
     rows_values = [
-        _row_values(p, i, enum_fix, platform="aliexpress")
-        for i, p in enumerate(expanded, start=1)
+        _row_values(p, i, enum_fix, platform="aliexpress") for i, p in enumerate(expanded, start=1)
     ]
 
     wb = Workbook()
@@ -67,9 +66,7 @@ def build_aliexpress_workbook(products: list, spec: dict | None = None) -> Workb
 
     # --- Строка 1: блоки ---
     ws.cell(row=BLOCK_ROW, column=1, value=AE_MAIN_BLOCK)
-    ws.merge_cells(
-        start_row=BLOCK_ROW, start_column=1, end_row=BLOCK_ROW, end_column=n_main
-    )
+    ws.merge_cells(start_row=BLOCK_ROW, start_column=1, end_row=BLOCK_ROW, end_column=n_main)
     ws.cell(row=BLOCK_ROW, column=custom_start, value=AE_CUSTOM_BLOCK)
     ws.merge_cells(
         start_row=BLOCK_ROW,
@@ -143,9 +140,7 @@ def build_aliexpress_workbook(products: list, spec: dict | None = None) -> Workb
         else:
             title = _add_dict_sheet(wb, f"Список {header}", used_dicts)
             n = _fill_dict_sheet(wb, title, values)
-            dv = DataValidation(
-                type="list", formula1=f"'{title}'!$A$1:$A${n}", allow_blank=True
-            )
+            dv = DataValidation(type="list", formula1=f"'{title}'!$A$1:$A${n}", allow_blank=True)
             ws.add_data_validation(dv)
             dv.add(f"{letter}{DATA_START_ROW}:{letter}{last_row}")
 
@@ -155,9 +150,7 @@ def build_aliexpress_workbook(products: list, spec: dict | None = None) -> Workb
             _write_cell(ws, r, col, values.get(key))
         for idx, name in enumerate(custom_names):
             _write_cell(ws, r, custom_start + idx, values.get(_norm(name)))
-        for idx, (_header, _req, _hint, key) in enumerate(
-            AE_SKU_COLUMNS, start=sku_start
-        ):
+        for idx, (_header, _req, _hint, key) in enumerate(AE_SKU_COLUMNS, start=sku_start):
             _write_cell(ws, r, idx, values.get(key))
 
     # --- Ширины колонок, высоты строк шапки и закрепление шапки ---

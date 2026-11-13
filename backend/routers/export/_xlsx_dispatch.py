@@ -63,6 +63,4 @@ async def run_xlsx_via_celery_or_thread(
                 f"выполняю через asyncio.to_thread"
             )
 
-    return await asyncio.to_thread(
-        generate_export, product_dicts, specs_by_category, platform
-    )
+    return await asyncio.to_thread(generate_export, product_dicts, specs_by_category, platform)

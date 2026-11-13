@@ -103,9 +103,7 @@ def test_fill_official_template_end_to_end(tmp_templates_dir):
     assert ws.cell(row=5, column=2).value == "Футболка детская"
     assert ws.cell(row=5, column=3).value == 990
     # Пример площадки удалён
-    values_in_col_a = [
-        ws.cell(row=r, column=1).value for r in range(5, ws.max_row + 1)
-    ]
+    values_in_col_a = [ws.cell(row=r, column=1).value for r in range(5, ws.max_row + 1)]
     assert "EXAMPLE-1" not in values_in_col_a
 
 

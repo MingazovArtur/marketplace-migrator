@@ -109,15 +109,15 @@ class _SyncReadsMixin:
         with SessionLocal() as db:
             stmt = select(
                 func.count(Product.id).label("total"),
-                func.coalesce(
-                    func.sum(case((Product.status == "pending", 1), else_=0)), 0
-                ).label("pending"),
-                func.coalesce(
-                    func.sum(case((Product.status == "success", 1), else_=0)), 0
-                ).label("success"),
-                func.coalesce(
-                    func.sum(case((Product.status == "error", 1), else_=0)), 0
-                ).label("error"),
+                func.coalesce(func.sum(case((Product.status == "pending", 1), else_=0)), 0).label(
+                    "pending"
+                ),
+                func.coalesce(func.sum(case((Product.status == "success", 1), else_=0)), 0).label(
+                    "success"
+                ),
+                func.coalesce(func.sum(case((Product.status == "error", 1), else_=0)), 0).label(
+                    "error"
+                ),
                 func.coalesce(
                     func.sum(case((Product.status == "processing", 1), else_=0)), 0
                 ).label("processing"),

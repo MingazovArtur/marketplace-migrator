@@ -53,9 +53,9 @@ def validate_product(product: dict, platform: str) -> list[dict]:
             {
                 "field": "photos",
                 "level": lvl,
-                "message": "Не указан URL основного фото"
-                if lvl == "error"
-                else "Нет ни одного фото",
+                "message": (
+                    "Не указан URL основного фото" if lvl == "error" else "Нет ни одного фото"
+                ),
             }
         )
     elif len(photos) > rules["photos_max"]:

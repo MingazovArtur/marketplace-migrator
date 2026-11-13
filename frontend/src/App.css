@@ -889,9 +889,7 @@ body,
 }
 
 .btn,
-
 .products-toolbar .btn,
-
 .header-actions .btn {
   animation: none !important;
 }
@@ -2623,8 +2621,6 @@ tr.selected td:first-child {
   .progress-stats {
     grid-template-columns: repeat(2, 1fr);
   }
-
-
 }
 
 /* === UX-СПРИНТ: точки прогресса онбординг-тура === */
@@ -2642,7 +2638,9 @@ tr.selected td:first-child {
   border: none;
   cursor: pointer;
   background: var(--border-color);
-  transition: background 0.2s ease, transform 0.15s ease;
+  transition:
+    background 0.2s ease,
+    transform 0.15s ease;
 }
 
 .onboarding-dot:hover {

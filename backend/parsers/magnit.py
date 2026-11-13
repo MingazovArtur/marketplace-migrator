@@ -1,6 +1,7 @@
 """
 Парсер файлов Магнит Маркет (XLSX).
 """
+
 import logging
 from typing import Any
 
@@ -53,7 +54,9 @@ class MagnitFileParser(BaseFileParser):
                 row_text = " ".join(str(v).lower() for v in row.values if v is not None)
                 if any(marker in row_text for marker in ["не менять", "не изменяйте"]):
                     continue
-                if "название товара" in row_text or ("название" in row_text and "артикул" in row_text):
+                if "название товара" in row_text or (
+                    "название" in row_text and "артикул" in row_text
+                ):
                     data_sheet = sheet_name
                     break
 
@@ -79,9 +82,11 @@ class MagnitFileParser(BaseFileParser):
             raise ValueError("Не найдена строка заголовков в файле Магнит Маркета")
 
         header_row = df.iloc[header_row_idx]
-        headers = [str(v).strip() if v is not None else f"col_{i}" for i, v in enumerate(header_row.values)]
+        headers = [
+            str(v).strip() if v is not None else f"col_{i}" for i, v in enumerate(header_row.values)
+        ]
 
-        data = df.iloc[header_row_idx + 1:]
+        data = df.iloc[header_row_idx + 1 :]
         data.columns = headers
 
         # Фильтрация служебных строк (сохраняем исходные индексы для номеров строк)
@@ -190,10 +195,12 @@ class MagnitFileParser(BaseFileParser):
 
         warnings = []
         if products and all(p["price"] == 0 for p in products):
-            warnings.append({
-                "type": "magnit_no_price",
-                "message": "В файле Магнит Маркета нет цен или все цены равны 0. Задайте цены вручную после импорта.",
-            })
+            warnings.append(
+                {
+                    "type": "magnit_no_price",
+                    "message": "В файле Магнит Маркета нет цен или все цены равны 0. Задайте цены вручную после импорта.",
+                }
+            )
 
         return ParseResult(
             products=products,

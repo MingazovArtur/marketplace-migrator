@@ -2,7 +2,6 @@
 Роутер для управления вариациями товаров (SKU по размерам/цветам).
 """
 
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 

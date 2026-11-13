@@ -117,8 +117,8 @@ def test_variant_rows_skip_empty_sku():
         7,
         [
             {"sku": "  T-1  ", "size": " M ", "price": 10, "stock": 2},
-            {"sku": "   ", "size": "L"},          # пустой SKU — пропущен
-            {"size": "XL"},                        # SKU нет — пропущен
+            {"sku": "   ", "size": "L"},  # пустой SKU — пропущен
+            {"size": "XL"},  # SKU нет — пропущен
             {"sku": "T-2"},
         ],
     )
@@ -137,7 +137,7 @@ def test_variant_rows_strip_and_none():
         1, [{"sku": "T-9", "color": "  Красный ", "size": "", "external_id": "ext-9"}]
     )
     assert rows[0].color == "Красный"
-    assert rows[0].size is None          # пустая строка → None
+    assert rows[0].size is None  # пустая строка → None
     assert rows[0].external_id == "ext-9"
 
 
@@ -146,8 +146,8 @@ def test_attr_rows_skip_empty_name_or_value():
         3,
         [
             {"name": " Цвет ", "value": " синий ", "platform_attribute_id": 42},
-            {"name": "", "value": "x"},    # без имени — пропущен
-            {"name": "Материал"},          # без значения — пропущен
+            {"name": "", "value": "x"},  # без имени — пропущен
+            {"name": "Материал"},  # без значения — пропущен
             {"name": "Бренд", "value": "A"},
         ],
     )
@@ -159,7 +159,9 @@ def test_attr_rows_skip_empty_name_or_value():
 
 
 def test_import_payload_defaults():
-    payload, variants, attributes = ProductRepository._import_payload({}, user_id=5, source_label="Ozon (Файл)")
+    payload, variants, attributes = ProductRepository._import_payload(
+        {}, user_id=5, source_label="Ozon (Файл)"
+    )
     assert payload["user_id"] == 5
     assert payload["source"] == "Ozon (Файл)"
     assert payload["price"] == 0

@@ -47,16 +47,12 @@ def migrate_batch_task(self, product_ids: list, target_platform: str, user_id: i
     error_count = 0
     errors = []
     status_updates: list = []  # [(product_id, {колонки})] — применяется батчем в конце
-    log_entries: list = []     # dicts для MigrationLog — bulk insert в конце
+    log_entries: list = []  # dicts для MigrationLog — bulk insert в конце
 
     def _publish(done: int, force: bool = False):
         """Прогресс в Redis с троттлингом (P-3): ~1 запись на 5% или 25 товаров."""
         percent = int(done * 100 / total) if total else 0
-        if (
-            not force
-            and percent - _publish.last_percent < 5
-            and done - _publish.last_done < 25
-        ):
+        if not force and percent - _publish.last_percent < 5 and done - _publish.last_done < 25:
             return
         _publish.last_percent = percent
         _publish.last_done = done

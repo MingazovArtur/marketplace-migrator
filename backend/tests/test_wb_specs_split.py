@@ -207,7 +207,14 @@ def test_build_validation_rules_max_values():
             "separator": ";",
             "max_count": 20,
         },
-        {"id": "8", "values": None, "case_sensitive": True, "type": "text", "separator": ";", "max_count": 1},
+        {
+            "id": "8",
+            "values": None,
+            "case_sensitive": True,
+            "type": "text",
+            "separator": ";",
+            "max_count": 1,
+        },
     ]
     rules = _build_validation_rules(attrs)
 

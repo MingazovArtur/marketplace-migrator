@@ -124,11 +124,14 @@ const ActiveTaskCard = ({ t, nowTs, onPause, busy }) => {
         <strong style={{ minWidth: 110 }}>{platformName(t.platform)}</strong>
         <StateBadge t={t} />
         <span style={{ color: 'var(--text-muted)' }}>
-          пользователь: <strong style={{ color: 'var(--text-primary)' }}>{t.username || t.user_id}</strong>
+          пользователь:{' '}
+          <strong style={{ color: 'var(--text-primary)' }}>{t.username || t.user_id}</strong>
         </span>
         <span style={{ color: 'var(--text-muted)', marginLeft: 'auto', fontSize: '0.82rem' }}>
           в очереди с {fmtTime(t.enqueued_at)}
-          {t.state !== 'queued' ? ` · выполняется ${fmtElapsed(t.started_at || t.enqueued_at, nowTs)}` : ''}
+          {t.state !== 'queued'
+            ? ` · выполняется ${fmtElapsed(t.started_at || t.enqueued_at, nowTs)}`
+            : ''}
         </span>
         {t.can_pause && (
           <Button
@@ -154,7 +157,8 @@ const ActiveTaskCard = ({ t, nowTs, onPause, busy }) => {
             }}
           >
             <span>
-              обработано {t.success + t.errors} из {t.total || '?'} · успешно {t.success} · ошибок {t.errors}
+              обработано {t.success + t.errors} из {t.total || '?'} · успешно {t.success} · ошибок{' '}
+              {t.errors}
             </span>
             <span>{percent}%</span>
           </div>
@@ -179,16 +183,23 @@ const ActiveTaskCard = ({ t, nowTs, onPause, busy }) => {
       )}
 
       {t.pause_requested && (
-        <div className="alert alert-error" style={{ marginTop: '0.55rem', padding: '0.4rem 0.7rem', fontSize: '0.82rem' }}>
+        <div
+          className="alert alert-error"
+          style={{ marginTop: '0.55rem', padding: '0.4rem 0.7rem', fontSize: '0.82rem' }}
+        >
           <div>
-            ⏸ Пауза запрошена: задача остановится после текущего блока категорий (обычно до пары минут),
-            сделанное уже сохранено в БД. После остановки карточка перейдёт в секцию «На паузе».
+            ⏸ Пауза запрошена: задача остановится после текущего блока категорий (обычно до пары
+            минут), сделанное уже сохранено в БД. После остановки карточка перейдёт в секцию «На
+            паузе».
           </div>
         </div>
       )}
 
       {t.stale && (
-        <div className="alert alert-error" style={{ marginTop: '0.55rem', padding: '0.4rem 0.7rem', fontSize: '0.82rem' }}>
+        <div
+          className="alert alert-error"
+          style={{ marginTop: '0.55rem', padding: '0.4rem 0.7rem', fontSize: '0.82rem' }}
+        >
           <div>
             ⚠️ Задача выполняется без прогресса дольше 15 минут — вероятно, воркер был перезапущен.
             Перезапустите загрузку спеков.
@@ -316,9 +327,9 @@ const SpecsMonitorPage = ({ user }) => {
         <div>
           <h1 className="header-title">Мониторинг загрузки спеков</h1>
           <p className="header-subtitle">
-            Очередь и ход загрузки спецификаций площадок. Обновляется каждые 3 с.
-            «Пауза» на карточке останавливает выбранную загрузку после текущего блока категорий,
-            «Возобновить» продолжает с места остановки (ключ API не запрашивается заново).
+            Очередь и ход загрузки спецификаций площадок. Обновляется каждые 3 с. «Пауза» на
+            карточке останавливает выбранную загрузку после текущего блока категорий, «Возобновить»
+            продолжает с места остановки (ключ API не запрашивается заново).
           </p>
         </div>
         <div className="header-actions">
@@ -330,7 +341,8 @@ const SpecsMonitorPage = ({ user }) => {
             onClick={() => setPaused((p) => !p)}
             title="Включает/выключает автодобновление данных на странице. На сами загрузки не влияет — их останавливает кнопка «Пауза» на карточке загрузки."
           >
-            <Icon name={paused ? 'refresh' : 'info'} size={16} /> Автодобновление: {paused ? 'выкл' : 'вкл'}
+            <Icon name={paused ? 'refresh' : 'info'} size={16} /> Автодобновление:{' '}
+            {paused ? 'выкл' : 'вкл'}
           </Button>
         </div>
       </header>
@@ -342,7 +354,10 @@ const SpecsMonitorPage = ({ user }) => {
       )}
 
       {notice && (
-        <div className="alert alert-success" style={{ background: 'var(--accent-success-bg, rgba(34,197,94,0.12))' }}>
+        <div
+          className="alert alert-success"
+          style={{ background: 'var(--accent-success-bg, rgba(34,197,94,0.12))' }}
+        >
           <div>{notice}</div>
         </div>
       )}
@@ -352,7 +367,9 @@ const SpecsMonitorPage = ({ user }) => {
         <h2 style={{ fontSize: '1.05rem', margin: '0 0 0.6rem' }}>
           Активные загрузки ({active.length})
           {active.length > 0 && (
-            <span style={{ color: 'var(--accent-warning)', fontSize: '0.85rem', marginLeft: '0.5rem' }}>
+            <span
+              style={{ color: 'var(--accent-warning)', fontSize: '0.85rem', marginLeft: '0.5rem' }}
+            >
               {active.filter((t) => t.state === 'queued').length} в очереди
             </span>
           )}
@@ -360,12 +377,18 @@ const SpecsMonitorPage = ({ user }) => {
 
         {active.length === 0 ? (
           <div className="card" style={{ padding: '1rem 1.1rem', color: 'var(--text-muted)' }}>
-            Сейчас ничего не загружается. Запустите загрузку на странице «Спецификации» —
-            задача появится здесь сразу (в том числе стоящая в очереди за другой).
+            Сейчас ничего не загружается. Запустите загрузку на странице «Спецификации» — задача
+            появится здесь сразу (в том числе стоящая в очереди за другой).
           </div>
         ) : (
           active.map((t) => (
-            <ActiveTaskCard key={t.task_id} t={t} nowTs={nowTs} onPause={handlePause} busy={busyId === t.task_id} />
+            <ActiveTaskCard
+              key={t.task_id}
+              t={t}
+              nowTs={nowTs}
+              onPause={handlePause}
+              busy={busyId === t.task_id}
+            />
           ))
         )}
       </section>
@@ -393,10 +416,12 @@ const SpecsMonitorPage = ({ user }) => {
               <strong style={{ minWidth: 110 }}>{platformName(t.platform)}</strong>
               <StatusBadge s={t.status} />
               <span style={{ color: 'var(--text-muted)' }}>
-                пользователь: <strong style={{ color: 'var(--text-primary)' }}>{t.username || t.user_id}</strong>
+                пользователь:{' '}
+                <strong style={{ color: 'var(--text-primary)' }}>{t.username || t.user_id}</strong>
               </span>
               <span style={{ color: 'var(--text-muted)' }}>
-                категорий сохранено: <strong style={{ color: 'var(--text-primary)' }}>{t.success ?? 0}</strong>
+                категорий сохранено:{' '}
+                <strong style={{ color: 'var(--text-primary)' }}>{t.success ?? 0}</strong>
               </span>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
                 {t.status === 'interrupted' ? 'прервана' : 'остановлена'} {fmtDate(t.finished_at)}
@@ -412,8 +437,9 @@ const SpecsMonitorPage = ({ user }) => {
             </div>
           ))}
           <p className="form-hint" style={{ marginTop: '0.4rem' }}>
-            Возобновление продолжает загрузку с места остановки: уже сохранённые категории пропускаются.
-            «Прервана» — воркер был перезапущен (например, docker compose down): прогресс в БД сохранён.
+            Возобновление продолжает загрузку с места остановки: уже сохранённые категории
+            пропускаются. «Прервана» — воркер был перезапущен (например, docker compose down):
+            прогресс в БД сохранён.
           </p>
         </section>
       )}
@@ -446,20 +472,30 @@ const SpecsMonitorPage = ({ user }) => {
               <tbody>
                 {finished.map((t) => (
                   <tr key={t.task_id} style={{ borderTop: '1px solid var(--border-color)' }}>
-                    <td style={{ padding: '0.55rem 0.9rem', whiteSpace: 'nowrap' }}>{fmtDate(t.finished_at)}</td>
+                    <td style={{ padding: '0.55rem 0.9rem', whiteSpace: 'nowrap' }}>
+                      {fmtDate(t.finished_at)}
+                    </td>
                     <td style={{ padding: '0.55rem 0.9rem' }}>{platformName(t.platform)}</td>
                     <td style={{ padding: '0.55rem 0.9rem' }}>{t.username || t.user_id || '—'}</td>
                     <td style={{ padding: '0.55rem 0.9rem' }}>
                       <StatusBadge s={t.status} />
                       {t.resumed_as && (
-                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                        <div
+                          style={{
+                            fontSize: '0.72rem',
+                            color: 'var(--text-muted)',
+                            marginTop: '0.2rem',
+                          }}
+                        >
                           продолжена
                         </div>
                       )}
                     </td>
                     <td style={{ padding: '0.55rem 0.9rem' }}>{t.success ?? '—'}</td>
                     <td style={{ padding: '0.55rem 0.9rem' }}>{t.errors ?? '—'}</td>
-                    <td style={{ padding: '0.55rem 0.9rem', whiteSpace: 'nowrap' }}>{fmtDuration(t.duration_ms)}</td>
+                    <td style={{ padding: '0.55rem 0.9rem', whiteSpace: 'nowrap' }}>
+                      {fmtDuration(t.duration_ms)}
+                    </td>
                     <td style={{ padding: '0.55rem 0.9rem', whiteSpace: 'nowrap' }}>
                       {t.can_resume ? (
                         <Button
@@ -483,13 +519,12 @@ const SpecsMonitorPage = ({ user }) => {
       </section>
 
       <p className="form-hint" style={{ marginTop: '0.9rem' }}>
-        Загрузки спеков идут в отдельном воркере и не мешают миграциям и выгрузкам.
-        Спеки одной площадки грузятся по очереди: вторая и последующие задачи стоят
-        в очереди и стартуют автоматически после текущей. «Пауза» останавливает выбранную
-        загрузку после текущего блока категорий (сделанное сохранено в БД, ключ не запрашивается
-        заново), «Возобновить» продолжает с места остановки. Если задача помечена
-        «прервана» (воркер перезапущен, например docker compose down) — её тоже можно
-        продолжить той же кнопкой, прогресс в БД сохранён.
+        Загрузки спеков идут в отдельном воркере и не мешают миграциям и выгрузкам. Спеки одной
+        площадки грузятся по очереди: вторая и последующие задачи стоят в очереди и стартуют
+        автоматически после текущей. «Пауза» останавливает выбранную загрузку после текущего блока
+        категорий (сделанное сохранено в БД, ключ не запрашивается заново), «Возобновить» продолжает
+        с места остановки. Если задача помечена «прервана» (воркер перезапущен, например docker
+        compose down) — её тоже можно продолжить той же кнопкой, прогресс в БД сохранён.
       </p>
     </>
   );

@@ -82,9 +82,9 @@ class StatsRepository:
                     day_expr.label("day"),
                     ImportExportStats.operation,
                     func.count(ImportExportStats.id).label("cnt"),
-                    func.sum(
-                        case((ImportExportStats.status == "error", 1), else_=0)
-                    ).label("errors"),
+                    func.sum(case((ImportExportStats.status == "error", 1), else_=0)).label(
+                        "errors"
+                    ),
                 )
                 .group_by(day_expr, ImportExportStats.operation)
                 .all()
@@ -126,9 +126,9 @@ class StatsRepository:
                 base.with_entities(
                     ImportExportStats.operation,
                     func.count(ImportExportStats.id).label("cnt"),
-                    func.sum(
-                        case((ImportExportStats.status == "error", 1), else_=0)
-                    ).label("errors"),
+                    func.sum(case((ImportExportStats.status == "error", 1), else_=0)).label(
+                        "errors"
+                    ),
                     func.coalesce(func.sum(ImportExportStats.success_items), 0).label("items"),
                 )
                 .group_by(ImportExportStats.operation)

@@ -28,6 +28,7 @@ from routers.import_router._support import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
 # ==================== ИМПОРТ ПО КЛЮЧУ / YML / МОК ====================
 @limiter.limit("10/minute;100/day")
 @router.post("/import")
@@ -74,18 +75,14 @@ async def import_products(
                 "price": 899.0,
                 "description": "<p>Удобная швабра с ведром для быстрой уборки.</p>",
                 "category": "Дом и сад > Уборка > Швабры",
-                "photos": [
-                    f"https://mock.local/{platform}/mop/{i}.jpg" for i in range(1, 4)
-                ],
+                "photos": [f"https://mock.local/{platform}/mop/{i}.jpg" for i in range(1, 4)],
             },
             {
                 "name": "Смартфон Xiaomi Redmi Note 12 4/128GB",
                 "price": 12990.0,
                 "description": "Отличный смартфон с хорошей камерой.",
                 "category": "Электроника > Смартфоны",
-                "photos": [
-                    f"https://mock.local/{platform}/phone/{i}.jpg" for i in range(1, 6)
-                ],
+                "photos": [f"https://mock.local/{platform}/phone/{i}.jpg" for i in range(1, 6)],
             },
             {
                 "name": "Чай черный байкальский, 100 пакетиков",
@@ -251,9 +248,7 @@ async def import_products(
             raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
             logger.error(f"Ошибка импорта через API Яндекс Маркета: {e}")
-            raise HTTPException(
-                status_code=502, detail=f"Ошибка API Яндекс Маркета: {e}"
-            ) from e
+            raise HTTPException(status_code=502, detail=f"Ошибка API Яндекс Маркета: {e}") from e
 
         if not ym_offers:
             raise HTTPException(

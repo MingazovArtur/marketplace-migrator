@@ -54,7 +54,7 @@ def decrypt_str(value: str | None) -> str | None:
     if not value.startswith(_PREFIX):
         return value
     try:
-        return _fernet.decrypt(value[len(_PREFIX):].encode("ascii")).decode("utf-8")
+        return _fernet.decrypt(value[len(_PREFIX) :].encode("ascii")).decode("utf-8")
     except InvalidToken as e:
         raise ValueError(
             "Не удалось расшифровать секрет из Celery-payload "

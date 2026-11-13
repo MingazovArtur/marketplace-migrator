@@ -21,11 +21,46 @@ def build_simple_workbook(platform: str, products: list, spec: dict | None) -> W
     ws.title = "Товары"
 
     columns = [
-        {"header": "Артикул", "key": "article", "required": True, "type": "text", "values": None, "multi": False},
-        {"header": "Название", "key": "name", "required": True, "type": "text", "values": None, "multi": False},
-        {"header": "Цена", "key": "price", "required": True, "type": "number", "values": None, "multi": False},
-        {"header": "Категория", "key": "category", "required": False, "type": "text", "values": None, "multi": False},
-        {"header": "Штрихкод", "key": "barcode", "required": False, "type": "text", "values": None, "multi": True},
+        {
+            "header": "Артикул",
+            "key": "article",
+            "required": True,
+            "type": "text",
+            "values": None,
+            "multi": False,
+        },
+        {
+            "header": "Название",
+            "key": "name",
+            "required": True,
+            "type": "text",
+            "values": None,
+            "multi": False,
+        },
+        {
+            "header": "Цена",
+            "key": "price",
+            "required": True,
+            "type": "number",
+            "values": None,
+            "multi": False,
+        },
+        {
+            "header": "Категория",
+            "key": "category",
+            "required": False,
+            "type": "text",
+            "values": None,
+            "multi": False,
+        },
+        {
+            "header": "Штрихкод",
+            "key": "barcode",
+            "required": False,
+            "type": "text",
+            "values": None,
+            "multi": True,
+        },
     ]
     for a in (spec or {}).get("attributes") or []:
         columns.append(

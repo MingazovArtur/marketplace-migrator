@@ -187,10 +187,7 @@ class SmartMarketplaceParser(BaseFileParser):
                     pval = row_dict.get(pcol)
                     if pval is not None and str(pval).strip():
                         for part in re.split(r"[;,\s]+", str(pval).strip()):
-                            if (
-                                part.startswith(("http://", "https://"))
-                                and part not in photos
-                            ):
+                            if part.startswith(("http://", "https://")) and part not in photos:
                                 photos.append(part)
 
                 sku_str = str(raw_sku).strip() if raw_sku is not None else f"IMP-{idx + 1}"

@@ -126,14 +126,17 @@ def test_map_attribute_types():
     }
 
     # словарь → select
-    a = _map_attribute({"id": 2, "name": "Цвет", "type": "String", "dictionary_id": 55}, ["Красный"])
+    a = _map_attribute(
+        {"id": 2, "name": "Цвет", "type": "String", "dictionary_id": 55}, ["Красный"]
+    )
     assert a["type"] == "select"
     assert a["values"] == ["Красный"]
     assert a["allow_unit_in_value"] is False
 
     # словарь + коллекция → multiselect с разделителем "; "
     a = _map_attribute(
-        {"id": 3, "name": "Состав", "type": "String", "dictionary_id": 7, "is_collection": True}, None
+        {"id": 3, "name": "Состав", "type": "String", "dictionary_id": 7, "is_collection": True},
+        None,
     )
     assert a["type"] == "multiselect"
     assert a["separator"] == "; "
@@ -151,8 +154,20 @@ def test_build_validation_rules_enums():
     from services.ozon_specs._attributes import _build_validation_rules
 
     attrs = [
-        {"id": "10", "values": ["Красный", "Синий"], "case_sensitive": True, "type": "select", "separator": None},
-        {"id": "11", "values": ["a", "b"], "case_sensitive": False, "type": "multiselect", "separator": "; "},
+        {
+            "id": "10",
+            "values": ["Красный", "Синий"],
+            "case_sensitive": True,
+            "type": "select",
+            "separator": None,
+        },
+        {
+            "id": "11",
+            "values": ["a", "b"],
+            "case_sensitive": False,
+            "type": "multiselect",
+            "separator": "; ",
+        },
         {"id": "12", "values": None, "type": "text", "separator": None},
     ]
     rules = _build_validation_rules(attrs)
@@ -180,7 +195,13 @@ def test_build_spec_assembles_attributes_and_dictionaries(monkeypatch):
             assert body["type_id"] == 7
             return {
                 "result": [
-                    {"id": 10, "name": "Цвет", "type": "String", "is_required": True, "dictionary_id": 55},
+                    {
+                        "id": 10,
+                        "name": "Цвет",
+                        "type": "String",
+                        "is_required": True,
+                        "dictionary_id": 55,
+                    },
                     {"id": 11, "name": "Вес, г", "type": "Integer", "is_required": False},
                 ]
             }
@@ -213,22 +234,31 @@ def test_build_spec_assembles_attributes_and_dictionaries(monkeypatch):
     # enum-правило по словарю + спецтребования
     assert spec["validation_rules"]["10"]["enum"] == ["Красный", "Синий"]
     assert "okpd_required_for_tags" in spec["special_requirements"]
-    assert spec["sheets"] == ["Шаблон Поставщика", "Документация PDF", "Озон.Видео", "Озон.Видеообложка"]
+    assert spec["sheets"] == [
+        "Шаблон Поставщика",
+        "Документация PDF",
+        "Озон.Видео",
+        "Озон.Видеообложка",
+    ]
 
 
 def test_refresh_orchestrator_pause_between_chunks(monkeypatch):
     from services.ozon_specs import _refresh
 
     leaves = [
-        {"id": str(i), "type_id": 7, "name": f"Кат-{i}", "type_name": "Тип"}
-        for i in range(3)
+        {"id": str(i), "type_id": 7, "name": f"Кат-{i}", "type_name": "Тип"} for i in range(3)
     ]
 
     async def fake_tree(client, sem, client_id, api_key):
         return [dict(leaf) for leaf in leaves]
 
     async def fake_build_spec(client, sem, headers, leaf):
-        return {"attributes": [], "required_fields": [], "validation_rules": {}, "special_requirements": {}}
+        return {
+            "attributes": [],
+            "required_fields": [],
+            "validation_rules": {},
+            "special_requirements": {},
+        }
 
     flushed = []
 
@@ -269,8 +299,7 @@ def test_refresh_orchestrator_full_run_with_skip_and_errors(monkeypatch):
     from services.ozon_specs import _refresh
 
     leaves = [
-        {"id": str(i), "type_id": 7, "name": f"Кат-{i}", "type_name": "Тип"}
-        for i in range(3)
+        {"id": str(i), "type_id": 7, "name": f"Кат-{i}", "type_name": "Тип"} for i in range(3)
     ]
 
     async def fake_tree(client, sem, client_id, api_key):
@@ -279,7 +308,12 @@ def test_refresh_orchestrator_full_run_with_skip_and_errors(monkeypatch):
     async def fake_build_spec(client, sem, headers, leaf):
         if leaf["id"] == "1":
             raise RuntimeError("boom")
-        return {"attributes": [], "required_fields": [], "validation_rules": {}, "special_requirements": {}}
+        return {
+            "attributes": [],
+            "required_fields": [],
+            "validation_rules": {},
+            "special_requirements": {},
+        }
 
     flushed = []
 

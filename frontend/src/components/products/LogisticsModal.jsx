@@ -33,7 +33,7 @@ const num = (v) => (v === '' || v == null ? null : Number(v));
 const generateValidEan13 = (productId) => {
   const pid = Number(productId) || Math.floor(Math.random() * 999999);
   const randPart = String(Math.floor(100 + Math.random() * 900));
-  const base12 = (`200${String(pid).padStart(6, '0')}${randPart}`).slice(0, 12);
+  const base12 = `200${String(pid).padStart(6, '0')}${randPart}`.slice(0, 12);
   let oddSum = 0;
   let evenSum = 0;
   for (let i = 0; i < 12; i++) {
@@ -168,9 +168,7 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
             </option>
           ))}
         </select>
-        <p className="form-hint">
-          Значения: «Не облагается» (УСН), 22, 10, 7, 5.
-        </p>
+        <p className="form-hint">Значения: «Не облагается» (УСН), 22, 10, 7, 5.</p>
 
         {/* ================= ТН ВЭД (Умный селектор) ================= */}
         <label className="form-label">ТН ВЭД коды ЕАЭС{req}</label>
@@ -182,7 +180,8 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           disabled={saving}
         />
         <p className="form-hint">
-          Обязателен в шаблонах Ozon и Яндекс Маркета. Начните вводить название товара выше для автоподбора.
+          Обязателен в шаблонах Ozon и Яндекс Маркета. Начните вводить название товара выше для
+          автоподбора.
         </p>
 
         {/* ================= Габариты упаковки (ОВХ) ================= */}
@@ -262,7 +261,8 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           </div>
         </div>
         <p className="form-hint">
-          Указывайте в граммах и миллиметрах (для Яндекс Маркета перевод в кг и см выполняется автоматически).
+          Указывайте в граммах и миллиметрах (для Яндекс Маркета перевод в кг и см выполняется
+          автоматически).
         </p>
 
         {/* ================= Штрихкод (обязателен для Яндекса, опционален для Ozon) ================= */}
@@ -293,9 +293,9 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
           </Button>
         </div>
         <p className="form-hint">
-          ⚠️ В шаблоне <strong>Яндекс Маркета</strong> колонка «Штрихкод *» обязательна (если оставить пустым,
-          при выгрузке на Яндекс система сгенерирует валидный EAN-13 автоматически). В шаблоне{' '}
-          <strong>Ozon</strong> поле необязательное.
+          ⚠️ В шаблоне <strong>Яндекс Маркета</strong> колонка «Штрихкод *» обязательна (если
+          оставить пустым, при выгрузке на Яндекс система сгенерирует валидный EAN-13
+          автоматически). В шаблоне <strong>Ozon</strong> поле необязательное.
         </p>
 
         {/* ================= Индикатор главного фото ================= */}
@@ -319,9 +319,8 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
         {missingRequired.length > 0 && (
           <div className="alert alert-error" style={{ marginTop: '0.5rem' }}>
             <div>
-              Не заполнены обязательные поля шаблона:{' '}
-              <strong>{missingRequired.join(', ')}</strong>. Сохранить можно, но товар не попадёт в
-              выгрузку до заполнения.
+              Не заполнены обязательные поля шаблона: <strong>{missingRequired.join(', ')}</strong>.
+              Сохранить можно, но товар не попадёт в выгрузку до заполнения.
             </div>
           </div>
         )}

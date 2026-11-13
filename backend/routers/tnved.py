@@ -4,6 +4,7 @@
 ✅ v4: массовый подбор — POST /batch-suggest (топ-коды по выбранным товарам)
 и POST /batch-apply (проставить код всем выбранным; откатывается через undo).
 """
+
 from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -37,13 +38,19 @@ def suggest_tnved_endpoint(
     return {
         "success": True,
         "suggestions": suggestions,
-        "message": f"Найдено {len(suggestions)} вариантов" if suggestions else "Точных совпадений не найдено. Проверьте название или категорию."
+        "message": (
+            f"Найдено {len(suggestions)} вариантов"
+            if suggestions
+            else "Точных совпадений не найдено. Проверьте название или категорию."
+        ),
     }
 
 
 @router.get("/search")
 def search_tnved_endpoint(
-    query: str = Query(..., min_length=2, description="Поисковый запрос (слово, часть кода или описание)"),
+    query: str = Query(
+        ..., min_length=2, description="Поисковый запрос (слово, часть кода или описание)"
+    ),
 ):
     """
     Поиск по справочнику ТН ВЭД по произвольному запросу.
@@ -51,11 +58,7 @@ def search_tnved_endpoint(
     """
     results = search_tnved(query)
 
-    return {
-        "success": True,
-        "results": results,
-        "total": len(results)
-    }
+    return {"success": True, "results": results, "total": len(results)}
 
 
 # ==================== Массовый подбор (v4) ====================

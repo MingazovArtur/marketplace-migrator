@@ -59,9 +59,9 @@ def test_proxy_route_registered_before_parametric():
     app = FastAPI()
     app.include_router(pkg.router)
     paths = [p for p in app.openapi()["paths"] if "photos" in p]
-    assert paths[0] == "/api/products/photos/proxy", (
-        f"/photos/proxy обязан идти первым, фактически: {paths}"
-    )
+    assert (
+        paths[0] == "/api/products/photos/proxy"
+    ), f"/photos/proxy обязан идти первым, фактически: {paths}"
     assert all("{product_id}" in p for p in paths[1:])
 
 
@@ -201,7 +201,10 @@ def test_build_public_media_url_variants(monkeypatch):
         base_url = "http://backend:8000/"
 
     monkeypatch.setattr(settings, "PUBLIC_URL", "")
-    assert from_support(_FakeRequest(), "products/5/x.jpg") == "http://backend:8000/media/products/5/x.jpg"
+    assert (
+        from_support(_FakeRequest(), "products/5/x.jpg")
+        == "http://backend:8000/media/products/5/x.jpg"
+    )
 
     monkeypatch.setattr(settings, "PUBLIC_URL", "http://localhost:5173")
     # dev-фронт подставлять нельзя: XLSX-экспорт получает адрес бэкенда

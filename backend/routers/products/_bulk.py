@@ -181,9 +181,7 @@ async def bulk_preview_products(
     )
     products = (await db.execute(stmt)).scalars().all()
 
-    preview = compute_preview(
-        products, price=request.price, price_percent=request.price_percent
-    )
+    preview = compute_preview(products, price=request.price, price_percent=request.price_percent)
 
     category_info = None
     if request.category is not None and request.category.strip():
@@ -211,7 +209,9 @@ async def bulk_undo_products(
         db, current_user.id, snapshot_id=payload.snapshot_id if payload else None
     )
     if not result.get("success"):
-        raise HTTPException(status_code=404, detail=result.get("detail", "Нет изменений для отмены"))
+        raise HTTPException(
+            status_code=404, detail=result.get("detail", "Нет изменений для отмены")
+        )
 
     await db.commit()
 

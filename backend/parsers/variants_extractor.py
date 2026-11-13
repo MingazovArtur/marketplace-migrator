@@ -4,7 +4,6 @@
 """
 
 
-
 def _clean(value) -> str | None:
     if value is None:
         return None

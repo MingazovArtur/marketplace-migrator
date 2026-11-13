@@ -59,13 +59,15 @@ describe('readSseStream', () => {
     const events = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        sseResponse([
-          'data: {"status":"pend',
-          'ing"}\n\n: keepalive\n\ndata: {"status":"progress","percent":',
-          '50}\n\n',
-        ])
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse([
+            'data: {"status":"pend',
+            'ing"}\n\n: keepalive\n\ndata: {"status":"progress","percent":',
+            '50}\n\n',
+          ])
+        )
     );
 
     await readSseStream(URL_SSE, { onEvent: (p) => events.push(p) });
@@ -82,9 +84,11 @@ describe('readSseStream', () => {
     const events = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        sseResponse(['data: {broken json\n\n', 'data: {"status":"completed"}\n\n'])
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse(['data: {broken json\n\n', 'data: {"status":"completed"}\n\n'])
+        )
     );
 
     await readSseStream(URL_SSE, { onEvent: (p) => events.push(p) });

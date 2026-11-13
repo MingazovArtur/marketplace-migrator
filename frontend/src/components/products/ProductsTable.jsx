@@ -21,7 +21,11 @@ const ProductsTable = ({
   const { colStyle, Resizer } = resize;
 
   return (
-    <div className="card" style={{ padding: 0, overflowX: 'auto' }} data-onboarding="products-table">
+    <div
+      className="card"
+      style={{ padding: 0, overflowX: 'auto' }}
+      data-onboarding="products-table"
+    >
       <table
         style={{
           width: '100%',
@@ -231,9 +235,7 @@ const ProductsTable = ({
                         size="small"
                         className="btn-icon"
                         data-onboarding="migrate-btn"
-                        title={
-                          hasBlocking ? '⚠️ Товар имеет блокирующие пропуски' : 'Мигрировать'
-                        }
+                        title={hasBlocking ? '⚠️ Товар имеет блокирующие пропуски' : 'Мигрировать'}
                         onClick={() => onMigrate(p)}
                         style={
                           hasBlocking

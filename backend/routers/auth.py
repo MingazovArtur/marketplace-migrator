@@ -176,16 +176,26 @@ def login(payload: UserLogin, request: Request):
         # csrf_token — читается фронтендом и возвращается заголовком X-CSRF-Token (double-submit)
         csrf_token = secrets.token_urlsafe(32)
         max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        response = JSONResponse(content={"access_token": token, "token_type": "bearer", "csrf_token": csrf_token})
-        response.set_cookie(
-            "access_token", token,
-            max_age=max_age, httponly=True, samesite=settings.COOKIE_SAMESITE,
-            secure=settings.COOKIE_SECURE, path="/",
+        response = JSONResponse(
+            content={"access_token": token, "token_type": "bearer", "csrf_token": csrf_token}
         )
         response.set_cookie(
-            "csrf_token", csrf_token,
-            max_age=max_age, httponly=False, samesite=settings.COOKIE_SAMESITE,
-            secure=settings.COOKIE_SECURE, path="/",
+            "access_token",
+            token,
+            max_age=max_age,
+            httponly=True,
+            samesite=settings.COOKIE_SAMESITE,
+            secure=settings.COOKIE_SECURE,
+            path="/",
+        )
+        response.set_cookie(
+            "csrf_token",
+            csrf_token,
+            max_age=max_age,
+            httponly=False,
+            samesite=settings.COOKIE_SAMESITE,
+            secure=settings.COOKIE_SECURE,
+            path="/",
         )
         return response
 

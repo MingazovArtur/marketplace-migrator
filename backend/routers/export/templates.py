@@ -41,7 +41,9 @@ async def upload_official_template(
     cat = await normalize_category_name(db, category_name, pl)
 
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Нужен файл .xlsx — шаблон из кабинета площадки")
+        raise HTTPException(
+            status_code=400, detail="Нужен файл .xlsx — шаблон из кабинета площадки"
+        )
 
     data = await file.read()
     if len(data) > 15 * 1024 * 1024:

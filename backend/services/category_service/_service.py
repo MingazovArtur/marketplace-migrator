@@ -125,9 +125,7 @@ class CategoryService:
         self, source_platform: str, category_name: str, target_platform: str, user_id: int
     ) -> dict | None:
         """Найти маппинг для товара по имени категории."""
-        return find_mapping_for_product(
-            source_platform, category_name, target_platform, user_id
-        )
+        return find_mapping_for_product(source_platform, category_name, target_platform, user_id)
 
 
 # Глобальный экземпляр

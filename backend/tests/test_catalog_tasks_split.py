@@ -102,19 +102,14 @@ def test_task_registered_and_queue():
 def test_worker_ready_receiver_connected():
     from celery.signals import worker_ready
 
-    names = [
-        getattr(r, "__name__", "")
-        for r in worker_ready._live_receivers(None)
-    ]
+    names = [getattr(r, "__name__", "") for r in worker_ready._live_receivers(None)]
     assert "_reconcile_specs_registry_on_worker_start" in names
 
 
 def test_refresh_task_unknown_platform_is_error(monkeypatch):
     monitor, stats, cache, invalidated = _stub_shared(monkeypatch)
 
-    result = pkg.refresh_specs_task.apply(
-        args=[7, "aliexpress", "key"], throw=True
-    ).get()
+    result = pkg.refresh_specs_task.apply(args=[7, "aliexpress", "key"], throw=True).get()
 
     assert result["status"] == "error"
     assert result["platform"] == "aliexpress"
@@ -130,9 +125,7 @@ def test_refresh_task_unknown_platform_is_error(monkeypatch):
 def test_refresh_task_paused_from_queue(monkeypatch):
     monitor, stats, cache, invalidated = _stub_shared(monkeypatch, pause=True)
 
-    result = pkg.refresh_specs_task.apply(
-        args=[7, "ozon", "key"], throw=True
-    ).get()
+    result = pkg.refresh_specs_task.apply(args=[7, "ozon", "key"], throw=True).get()
 
     assert result["status"] == "paused"
     assert result["total"] == 0 and result["percent"] == 0
@@ -144,11 +137,14 @@ def test_refresh_task_paused_from_queue(monkeypatch):
     assert not cache.deleted and not invalidated and not stats.records
 
 
-@pytest.mark.parametrize("platform,loader_path", [
-    ("ozon", "services.ozon_specs.refresh_ozon_specs"),
-    ("yandex", "services.yandex_specs.refresh_yandex_specs"),
-    ("wildberries", "services.wb_specs.refresh_wildberries_specs"),
-])
+@pytest.mark.parametrize(
+    "platform,loader_path",
+    [
+        ("ozon", "services.ozon_specs.refresh_ozon_specs"),
+        ("yandex", "services.yandex_specs.refresh_yandex_specs"),
+        ("wildberries", "services.wb_specs.refresh_wildberries_specs"),
+    ],
+)
 def test_refresh_task_success_flow(monkeypatch, platform, loader_path):
     monitor, stats, cache, invalidated = _stub_shared(monkeypatch)
     loaded = {}
@@ -159,9 +155,7 @@ def test_refresh_task_success_flow(monkeypatch, platform, loader_path):
 
     monkeypatch.setattr(loader_path, _fake_loader)
 
-    result = pkg.refresh_specs_task.apply(
-        args=[7, platform, "key"], throw=True
-    ).get()
+    result = pkg.refresh_specs_task.apply(args=[7, platform, "key"], throw=True).get()
 
     assert result == {
         "status": "completed",
@@ -200,7 +194,8 @@ def test_refresh_task_paused_mid_run(monkeypatch):
     monkeypatch.setattr("services.ozon_specs.refresh_ozon_specs", _fake_loader)
 
     result = pkg.refresh_specs_task.apply(
-        args=[7, "ozon", "key"], kwargs={"skip_category_ids": ["100"]},
+        args=[7, "ozon", "key"],
+        kwargs={"skip_category_ids": ["100"]},
         throw=True,
     ).get()
 

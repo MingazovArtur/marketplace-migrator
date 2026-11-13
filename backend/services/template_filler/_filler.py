@@ -47,7 +47,9 @@ def fill_official_template(
     data_start_row = _detect_data_start_row(ws, header_row, pl)
 
     # Для AliExpress определяем 5 колонок «Произвольные характеристики продавца»
-    ae_custom_cols = _detect_aliexpress_custom_attr_cols(ws, header_row) if pl == "aliexpress" else []
+    ae_custom_cols = (
+        _detect_aliexpress_custom_attr_cols(ws, header_row) if pl == "aliexpress" else []
+    )
 
     # Сопоставляем нормализованные заголовки с номерами столбцов
     headers: dict[str, int] = {}
@@ -111,7 +113,14 @@ def fill_official_template(
         "зачеркнутаяцена",
     }
     if pl != "megamarket":
-        numeric_keys |= {"вескг", "весвупаковкекг", "вессупаковкойкг", "длинасм", "ширинасм", "высотасм"}
+        numeric_keys |= {
+            "вескг",
+            "весвупаковкекг",
+            "вессупаковкойкг",
+            "длинасм",
+            "ширинасм",
+            "высотасм",
+        }
 
     for i, product in enumerate(rows_to_write, start=1):
         values = _row_values(product, i, enum_fix, platform=pl)

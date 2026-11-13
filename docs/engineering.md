@@ -207,11 +207,17 @@ pre-commit run --all-files
 >1 МБ), ruff + black (backend), eslint + prettier (frontend). Все
 авто-фиксы применяются к коммиту автоматически.
 
-**Важно (первый запуск):** `pre-commit run --all-files` и первый коммит
-после установки поправят пробелы/импорты/форматирование примерно в ~100
-старых файлах (долг из §1). Сделайте это ОДНИМ отдельным коммитом
-`style: pre-commit autofix (whitespace, imports, formatting)` — не
-смешивайте с логическими изменениями.
+**Важно:** автоправки первой установки уже внесены — Round 22 сделал
+запланированный этим абзацем единый коммит `style: pre-commit autofix`:
+black по backend (89 файлов), prettier по frontend (25 файлов),
+EOF-newline для 21 конфига (Dockerfile×4, compose×2, nginx×3,
+alembic.ini, vite.config.js, email-шаблоны, data-JSON). `pre-commit
+run --all-files` сейчас чист, отдельные правки не нужны.
+
+Остаточный малый долг frontend (eslint, не гейтит CI): 11 warnings —
+8 `no-console`, 2 `react-hooks/exhaustive-deps`, 1
+`react-refresh/only-export-components`; поведенческие (в отличие от
+форматирования), закрываются отдельной линией с анализом каждого.
 
 ## 2. CI (GitHub Actions)
 

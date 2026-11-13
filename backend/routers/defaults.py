@@ -217,7 +217,5 @@ async def apply_defaults(
     if updated:
         await db.commit()
 
-    logger.info(
-        f"🩹 apply-defaults: обновлено {updated} из {len(products)}; поля: {field_counter}"
-    )
+    logger.info(f"🩹 apply-defaults: обновлено {updated} из {len(products)}; поля: {field_counter}")
     return {"updated": updated, "total": len(products), "fields": field_counter}

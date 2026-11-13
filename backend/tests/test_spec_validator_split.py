@@ -114,24 +114,28 @@ def test_canon_synonym_and_aggressive_normalization():
 def test_dictionary_select_values():
     # значение не из словаря у канонического select — error
     issues = validate_product_by_spec(
-        _valid_product(attributes=[
-            {"name": "Бренд", "value": "Ozon Fresh"},
-            {"name": "Название модели (для объединения в одну карточку)", "value": "Модель X"},
-            {"name": "Тип", "value": "Толстовка"},
-            {"name": "Нужен код маркировки", "value": "Нет"},
-        ]),
+        _valid_product(
+            attributes=[
+                {"name": "Бренд", "value": "Ozon Fresh"},
+                {"name": "Название модели (для объединения в одну карточку)", "value": "Модель X"},
+                {"name": "Тип", "value": "Толстовка"},
+                {"name": "Нужен код маркировки", "value": "Нет"},
+            ]
+        ),
         _FULL_SPEC,
     )
     assert ("attr:Тип", "error") in {(i["field"], i["severity"]) for i in issues}
 
     # регистр отличается от словаря — warning (генератор исправит сам)
     issues = validate_product_by_spec(
-        _valid_product(attributes=[
-            {"name": "Бренд", "value": "Ozon Fresh"},
-            {"name": "Название модели (для объединения в одну карточку)", "value": "Модель X"},
-            {"name": "Тип", "value": "футболка"},
-            {"name": "Нужен код маркировки", "value": "Нет"},
-        ]),
+        _valid_product(
+            attributes=[
+                {"name": "Бренд", "value": "Ozon Fresh"},
+                {"name": "Название модели (для объединения в одну карточку)", "value": "Модель X"},
+                {"name": "Тип", "value": "футболка"},
+                {"name": "Нужен код маркировки", "value": "Нет"},
+            ]
+        ),
         _FULL_SPEC,
     )
     assert ("attr:Тип", "warning") in {(i["field"], i["severity"]) for i in issues}
@@ -154,9 +158,11 @@ def test_dictionary_select_values():
 
 
 def test_multiselect_separator_and_limit():
-    spec = {"attributes": [
-        {"name": "Цвет", "type": "multiselect", "values": ["белый", "чёрный"], "max_count": 1},
-    ]}
+    spec = {
+        "attributes": [
+            {"name": "Цвет", "type": "multiselect", "values": ["белый", "чёрный"], "max_count": 1},
+        ]
+    }
     product = _valid_product(
         attributes=[
             {"name": "Бренд", "value": "Ozon Fresh"},
@@ -231,9 +237,7 @@ def test_hashtags_format_and_limit():
 
 
 def test_excisable_category_warning():
-    issues = validate_product_by_spec(
-        _valid_product(category="Авто > Моторные масла"), _FULL_SPEC
-    )
+    issues = validate_product_by_spec(_valid_product(category="Авто > Моторные масла"), _FULL_SPEC)
     assert ("excisable", "warning") in {(i["field"], i["severity"]) for i in issues}
 
 

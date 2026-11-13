@@ -232,7 +232,9 @@ def reconcile_on_startup(live=None) -> int:
             )
             closed += 1
         if closed:
-            logger.info(f"specs_monitor.reconcile_on_startup: помечено прерванными {closed} записей")
+            logger.info(
+                f"specs_monitor.reconcile_on_startup: помечено прерванными {closed} записей"
+            )
     except Exception as e:
         logger.warning(f"specs_monitor.reconcile_on_startup() не выполнен: {e}")
     return closed

@@ -80,9 +80,7 @@ async def write_edit_snapshot(
     return snap
 
 
-async def undo_snapshot(
-    db: AsyncSession, user_id: int, snapshot_id: int | None = None
-) -> dict:
+async def undo_snapshot(db: AsyncSession, user_id: int, snapshot_id: int | None = None) -> dict:
     """
     Отменить операцию правки: восстановить прежние значения полей.
 
@@ -96,9 +94,7 @@ async def undo_snapshot(
     else:
         stmt = stmt.where(BulkEditSnapshot.undone.is_(False))
     snapshot = (
-        await db.execute(
-            stmt.order_by(BulkEditSnapshot.id.desc()).limit(1)
-        )
+        await db.execute(stmt.order_by(BulkEditSnapshot.id.desc()).limit(1))
     ).scalar_one_or_none()
 
     if snapshot is None:
@@ -109,11 +105,7 @@ async def undo_snapshot(
 
     ids = [item.get("id") for item in snapshot.payload.get("items", []) if item.get("id")]
     products = (
-        (
-            await db.execute(
-                select(Product).where(Product.id.in_(ids), Product.user_id == user_id)
-            )
-        )
+        (await db.execute(select(Product).where(Product.id.in_(ids), Product.user_id == user_id)))
         .scalars()
         .all()
         if ids

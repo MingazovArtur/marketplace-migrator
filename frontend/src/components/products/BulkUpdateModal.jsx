@@ -367,8 +367,8 @@ const PreviewBox = ({ loading, preview, categoryInfo, hasBrand, brand }) => {
         <div className="bulk-preview-sample">
           {sample.map((s) => (
             <div key={s.id} className="bulk-preview-row" title={s.name}>
-              · {s.name.length > 32 ? `${s.name.slice(0, 32)}…` : s.name}:{' '}
-              <b>{fmt(s.old_price)}</b> → <b>{fmt(s.new_price)}</b>
+              · {s.name.length > 32 ? `${s.name.slice(0, 32)}…` : s.name}: <b>{fmt(s.old_price)}</b>{' '}
+              → <b>{fmt(s.new_price)}</b>
             </div>
           ))}
         </div>

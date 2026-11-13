@@ -34,8 +34,7 @@ export const computeSelectedGaps = (products, selected) => {
   selectedProducts.forEach((p) => {
     const price = Number(p.price);
     if (!price || price <= 0 || isNaN(price)) gapsLocal.price = (gapsLocal.price || 0) + 1;
-    if (!p.photos || p.photos.length === 0)
-      gapsLocal.main_photo = (gapsLocal.main_photo || 0) + 1;
+    if (!p.photos || p.photos.length === 0) gapsLocal.main_photo = (gapsLocal.main_photo || 0) + 1;
     [
       'vat_rate',
       'okpd_code',

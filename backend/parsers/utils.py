@@ -1,6 +1,7 @@
 """
 Общие утилиты для парсеров: очистка данных, нормализация.
 """
+
 import math
 import re
 from typing import Any

@@ -79,18 +79,18 @@ class _AsyncReadsMixin:
         """Неблокирующее получение статистики одним SQL-запросом."""
         stmt = select(
             func.count(Product.id).label("total"),
-            func.coalesce(
-                func.sum(case((Product.status == "pending", 1), else_=0)), 0
-            ).label("pending"),
-            func.coalesce(
-                func.sum(case((Product.status == "success", 1), else_=0)), 0
-            ).label("success"),
-            func.coalesce(
-                func.sum(case((Product.status == "error", 1), else_=0)), 0
-            ).label("error"),
-            func.coalesce(
-                func.sum(case((Product.status == "processing", 1), else_=0)), 0
-            ).label("processing"),
+            func.coalesce(func.sum(case((Product.status == "pending", 1), else_=0)), 0).label(
+                "pending"
+            ),
+            func.coalesce(func.sum(case((Product.status == "success", 1), else_=0)), 0).label(
+                "success"
+            ),
+            func.coalesce(func.sum(case((Product.status == "error", 1), else_=0)), 0).label(
+                "error"
+            ),
+            func.coalesce(func.sum(case((Product.status == "processing", 1), else_=0)), 0).label(
+                "processing"
+            ),
         )
         if not is_admin and user_id is not None:
             stmt = stmt.where(Product.user_id == user_id)

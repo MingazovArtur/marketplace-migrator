@@ -144,7 +144,7 @@ def test_match_spec_by_text_scoring():
 
     # свежая TTL-метка: _spec_cache_load — no-op, БД не открывается
     cache_mod._spec_cache_names["ozon"] = [
-        "Одежда / Футболки",            # точное вхождение типа в текст → score 120+
+        "Одежда / Футболки",  # точное вхождение типа в текст → score 120+
         "Одежда / Футболки с принтом",  # стемминг общий → score 100+
         "Дом и сад / Пледы",
     ]
@@ -297,9 +297,9 @@ def test_ensure_canonical_attributes_writes_required(monkeypatch):
         "ТН ВЭД коды ЕАЭС",
         "Тип",
     ]
-    assert values["Бренд"] == "Adidas"           # дефолт-приоритет: pref из defaults
+    assert values["Бренд"] == "Adidas"  # дефолт-приоритет: pref из defaults
     assert values["Название модели"] == "Моя модель"  # имя товара
-    assert values["Тип"] == "Футболка"            # derived_type
+    assert values["Тип"] == "Футболка"  # derived_type
     assert values["Нужен код маркировки"] == "Нет"
-    assert values["ТН ВЭД коды ЕАЭС"] == "6109"   # okpd_code
+    assert values["ТН ВЭД коды ЕАЭС"] == "6109"  # okpd_code
     assert all(a.product_id == 42 for a in added)

@@ -152,7 +152,9 @@ class YandexFileParser(BaseFileParser):
 
         if "name" not in col_indices:
             wb.close()
-            raise ValueError("Не найдена обязательная колонка «Название товара *» в файле Яндекс Маркета")
+            raise ValueError(
+                "Не найдена обязательная колонка «Название товара *» в файле Яндекс Маркета"
+            )
 
         products: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
@@ -250,11 +252,15 @@ class YandexFileParser(BaseFileParser):
         columns = [str(c).strip() for c in list(df.columns)]
         df.columns = columns
 
-        name_col = find_column(columns, ["Название товара *", "Название товара", "Название", "Наименование"])
+        name_col = find_column(
+            columns, ["Название товара *", "Название товара", "Название", "Наименование"]
+        )
         price_col = find_column(columns, ["Цена *", "Цена", "Стоимость"])
         sku_col = find_column(columns, ["Ваш SKU *", "Ваш SKU", "Артикул", "SKU"])
         category_col = find_column(columns, ["Категория на Маркете *", "Категория"])
-        photo_col = find_column(columns, ["Ссылка на изображение *", "Ссылка на фото", "URL картинки", "Фото"])
+        photo_col = find_column(
+            columns, ["Ссылка на изображение *", "Ссылка на фото", "URL картинки", "Фото"]
+        )
         desc_col = find_column(columns, ["Описание товара *", "Описание товара", "Описание"])
         brand_col = find_column(columns, ["Бренд *", "Бренд", "Производитель"])
         barcode_col = find_column(columns, ["Штрихкод *", "Штрихкод"])
@@ -280,7 +286,9 @@ class YandexFileParser(BaseFileParser):
                     "barcode": clean_value(row.get(barcode_col)) if barcode_col else "",
                     "description": clean_value(row.get(desc_col)) if desc_col else "",
                     "photos": split_photos(clean_value(row.get(photo_col))) if photo_col else [],
-                    "category": clean_value(row.get(category_col)) if category_col else "Не указана",
+                    "category": (
+                        clean_value(row.get(category_col)) if category_col else "Не указана"
+                    ),
                     "brand": clean_value(row.get(brand_col)) if brand_col else "",
                 }
             )

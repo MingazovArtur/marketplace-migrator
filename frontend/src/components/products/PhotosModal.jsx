@@ -104,9 +104,7 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
   /* ---------- загрузка файлов с компьютера ---------- */
 
   const handleUploadFiles = async (fileList) => {
-    const files = Array.from(fileList || []).filter((f) =>
-      /\.(jpe?g|png|webp)$/i.test(f.name)
-    );
+    const files = Array.from(fileList || []).filter((f) => /\.(jpe?g|png|webp)$/i.test(f.name));
     if (files.length === 0) {
       notify('❌ Выберите изображения в формате JPG, PNG или WEBP');
       return;
@@ -175,7 +173,9 @@ const PhotosModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
       if (data?.photos) {
         setPhotos(data.photos);
       }
-      notify(`✅ Сохранены локальные копии фото (${data.downloaded ?? data.count ?? photos.length} шт.)`);
+      notify(
+        `✅ Сохранены локальные копии фото (${data.downloaded ?? data.count ?? photos.length} шт.)`
+      );
       if (onSave) await onSave();
     } catch (e) {
       notify('❌ ' + e.message);

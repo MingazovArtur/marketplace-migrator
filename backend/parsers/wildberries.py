@@ -1,6 +1,7 @@
 """
 Парсер плоских файлов (CSV/XLSX) для Wildberries и Яндекс Маркета.
 """
+
 import logging
 
 from .base import BaseFileParser, ParseResult

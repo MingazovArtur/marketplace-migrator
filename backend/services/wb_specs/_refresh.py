@@ -48,7 +48,9 @@ async def refresh_wildberries_specs(
             before = len(subjects)
             subjects = [s for s in subjects if str(s["id"]) not in skip]
             if before != len(subjects):
-                logger.info(f"⏩ WB: пропущено {before - len(subjects)} предметов из прошлой загрузки")
+                logger.info(
+                    f"⏩ WB: пропущено {before - len(subjects)} предметов из прошлой загрузки"
+                )
 
         total = len(subjects)
         fetched = 0

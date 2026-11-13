@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
-import { Routes, Route, Navigate, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import {
+  Routes,
+  Route,
+  Navigate,
+  useNavigate,
+  useLocation,
+  useSearchParams,
+} from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './hooks/useAuth';
 import { useProducts } from './hooks/useProducts';
@@ -40,7 +47,9 @@ const HelpPage = lazy(() => import('./pages/HelpPage'));
 const PrivacyPolicyPage = lazy(() =>
   import('./pages/Legal').then((m) => ({ default: m.PrivacyPolicyPage }))
 );
-const TermsOfUsePage = lazy(() => import('./pages/Legal').then((m) => ({ default: m.TermsOfUsePage })));
+const TermsOfUsePage = lazy(() =>
+  import('./pages/Legal').then((m) => ({ default: m.TermsOfUsePage }))
+);
 const VerifyEmailPage = lazy(() =>
   import('./pages/EmailPages').then((m) => ({ default: m.VerifyEmailPage }))
 );
@@ -113,9 +122,7 @@ const ImportView = ({ onOpenImportModal }) => (
           <Icon name="import" size={44} />
         </div>
         <h3>Из Excel / CSV</h3>
-        <p>
-          Рекомендуемый способ: выгрузка из кабинета Ozon, WB, Яндекс Маркет или Магнит Маркет
-        </p>
+        <p>Рекомендуемый способ: выгрузка из кабинета Ozon, WB, Яндекс Маркет или Магнит Маркет</p>
         <Button>Выбрать файл</Button>
       </div>
       <div
@@ -257,10 +264,7 @@ function App() {
     getProductById,
   } = useProducts(isAuthenticated, handleLogout);
 
-  const { isMigratingProductId, migrateProduct, migrateBatch } = useMigration(
-    loadData,
-    setMessage
-  );
+  const { isMigratingProductId, migrateProduct, migrateBatch } = useMigration(loadData, setMessage);
 
   // ОБЪЯДИНЁННАЯ функция перезагрузки (Round 7: вместо refreshKey-проброса —
   // инвалидация кэша TanStack Query; подписчики ['products'], ['stats'],
@@ -517,7 +521,10 @@ function App() {
               path="/dashboard"
               element={<DashboardView stats={stats} onGoImport={() => navigate('/import')} />}
             />
-            <Route path="/import" element={<ImportView onOpenImportModal={() => setShowImportModal(true)} />} />
+            <Route
+              path="/import"
+              element={<ImportView onOpenImportModal={() => setShowImportModal(true)} />}
+            />
             <Route
               path="/mapping"
               element={

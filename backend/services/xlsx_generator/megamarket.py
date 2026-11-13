@@ -96,8 +96,7 @@ def build_megamarket_workbook(products: list, spec: dict | None = None) -> Workb
     expanded = _expand_products_for_platform(products, "megamarket")
     enum_fix = _build_enum_fix(spec)
     rows_values = [
-        _row_values(p, i, enum_fix, platform="megamarket")
-        for i, p in enumerate(expanded, start=1)
+        _row_values(p, i, enum_fix, platform="megamarket") for i, p in enumerate(expanded, start=1)
     ]
 
     wb = Workbook()
@@ -114,13 +113,9 @@ def build_megamarket_workbook(products: list, spec: dict | None = None) -> Workb
         cell.alignment = Alignment(wrap_text=True, vertical="center")
 
     # --- Выпадающий список для НДС ---
-    vat_col = next(
-        col for col, (h, _r, _k) in enumerate(MM_COLUMNS, start=1) if h == "НДС"
-    )
+    vat_col = next(col for col, (h, _r, _k) in enumerate(MM_COLUMNS, start=1) if h == "НДС")
     letter = get_column_letter(vat_col)
-    dv = DataValidation(
-        type="list", formula1='"' + ",".join(VAT_VALUES) + '"', allow_blank=True
-    )
+    dv = DataValidation(type="list", formula1='"' + ",".join(VAT_VALUES) + '"', allow_blank=True)
     ws.add_data_validation(dv)
     dv.add(f"{letter}{DATA_START_ROW}:{letter}{last_row}")
 
@@ -168,9 +163,7 @@ def megamarket_example_products() -> list[dict]:
             "name": "Кофемашина DeLonghi Magnifica ECAM22.110",
             "price": 34990,
             "stock": 10,
-            "description": (
-                "Автоматическая кофемашина с капучинатором и встроенной кофемолкой."
-            ),
+            "description": ("Автоматическая кофемашина с капучинатором и встроенной кофемолкой."),
             "brand": "DeLonghi",
             "barcode": "4600000010018",
             "category": "Техника для кухни / Кофемашины",

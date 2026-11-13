@@ -24,9 +24,7 @@ from database.models import PlatformCategorySpec, Product, User
 logger = logging.getLogger(__name__)
 
 
-async def normalize_category_name(
-    db: AsyncSession, name: str, platform: str = "ozon"
-) -> str:
+async def normalize_category_name(db: AsyncSession, name: str, platform: str = "ozon") -> str:
     raw = (name or "").strip()
     if not raw or raw.lower() in ("универсальный", "общий", "все категории", "default", "all"):
         return "Универсальный (все категории)"
@@ -69,9 +67,7 @@ def product_to_dict(p: Product) -> dict:
         "units_per_item": getattr(p, "units_per_item", 1),
         "stock": getattr(p, "stock", 0),
         "photos": p.photos or [],
-        "attributes": [
-            {"name": a.name, "value": a.value} for a in (p.attributes or [])
-        ],
+        "attributes": [{"name": a.name, "value": a.value} for a in (p.attributes or [])],
         "variants": [
             {"sku": v.sku, "size": v.size, "color": v.color, "price": v.price}
             for v in (p.variants or [])
@@ -116,8 +112,7 @@ async def get_products_for_export_async(
 
     if changed_since:
         stmt = stmt.where(
-            (Product.last_export_at.is_(None))
-            | (Product.updated_at > Product.last_export_at)
+            (Product.last_export_at.is_(None)) | (Product.updated_at > Product.last_export_at)
         )
 
     res = await db.execute(stmt)
@@ -154,8 +149,7 @@ async def load_user_products(
 
     if changed_since:
         stmt = stmt.where(
-            (Product.last_export_at.is_(None))
-            | (Product.updated_at > Product.last_export_at)
+            (Product.last_export_at.is_(None)) | (Product.updated_at > Product.last_export_at)
         )
 
     res = await db.execute(stmt)
@@ -219,9 +213,7 @@ async def mark_exported(db: AsyncSession, product_ids: list[int], platform: str)
 async def load_specs_by_category(
     db: AsyncSession, product_dicts: list[dict], platform: str
 ) -> dict[str, dict | None]:
-    categories = {
-        (p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts
-    }
+    categories = {(p["mapped_category"] or p["category"] or "Без категории") for p in product_dicts}
     spec_stmt = select(PlatformCategorySpec).where(
         PlatformCategorySpec.platform == platform,
         PlatformCategorySpec.category_name.in_(categories),

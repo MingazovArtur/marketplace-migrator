@@ -23,7 +23,9 @@ from services.bulk_ops import (  # noqa: E402
 class FakeProduct:
     """Товароподобный объект: достаточно id/name/price/brand/mapped_category."""
 
-    def __init__(self, id, name, price, brand=None, mapped_category=None, okpd_code=None, vat_rate=None):  # noqa: A002
+    def __init__(
+        self, id, name, price, brand=None, mapped_category=None, okpd_code=None, vat_rate=None
+    ):  # noqa: A002
         self.id = id
         self.name = name
         self.price = price
@@ -34,13 +36,23 @@ class FakeProduct:
 
 
 PRODUCTS = [
-    FakeProduct(1, "Футболка", Decimal("1000.00"), brand="OldBrand", mapped_category="А / Б", okpd_code="6109"),
-    FakeProduct(2, "Кроссовки", Decimal("2000.00"), brand=None, mapped_category=None, okpd_code=None),
+    FakeProduct(
+        1,
+        "Футболка",
+        Decimal("1000.00"),
+        brand="OldBrand",
+        mapped_category="А / Б",
+        okpd_code="6109",
+    ),
+    FakeProduct(
+        2, "Кроссовки", Decimal("2000.00"), brand=None, mapped_category=None, okpd_code=None
+    ),
     FakeProduct(3, "Носки", Decimal("0"), brand="X", mapped_category=None, okpd_code="6115"),
 ]
 
 
 # ==================== compute_preview ====================
+
 
 def test_preview_percent_min_max_avg():
     p = compute_preview(PRODUCTS[:2], price_percent=15)
@@ -105,6 +117,7 @@ def test_preview_empty_products():
 
 # ==================== build_snapshot_payload ====================
 
+
 def test_snapshot_payload_decimal_to_float():
     snap = build_snapshot_payload(PRODUCTS, ["price", "brand", "category"])
     # ✅ v4: alias "category" -> колонка "mapped_category"
@@ -136,6 +149,7 @@ def test_snapshot_payload_skips_unknown_fields():
 
 
 # ==================== apply_snapshot ====================
+
 
 def test_apply_snapshot_restores_values():
     snap = build_snapshot_payload(PRODUCTS, ["price", "brand", "category"])
@@ -199,6 +213,7 @@ def test_apply_snapshot_empty_items():
 
 
 # ==================== escape_like / parse ====================
+
 
 def test_escape_like_wildcards():
     assert escape_like("100%_x\\") == "100\\%\\_x\\\\"

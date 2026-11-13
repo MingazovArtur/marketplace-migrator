@@ -125,9 +125,7 @@ def test_safe_get_redirect_without_location_raises():
 
 
 def test_safe_get_redirect_loop_limit():
-    stub = _StubSession(
-        [_StubResponse(location=f"http://8.8.8.8/hop{i}") for i in range(10)]
-    )
+    stub = _StubSession([_StubResponse(location=f"http://8.8.8.8/hop{i}") for i in range(10)])
     with pytest.raises(ValueError, match="редирект"):
         safe_get("http://8.8.8.8/start", session=stub, timeout=1, max_redirects=3)
     assert len(stub.calls) == 4  # исходный + 3 перехода
@@ -237,9 +235,7 @@ def test_dns_rebinding_blocked_on_redirect_hop(monkeypatch):
             self.hop += 1
             if self.hop == 1:
                 return _StubResponse(location=f"http://{REBIND_HOST}/hop2")
-            return self._real.send(
-                self._real.build_request(method, url, **kw), stream=stream
-            )
+            return self._real.send(self._real.build_request(method, url, **kw), stream=stream)
 
     _install_rebinding_dns(monkeypatch, public_for_n=2)
     connected = _record_socket_connections(monkeypatch)

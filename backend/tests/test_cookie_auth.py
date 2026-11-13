@@ -18,6 +18,7 @@ from database.models import User
 # Стабы
 # ---------------------------------------------------------------------------
 
+
 class _FakeResult:
     def __init__(self, obj):
         self._obj = obj
@@ -81,6 +82,7 @@ def patch_decode(monkeypatch):
 # Приём токена: Bearer ИЛИ httpOnly-cookie
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_bearer_token_accepted(patch_decode):
     patch_decode()
@@ -109,6 +111,7 @@ async def test_no_token_401(patch_decode):
 # ---------------------------------------------------------------------------
 # CSRF: double-submit (заголовок X-CSRF-Token == кука csrf_token)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_cookie_post_without_csrf_403(patch_decode):
@@ -166,6 +169,7 @@ async def test_bearer_post_without_csrf_ok(patch_decode):
 # ---------------------------------------------------------------------------
 # /media: ownership + path traversal
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def media_dir(tmp_path, monkeypatch):

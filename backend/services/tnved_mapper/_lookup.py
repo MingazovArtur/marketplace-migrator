@@ -31,12 +31,14 @@ def suggest_tnved(name: str, category: str = "") -> list[dict[str, str]]:
     for keyword, data in TNVED_DATABASE.items():
         # Проверяем, содержится ли ключевое слово в названии или категории
         if keyword in search_text:
-            matches.append({
-                "keyword": keyword,
-                "code": data["code"],
-                "description": data["desc"],
-                "score": len(keyword)  # Чем длиннее совпавшее слово, тем выше релевантность
-            })
+            matches.append(
+                {
+                    "keyword": keyword,
+                    "code": data["code"],
+                    "description": data["desc"],
+                    "score": len(keyword),  # Чем длиннее совпавшее слово, тем выше релевантность
+                }
+            )
 
     # Сортируем: сначала самые длинные (точные) совпадения
     matches.sort(key=lambda x: x["score"], reverse=True)
@@ -70,13 +72,17 @@ def search_tnved(query: str) -> list[dict[str, str]]:
 
     for keyword, data in TNVED_DATABASE.items():
         # Ищем по ключевому слову, коду или описанию
-        if (query_lower in keyword or
-            query_lower in data["code"] or
-            query_lower in data["desc"].lower()):
-            results.append({
-                "keyword": keyword,
-                "code": data["code"],
-                "description": data["desc"],
-            })
+        if (
+            query_lower in keyword
+            or query_lower in data["code"]
+            or query_lower in data["desc"].lower()
+        ):
+            results.append(
+                {
+                    "keyword": keyword,
+                    "code": data["code"],
+                    "description": data["desc"],
+                }
+            )
 
     return results[:10]  # Возвращаем топ-10 результатов

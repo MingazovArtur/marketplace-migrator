@@ -5,6 +5,7 @@ CRUD + apply. Применение профиля проставляет сох�
 ГЛОБАЛЬНЫЕ дефолты пользователя (export_defaults, category_name=NULL) — их
 подхватывают миграция (дозаполнение пустых полей) и кнопка «Заполнить пропуски».
 """
+
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -155,7 +156,9 @@ async def save_profile(
                 await db.execute(
                     select(MigrationProfile.id).where(MigrationProfile.user_id == current_user.id)
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         if count >= MAX_PROFILES_PER_USER:
             raise HTTPException(

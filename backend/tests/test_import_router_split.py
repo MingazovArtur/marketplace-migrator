@@ -77,7 +77,10 @@ def test_package_parse_yandex_api_credentials(monkeypatch):
     assert _parse_yandex_api_credentials("ACMA:abc") == ("217055223", "ACMA:abc")
     assert _parse_yandex_api_credentials("yandex:y0_token") == ("217055223", "y0_token")
     # '<business_id>:<длинный токен>'
-    assert _parse_yandex_api_credentials("123456:abcdefghijklmnop") == ("123456", "abcdefghijklmnop")
+    assert _parse_yandex_api_credentials("123456:abcdefghijklmnop") == (
+        "123456",
+        "abcdefghijklmnop",
+    )
     # не яндекс-ключ
     assert _parse_yandex_api_credentials("38146098:test") is None
     assert _parse_yandex_api_credentials("some_random_key") is None

@@ -6,7 +6,6 @@ Ozon чувствителен к регистру: «белый» ≠ «Белы
 и создание дубля. При сохранении значение приводится к регистру словаря площадки.
 """
 
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 

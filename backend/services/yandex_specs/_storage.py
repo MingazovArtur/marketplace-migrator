@@ -7,7 +7,7 @@ from core.time import utcnow
 from database.models import PlatformCategorySpec
 from database.session import SessionLocal
 
-DB_CHUNK = 50            # категорий на один commit в БД
+DB_CHUNK = 50  # категорий на один commit в БД
 
 
 def _flush_ym_buffer(user_id: int, buffer: list[tuple[dict, dict]]) -> None:

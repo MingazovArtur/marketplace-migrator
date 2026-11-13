@@ -168,6 +168,14 @@ def test_preview_file_structure():
     assert preview["valid_estimated"] == 15
     # колонки — ключи словаря товара в порядке вставки
     assert preview["columns"] == [
-        "external_id", "sku", "name", "price", "description",
-        "brand", "barcode", "category", "stock", "photos",
+        "external_id",
+        "sku",
+        "name",
+        "price",
+        "description",
+        "brand",
+        "barcode",
+        "category",
+        "stock",
+        "photos",
     ]

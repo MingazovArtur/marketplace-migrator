@@ -73,7 +73,9 @@ async def refresh_ozon_specs(
             before = len(leaves)
             leaves = [n for n in leaves if f"{n['id']}_{n['type_id']}" not in skip]
             if before != len(leaves):
-                logger.info(f"⏩ Ozon: пропущено {before - len(leaves)} категорий из прошлой загрузки")
+                logger.info(
+                    f"⏩ Ozon: пропущено {before - len(leaves)} категорий из прошлой загрузки"
+                )
 
         total = len(leaves)
         logger.info(f"🚀 Ozon: будет загружено {total} категорий (concurrency={concurrency})")
