@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../icons';
+import { logger } from '../../utils/logger';
 
 /**
  * Компонент выбора кода ТН ВЭД с автоподсказками.
@@ -28,7 +29,7 @@ const TnvedSelector = ({ value, onChange, productName = '', category = '', disab
           setSuggestions(data.suggestions || []);
         }
       } catch (error) {
-        console.error('Ошибка получения подсказок ТН ВЭД:', error);
+        logger.error('Ошибка получения подсказок ТН ВЭД:', error);
         setSuggestions([]);
       } finally {
         setLoading(false);

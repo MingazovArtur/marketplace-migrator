@@ -1,6 +1,6 @@
 import React from 'react';
 import Icon from '../components/icons';
-import { resetOnboarding } from '../components/onboarding/OnboardingTour';
+import { resetOnboarding } from '../components/onboarding/onboardingStorage';
 
 const SECTION = { maxWidth: 800, margin: '0 auto', padding: '2rem 1.5rem' };
 const CARD = {

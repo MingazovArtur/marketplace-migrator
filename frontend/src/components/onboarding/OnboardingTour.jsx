@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Icon from '../icons';
+import { STORAGE_KEY } from './onboardingStorage';
 
 /**
  * Онбординг-тур по рабочему интерфейсу (7 карточек: приветствие + 6 шагов).
@@ -16,8 +17,6 @@ import Icon from '../icons';
  * STORAGE_KEY версионируется: смена ключа показывает обновлённый тур
  * всем, кто прошёл предыдущую версию.
  */
-
-const STORAGE_KEY = 'onboarding_tour_v2';
 
 // Сколько раз ищем цель (200 мс × 15 ≈ 3 с) прежде чем показать карточку по центру
 const TARGET_RETRIES = 15;
@@ -287,16 +286,3 @@ const OnboardingTour = () => {
 };
 
 export default OnboardingTour;
-
-/**
- * Сброс онбординга: показывает тур заново.
- * Диспатчит событие — тур перезапускается, даже если уже смонтирован.
- */
-export const resetOnboarding = () => {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch (e) {
-    /* ignore */
-  }
-  window.dispatchEvent(new Event('onboarding-restart'));
-};

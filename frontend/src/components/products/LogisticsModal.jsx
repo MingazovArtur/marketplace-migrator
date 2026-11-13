@@ -3,6 +3,7 @@ import Button from '../common/Button';
 import Icon from '../icons';
 import { api } from '../../api';
 import TnvedSelector from './TnvedSelector';
+import { logger } from '../../utils/logger';
 
 // Значения НДС как в XLS-шаблонах площадок
 const VAT_OPTIONS = [
@@ -115,7 +116,7 @@ const LogisticsModal = ({ isOpen, onClose, product, onSaved }) => {
         try {
           await onSaved();
         } catch (e) {
-          console.warn('onSaved failed:', e);
+          logger.warn('onSaved failed:', e);
         }
       }
 

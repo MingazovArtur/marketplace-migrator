@@ -17,6 +17,7 @@
  */
 
 import { doFetch, getAuthHeaders } from './client';
+import { logger } from '../utils/logger';
 
 export const TERMINAL_TASK_STATUSES = ['completed', 'failed'];
 
@@ -80,7 +81,7 @@ export async function readSseStream(url, { onEvent, signal, headers } = {}) {
       try {
         onEvent(JSON.parse(data));
       } catch {
-        console.warn('SSE: не разобран кадр', data.slice(0, 100));
+        logger.warn('SSE: не разобран кадр', data.slice(0, 100));
       }
     }
   };

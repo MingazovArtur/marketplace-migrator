@@ -3,6 +3,7 @@ import Button from '../common/Button';
 import Icon from '../icons';
 import { PLATFORMS } from '../../utils/platformUtils';
 import { api } from '../../api';
+import { logger } from '../../utils/logger';
 
 const MigrateModal = ({
   isOpen,
@@ -70,7 +71,7 @@ const MigrateModal = ({
           try {
             await onSaved();
           } catch (e) {
-            console.warn('refreshAll failed:', e);
+            logger.warn('refreshAll failed:', e);
           }
         }
 
@@ -187,7 +188,7 @@ const MigrateModal = ({
         try {
           await onSaved();
         } catch (e) {
-          console.warn('refreshAll failed:', e);
+          logger.warn('refreshAll failed:', e);
         }
       }
       setTimeout(() => setSaveState('idle'), 4000);

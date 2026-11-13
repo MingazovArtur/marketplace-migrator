@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../../api';
 import EmptyState from '../common/EmptyState';
 import Icon from '../icons';
+import { logger } from '../../utils/logger';
 
 const OP_LABELS = {
   import_file: 'Импорт файла',
@@ -52,7 +53,7 @@ const StatsDashboard = () => {
     try {
       setData(await fetchDashboardStats(days));
     } catch (e) {
-      console.error('Ошибка статистики:', e);
+      logger.error('Ошибка статистики:', e);
       setError(true);
       setData(null);
     } finally {

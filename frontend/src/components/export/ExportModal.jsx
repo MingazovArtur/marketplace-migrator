@@ -189,7 +189,10 @@ const ExportModal = ({ isOpen, onClose, onExport, loading, onOpenTemplates, sele
     setDownloaded(false);
   }, [platform, status, onlySelected, changedSince]);
 
-  const v = validation || preview?.validation || {};
+  // v стабилизирован useMemo: без этого `validation || preview?.validation || {}`
+  // создавал бы новый объект каждый рендер и пересчитывал зависимые от v useMemo
+  // (errorCountByCanon, blockingFields) на каждый рендер (exhaustive-deps)
+  const v = useMemo(() => validation || preview?.validation || {}, [validation, preview]);
   const total = v.total ?? 0;
   const withErrors = v.products_with_errors ?? v.with_errors ?? 0;
   const withWarnings = Math.max(0, (v.products_with_warnings ?? v.with_warnings ?? 0) - withErrors);

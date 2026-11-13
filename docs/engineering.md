@@ -214,10 +214,22 @@ EOF-newline для 21 конфига (Dockerfile×4, compose×2, nginx×3,
 alembic.ini, vite.config.js, email-шаблоны, data-JSON). `pre-commit
 run --all-files` сейчас чист, отдельные правки не нужны.
 
-Остаточный малый долг frontend (eslint, не гейтит CI): 11 warnings —
-8 `no-console`, 2 `react-hooks/exhaustive-deps`, 1
-`react-refresh/only-export-components`; поведенческие (в отличие от
-форматирования), закрываются отдельной линией с анализом каждого.
+Долг frontend-eslint, зафиксированный после Round 22 (11 warnings), закрыт
+Round 23 — `npm run lint` теперь 0/0:
+
+- `no-console` (8): диагностика catch-блоков переведена на
+  `utils/logger.js` — единая точка логирования (console инкапсулирован
+  только там, `eslint-disable no-console` на уровне файла); вызовы
+  семантически 1:1 (`logger.error/warn` = прежние `console.error/warn`);
+- `react-hooks/exhaustive-deps` (2): `v` в ExportModal (`validation ||
+  preview?.validation || {}`) стабилизирован `useMemo` — зависимые
+  memo (errorCountByCanon, blockingFields) больше не пересчитываются на
+  каждый рендер; значения те же (чистые функции от v);
+- `react-refresh/only-export-components` (1): `resetOnboarding` +
+  `STORAGE_KEY` вынесены из OnboardingTour.jsx в
+  `onboarding/onboardingStorage.js` (файл компонента экспортирует только
+  компонент; STORAGE_KEY экспортирован — импортёр OnboardingTour,
+  потребитель reset — HelpPage).
 
 ## 2. CI (GitHub Actions)
 

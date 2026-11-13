@@ -3,6 +3,7 @@ import Button from '../common/Button';
 import Icon from '../icons';
 import { api } from '../../api';
 import EmptyState from '../common/EmptyState';
+import { logger } from '../../utils/logger';
 
 const TYPE_META = {
   import: { label: 'Импорт', icon: 'import' },
@@ -106,7 +107,7 @@ const HistoryView = () => {
       const data = await api.getHistory({ operation: filter || undefined, limit: 100 });
       setHistory(data.history || []);
     } catch (e) {
-      console.error('Ошибка загрузки истории:', e);
+      logger.error('Ошибка загрузки истории:', e);
       setHistory([]);
     } finally {
       setLoading(false);

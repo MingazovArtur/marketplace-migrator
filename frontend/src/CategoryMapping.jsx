@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import './App.css';
 import Icon from './components/icons';
 import { api } from './api';
+import { logger } from './utils/logger';
 
 const PLATFORMS = [
   { id: 'ozon', name: 'Ozon', color: '#005bff' },
@@ -76,7 +77,7 @@ function CategoryMapping() {
       const data = await api.getCategoryMapping(sourcePlatform, targetPlatform);
       setMappings(data?.mappings || []);
     } catch (e) {
-      console.error('Ошибка загрузки маппингов:', e);
+      logger.error('Ошибка загрузки маппингов:', e);
     }
   }, [sourcePlatform, targetPlatform]);
 
