@@ -15,8 +15,14 @@ import parsers.yandex as pkg
 from parsers.yandex._parser import YandexFileParser as from_parser
 from parsers.yandex._support import (
     YANDEX_SKIP_MARKERS as from_support_markers,
+)
+from parsers.yandex._support import (
     _cm_to_mm as from_support_cm,
+)
+from parsers.yandex._support import (
     _kg_to_grams as from_support_kg,
+)
+from parsers.yandex._support import (
     _parse_yandex_characteristics as from_support_chars,
 )
 
@@ -148,7 +154,7 @@ def test_parser_xlsx_full_product():
 
 def test_parser_xlsx_empty_name_is_error():
     # sku указан, названия нет → ошибка «Пустое название товара»
-    row = ["T-100", ""] + [v for v in GOOD_ROW[2:]]
+    row = ["T-100", ""] + list(GOOD_ROW[2:])
     content = _ym_xlsx([HEADERS, row])
     result = from_parser().parse(content, "xlsx")
     assert result.imported == 0
@@ -165,7 +171,7 @@ def test_parser_xlsx_no_header_raises():
 
 
 def test_parser_flat_csv():
-    csv = "Ваш SKU,Название товара,Цена,Бренд,Категория\nT-1,Товар,1990,Adidas,Дом\n".encode("utf-8")
+    csv = "Ваш SKU,Название товара,Цена,Бренд,Категория\nT-1,Товар,1990,Adidas,Дом\n".encode()
     result = from_parser().parse(csv, "csv")
     assert result.imported == 1
     p = result.products[0]
@@ -176,7 +182,7 @@ def test_parser_flat_csv():
 
 
 def test_parser_empty_csv_warning():
-    result = from_parser().parse("Название товара\n".encode("utf-8"), "csv")
+    result = from_parser().parse("Название товара\n".encode(), "csv")
     # только шапка → файл «пустой» по товарам, предупреждение
     assert result.imported == 0
     assert result.warnings == [{"type": "empty", "message": "Файл пуст"}]

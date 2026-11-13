@@ -19,7 +19,6 @@ import routers.products as products_router
 import services.defaults_service as defaults_service
 from database.models import User
 
-
 # ---------------------------------------------------------------------------
 # Стабы
 # ---------------------------------------------------------------------------
@@ -129,16 +128,16 @@ async def test_get_product_by_id_404(monkeypatch):
 
 
 def _full(**extra):
-    base = dict(
-        price=100,
-        vat_rate="20",
-        okpd_code="6109100010",
-        package_weight_grams=100,
-        package_width_mm=200,
-        package_height_mm=30,
-        package_length_mm=250,
-        photos=["http://x/1.jpg"],
-    )
+    base = {
+        "price": 100,
+        "vat_rate": "20",
+        "okpd_code": "6109100010",
+        "package_weight_grams": 100,
+        "package_width_mm": 200,
+        "package_height_mm": 30,
+        "package_length_mm": 250,
+        "photos": ["http://x/1.jpg"],
+    }
     base.update(extra)
     return FakeProduct(**base)
 

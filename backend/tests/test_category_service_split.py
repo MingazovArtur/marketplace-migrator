@@ -117,10 +117,10 @@ def test_get_categories_falls_back_to_mocks(monkeypatch):
 
 def test_get_categories_with_api_key_error_falls_back(monkeypatch):
     """Ошибка API -> автоматический фолбэк на get_categories (заглушки)."""
+    import httpx
+
     from services.category_service import _service
     from services.category_service._service import CategoryService
-
-    import httpx
 
     def boom(platform, api_key):
         raise httpx.ConnectError("network down")

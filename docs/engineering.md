@@ -132,10 +132,37 @@ Round 19 закрыл линию `parsers/` (145 замечаний — фина
   объединение вложенных `with` (yml_parser.py), снят пустой f-префикс
   (wildberries.py).
 
-Остаток долга после Round 19 — 73 замечания: `tests/` (45), `alembic/` (9),
-`core/` (7), `database/` (4), `tasks/`, `connectors/` (по 3), `models/`,
-`celery_app.py` (по 1) — мелкие каталоги и тесты, далее закрываются
-последними линиями.
+Round 20 закрыл линию `tests/` (45 замечаний):
+
+- I001 (13) — сортировка импортов, включая объединение дублирующихся
+  `from ... import`-блоков (products_repo, aliexpress) и разделение
+  aliased-импортов по операторам (дефолт ruff `combine-as-imports=false`)
+  в matching/photos/yandex_parser;
+- F401 (18): мёртвый `pytest` в test_wb_specs_split.py удалён (весь файл
+  на `asyncio.run`); остальные 16 — smoke-импорты split-тестов (aliexpress
+  `_sheets`/`_utils`, columns ×7, factory `_smart`, products_repo ×6)
+  помечены `# noqa: F401` с обоснованием: импорт под-модулей/имён путём
+  импортёров и есть проверка разбиения, удаление ослабило бы тест
+  (прецедент round18 — F841 с побочным эффектом сохраняет вызов);
+- B006 — `_patch(payload={"sub": "1", ...})` в test_cookie_auth.py →
+  None-паттерн (все вызовы без аргументов, персистентностью default
+  между вызовами никто не пользуется);
+- B007 (4) — распаковка 6-элементных кортежей YANDEX_TEMPLATE_COLUMNS в
+  test_xlsx_yandex_split.py: неиспользуемые имена с `_`-префиксом,
+  распаковка сохранена — она проверяет арность элементов;
+- SIM300 (4) — yoda-условия развёрнуты (`{...} == pkg.X`,
+  `t == "Статус карточки"`) — коммутативные `==` на set/str;
+- C402/C408/C416/UP012 — `dict(genexpr пар)` → `dict(repo.batches[0])`,
+  `dict(kwargs)` → литерал, `[v for v in x]` → `list(x)`,
+  `.encode("utf-8")` → `.encode()`;
+- F841 — `req = make_request(...)` в test_media_owner_ok удалён (req не
+  использовался, make_request без побочных эффектов);
+- невалидная noqa-директива test_columns_split.py:67 (без списка кодов)
+  убрана — на строке замечаний нет.
+
+Остаток долга после Round 20 — 28 замечаний: `alembic/` (9), `core/` (7),
+`database/` (4), `tasks/`/`connectors/` (по 3), `models/`, `celery_app.py`
+(по 1) — последний эшелон, закрывается финальной линией.
 
 ### Pre-commit
 

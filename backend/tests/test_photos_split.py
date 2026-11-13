@@ -12,6 +12,7 @@ GET /photos/proxy обязан идти раньше параметрическ�
 """
 
 import _route_helpers
+
 import routers.photos as pkg
 from routers.photos._download import start_download_photos as from_download
 from routers.photos._manage import get_photos as from_manage_get
@@ -19,9 +20,17 @@ from routers.photos._manage import set_photos as from_manage_put
 from routers.photos._proxy import proxy_external_photo as from_proxy
 from routers.photos._support import (
     ALLOWED_EXTENSIONS as support_allowed,
+)
+from routers.photos._support import (
     MAX_FILE_SIZE_BYTES as support_max_file,
+)
+from routers.photos._support import (
     MAX_PHOTOS_PER_PRODUCT as support_max_photos,
+)
+from routers.photos._support import (
     PhotosUpdate as support_model,
+)
+from routers.photos._support import (
     _build_public_media_url as from_support,
 )
 from routers.photos._upload import upload_photo_files as from_upload
@@ -76,7 +85,7 @@ def test_public_api_preserved():
     assert pkg.MAX_PHOTOS_PER_PRODUCT is support_max_photos
 
     # лимиты монолита не изменились
-    assert pkg.ALLOWED_EXTENSIONS == {".jpg", ".jpeg", ".png", ".webp"}
+    assert {".jpg", ".jpeg", ".png", ".webp"} == pkg.ALLOWED_EXTENSIONS
     assert pkg.MAX_FILE_SIZE_BYTES == 10 * 1024 * 1024
     assert pkg.MAX_PHOTOS_PER_PRODUCT == 30
     assert pkg.PROXY_MAX_SIZE_BYTES == 10 * 1024 * 1024

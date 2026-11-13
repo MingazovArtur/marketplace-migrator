@@ -8,24 +8,22 @@ routers/templates.py, xlsx_generator/__init__.py: все используют
 сборке книги openpyxl (без сети) по демо-примеру из документации AliExpress.
 """
 
-from services.xlsx_generator.aliexpress import (
-    aliexpress_custom_attr_names,
-    aliexpress_example_products,
-    aliexpress_flat_rows,
-    build_aliexpress_workbook,
-)
-from services.xlsx_generator.aliexpress import (
+from services.xlsx_generator.aliexpress import (  # noqa: F401 — smoke: под-модули разбиения
     _layout,
     _rows,
     _sheets,
     _utils,
     _workbook,
+    aliexpress_custom_attr_names,
+    aliexpress_example_products,
+    aliexpress_flat_rows,
+    build_aliexpress_workbook,
 )
 
 
 def test_public_api_preserved():
-    import services.xlsx_generator.aliexpress as pkg
     import services.xlsx_generator as xg
+    import services.xlsx_generator.aliexpress as pkg
 
     # публичные функции — те же объекты, что в подмодулях
     assert pkg.build_aliexpress_workbook is _workbook.build_aliexpress_workbook

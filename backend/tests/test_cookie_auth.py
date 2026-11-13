@@ -14,7 +14,6 @@ import routers.media as media_router
 from core.auth import get_current_user
 from database.models import User
 
-
 # ---------------------------------------------------------------------------
 # Стабы
 # ---------------------------------------------------------------------------
@@ -70,7 +69,9 @@ def bearer(token: str):
 def patch_decode(monkeypatch):
     """JWT-декодер всегда возвращает валидный payload для юзера 1."""
 
-    def _patch(payload={"sub": "1", "role": "user"}):
+    def _patch(payload=None):
+        if payload is None:
+            payload = {"sub": "1", "role": "user"}
         monkeypatch.setattr(auth_core, "decode_token", lambda token: payload)
 
     return _patch
@@ -179,7 +180,6 @@ def media_dir(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_media_owner_ok(patch_decode, media_dir):
     patch_decode()
-    req = make_request(method="GET", cookies={"access_token": "jwt"})
     # юзер 1 владеет продуктом 1 (БД-стаб возвращает id)
     res = await media_router.get_media(
         "products/1/img-a.jpg", current_user=make_user(1), db=_FakeDB(1)

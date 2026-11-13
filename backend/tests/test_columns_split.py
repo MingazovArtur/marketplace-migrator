@@ -47,7 +47,7 @@ def test_public_api_preserved():
 
 def test_importers_path_unchanged():
     # главный путь импортёров продолжает работать буквально
-    from services.xlsx_generator.columns import (
+    from services.xlsx_generator.columns import (  # noqa: F401 — импорт всех имён путём импортёров и есть тест
         BRAND_NAMES,
         CELL_BORDER,
         DICT_LIMIT,
@@ -64,7 +64,7 @@ def test_importers_path_unchanged():
         YM_HINT_FILL,
     )
 
-    assert BRAND_NAMES and CELL_BORDER and DICT_LIMIT  # noqa: городим использование
+    assert BRAND_NAMES and CELL_BORDER and DICT_LIMIT
     assert all(x is not None for x in (G_ATTRS, G_UNION, G_VARIANT, HEADER_FONT))
 
 
@@ -72,8 +72,8 @@ def test_common_constants():
     assert pkg.DATA_START_ROW == 5
     assert pkg.DICT_LIMIT == 5000
     assert pkg.VAT_LABELS == {"none": "Не облагается", "22": "22", "10": "10", "7": "7", "5": "5"}
-    assert pkg.BRAND_NAMES == {"бренд", "бренд в одежде и обуви", "брендодеждыиобуви"}
-    assert pkg.RECOMMENDED_ONLY == {"российский размер", "пол"}
+    assert {"бренд", "бренд в одежде и обуви", "брендодеждыиобуви"} == pkg.BRAND_NAMES
+    assert {"российский размер", "пол"} == pkg.RECOMMENDED_ONLY
 
 
 def test_ozon_columns_integrity():

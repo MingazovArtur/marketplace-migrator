@@ -18,6 +18,8 @@ from services.xlsx_generator.yandex._instruction import (
 )
 from services.xlsx_generator.yandex._values import (
     _guess_yandex_category as from_values_guess,
+)
+from services.xlsx_generator.yandex._values import (
     _yandex_cell_value as from_values_cell,
 )
 
@@ -116,7 +118,7 @@ def test_instruction_sheet_steps():
     texts = [str(ws.cell(row=r, column=1).value or "") for r in range(1, ws.max_row + 1)]
     assert any("Шаг 2. Загрузите шаблон в систему" in t for t in texts)
     assert any("Шаг 3. Дождитесь проверки ассортимента" in t for t in texts)
-    assert any("Статус карточки" == t for t in texts)
+    assert any(t == "Статус карточки" for t in texts)
     assert "Подробнее о статусах можно узнать в Справке." in texts
 
 
@@ -135,7 +137,7 @@ def test_workbook_writes_product_data():
     wb = from_book(products)
     ws = wb["Список товаров"]
     # колонка с key="name" и key="price" заполняется в строке 4
-    for col_idx, (header, key, required, is_gray, group_title, hint) in enumerate(
+    for col_idx, (_header, key, _required, is_gray, _group_title, _hint) in enumerate(
         YANDEX_TEMPLATE_COLUMNS, start=1
     ):
         if is_gray:

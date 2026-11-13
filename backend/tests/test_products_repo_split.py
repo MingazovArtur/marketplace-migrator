@@ -11,10 +11,10 @@ repository/variants.py и repository/attributes.py (обращаются к
 
 from decimal import Decimal
 
-from database.models import Product, ProductVariant
-from database.repository.products import ProductRepository, repo
 import database.repository.products as pkg
-from database.repository.products import (
+from database.models import Product, ProductVariant
+from database.repository.products import (  # noqa: F401 — smoke: под-модули миксинов
+    ProductRepository,
     _async_reads,
     _bulk_import,
     _filters,
@@ -22,6 +22,7 @@ from database.repository.products import (
     _serialize,
     _sync_reads,
     _writes,
+    repo,
 )
 
 ALL_METHODS = {
@@ -66,7 +67,8 @@ def test_public_api_preserved():
 
 def test_repository_package_reexport_is_same_object():
     # from database.repository import repo — тот же экземпляр (импортёр __init__.py не менялся)
-    from database.repository import ProductRepository as PR2, repo as repo2
+    from database.repository import ProductRepository as PR2
+    from database.repository import repo as repo2
 
     assert PR2 is ProductRepository
     assert repo2 is repo

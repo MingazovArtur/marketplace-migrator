@@ -7,11 +7,15 @@ preview_file, get_parser` (не менялся); дальше `from parsers impo
 """
 
 import parsers.factory as pkg
-import parsers.factory._smart as smart_mod
+import parsers.factory._smart as smart_mod  # noqa: F401 — smoke: под-модуль разбиения
 from parsers.base import BaseFileParser
 from parsers.factory._api import (
     get_parser as from_api_get,
+)
+from parsers.factory._api import (
     parse_file as from_api_parse,
+)
+from parsers.factory._api import (
     preview_file as from_api_preview,
 )
 from parsers.factory._registry import PARSERS as from_registry_parsers

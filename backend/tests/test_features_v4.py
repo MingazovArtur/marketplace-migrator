@@ -17,7 +17,6 @@ if str(BACKEND_DIR) not in sys.path:
 from routers.profiles import MigrationProfilePayload  # noqa: E402
 from routers.tnved import BATCH_LIMIT, _aggregate_codes  # noqa: E402
 
-
 # ==================== _aggregate_codes (массовый ТН ВЭД) ====================
 
 def test_aggregate_codes_counts_and_orders():

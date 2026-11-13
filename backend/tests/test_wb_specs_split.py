@@ -9,8 +9,6 @@ refresh_wildberries_specs`. Поведение проверяем без сет�
 
 import asyncio
 
-import pytest
-
 
 def test_public_api_preserved():
     import services.wb_specs as pkg

@@ -414,7 +414,7 @@ def test_batch_task_mixed_package(monkeypatch):
 
     # финальные статусы — ОДНИМ update_batch (P-3)
     assert len(repo.batches) == 1
-    updates = dict((pid, data) for pid, data in repo.batches[0])
+    updates = dict(repo.batches[0])
     assert updates[1]["status"] == "success"
     assert updates[1]["price"] == 1000.0
     assert updates[1]["source"] == "Магнит Маркет (Файл) → Ozon"

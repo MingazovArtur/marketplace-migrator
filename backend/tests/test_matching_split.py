@@ -19,15 +19,25 @@ import tasks.matching._cache as cache_mod
 import tasks.matching._match as match_mod
 from tasks.matching._attrs import (
     CANON_ATTRS as attrs_CANON_ATTRS,
+)
+from tasks.matching._attrs import (
     TNVED_NAMES as attrs_TNVED_NAMES,
+)
+from tasks.matching._attrs import (
     _ensure_canonical_attributes as from_attrs,
 )
 from tasks.matching._cache import _spec_cache_invalidate as from_cache
 from tasks.matching._match import _pick_target_category as from_match
 from tasks.matching._text import (
     _base_source as text_base_source,
+)
+from tasks.matching._text import (
     _norm_name,
+)
+from tasks.matching._text import (
     _safe_float as text_safe_float,
+)
+from tasks.matching._text import (
     _stem_ru as text_stem_ru,
 )
 
