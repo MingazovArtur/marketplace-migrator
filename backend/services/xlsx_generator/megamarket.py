@@ -24,7 +24,6 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from services.template_filler import (
     _build_enum_fix,
     _expand_products_for_platform,
-    _norm,
     _row_values,
 )
 

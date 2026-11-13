@@ -77,7 +77,7 @@ def build_aliexpress_workbook(products: list, spec: dict | None = None) -> Workb
         end_row=BLOCK_ROW,
         end_column=custom_start + n_custom - 1,
     )
-    c_sku = ws.cell(row=BLOCK_ROW, column=sku_start, value=AE_SKU_BLOCK)
+    ws.cell(row=BLOCK_ROW, column=sku_start, value=AE_SKU_BLOCK)
     ws.merge_cells(
         start_row=BLOCK_ROW,
         start_column=sku_start,
@@ -126,7 +126,7 @@ def build_aliexpress_workbook(products: list, spec: dict | None = None) -> Workb
         if a.get("name") and a.get("values"):
             spec_values.setdefault(_norm(a["name"]), a["values"])
 
-    for header, required, _hint, key in AE_MAIN_COLUMNS + AE_SKU_COLUMNS:
+    for header, _required, _hint, _key in AE_MAIN_COLUMNS + AE_SKU_COLUMNS:
         values = spec_values.get(_norm(header))
         if not values or len(values) < 2:
             continue

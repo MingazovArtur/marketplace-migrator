@@ -231,7 +231,6 @@ async def send_batch_migration_email(
             "service_name": settings.SMTP_FROM_NAME,
         },
     )
-    status_word = "успешно" if errors == 0 else f"с ошибками ({errors})"
     return await _send_email(
         to_email=to_email,
         subject=f"Пакетная миграция завершена: {success} из {total} — {settings.SMTP_FROM_NAME}",

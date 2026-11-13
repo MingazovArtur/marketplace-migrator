@@ -29,17 +29,17 @@ refresh_wildberries_specs` (импортёр tasks/catalog_tasks.py не мен�
 константы доступны на пакете, как и в монолите.
 """
 
-from services.wb_specs._http import WB_API_BASE, _wb_headers
+from services.wb_specs._characteristics import (
+    fetch_wb_characteristics,
+    fetch_wb_directory,
+)
+from services.wb_specs._http import WB_API_BASE
 from services.wb_specs._refresh import (
     PROGRESS_EVERY,
     WB_REQUEST_DELAY,
     refresh_wildberries_specs,
 )
 from services.wb_specs._subjects import fetch_wb_subjects
-from services.wb_specs._characteristics import (
-    fetch_wb_characteristics,
-    fetch_wb_directory,
-)
 
 __all__ = [
     # Публичный API

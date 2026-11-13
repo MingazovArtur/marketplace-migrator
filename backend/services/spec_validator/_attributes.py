@@ -19,8 +19,8 @@ import json
 import re
 
 from services.spec_validator._canon import (
-    CANON_LABELS,
     _SYNONYM_INDEX,
+    CANON_LABELS,
     _is_canon_attr,
     _norm_name,
 )

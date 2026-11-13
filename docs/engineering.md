@@ -83,11 +83,36 @@ Round 17 закрыл линию `routers/` (п. 3): `backend/routers/` чист
   и перевод строки в конце файла (`defaults.py`, `templates.py`,
   `import_router/_file_import.py`).
 
-Остаток долга после Round 17 — 249 замечаний: `parsers/` (145),
-`tests/` (45), `services/` (31), `alembic/` (9), `core/` (7), `database/` (4),
-`tasks/`, `connectors/` (по 3), `models/`, `celery_app.py` (по 1). Порядок
-дальше: `services/` → `parsers/` (план п. 3), затем остатки — один каталог —
-один PR.
+Round 18 закрыл линию `services/` (31 замечание — см. выше):
+
+- B007/B905/UP006/UP035/UP045/E712/I001/W292 — правки в духе
+  Round 17 (E712: SQLAlchemy-фильтр `Category.is_active == True` →
+  `.is_(True)` — каноничное `IS true`, NULL-строки не проходят так же);
+- B905: `zip(..., strict=...)` — `strict=True` только там, где равенство
+  длин гарантировано конструкцией (`asyncio.gather` возвращает ровно по
+  результату на задачу, `ozon_specs/_attributes.py`); `strict=False` —
+  там, где усечение по короткому — текущее поведение (`xlsx_io.write_columns`
+  принимает произвольный dict-of-columns);
+- F841 — мёртвые переменные удалены (`warning`/`normalized_flag` в
+  attribute_normalizer — никогда не читались, `status_word` в email_service);
+  `c_sku` в aliexpress/_workbook: вызов `ws.cell(...)` с побочным эффектом
+  (создаёт ячейку) сохранён, убрано только имя;
+- F401 — мёртвые импорты: `_norm` в xlsx_generator/megamarket.py,
+  `_wb_headers` в wb_specs/__init__.py (тесты ходят напрямую в
+  `services.wb_specs._http`, публичный `__all__` не менялся);
+- F601 — 4 дубликата ключей в TNVED-справочнике (`видеорегистратор`,
+  `крекеры`, `уайт-спирит`, `ацетон`) — данные монолита 1:1, помечены
+  `# noqa: F601`: в dict-литерале ключ встаёт на позицию первого вхождения,
+  значение — последнего; порядок ключей материален
+  (test_key_order_and_cross_values), удаление любого вхождения меняло бы
+  позицию или значение;
+- SIM105 — `media_service.py`: закрытие HTTP-ответа через
+  `contextlib.suppress(Exception)`.
+
+Остаток долга после Round 18 — 218 замечаний: `parsers/` (145),
+`tests/` (45), `alembic/` (9), `core/` (7), `database/` (4), `tasks/`,
+`connectors/` (по 3), `models/`, `celery_app.py` (по 1). Порядок
+дальше: `parsers/` (план п. 3), затем остатки — один каталог — один PR.
 
 ### Pre-commit
 

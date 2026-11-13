@@ -18,7 +18,7 @@ def load_categories_from_db(platform: str) -> list[dict]:
     try:
         categories = (
             db.query(Category)
-            .filter(Category.platform == platform, Category.is_active == True)
+            .filter(Category.platform == platform, Category.is_active.is_(True))
             .all()
         )
         return [

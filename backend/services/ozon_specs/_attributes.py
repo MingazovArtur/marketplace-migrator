@@ -42,7 +42,7 @@ async def _fetch_values(
     last_value_id = 0
 
     try:
-        for page in range(MAX_DICT_PAGES):
+        for _page in range(MAX_DICT_PAGES):
             data = await _post(
                 client,
                 sem,
@@ -239,7 +239,7 @@ async def _build_spec(
             *(coro for _, coro in dict_tasks),
             return_exceptions=True,
         )
-        for (idx, _), res in zip(dict_tasks, results):
+        for (idx, _), res in zip(dict_tasks, results, strict=True):
             if isinstance(res, Exception):
                 logger.warning(f"Словарь не загружен {desc_id}/{mapped[idx]['id']}: {res}")
                 mapped[idx]["values"] = []

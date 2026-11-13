@@ -50,8 +50,6 @@ def normalize_attributes(
         spec_attr = spec_attrs.get(attr_name.lower())
 
         new_value = attr_value
-        normalized_flag = False
-        warning = None
 
         if spec_attr and attr_value:
             allowed_values = spec_attr.get("values") or []
@@ -76,7 +74,6 @@ def normalize_attributes(
                                     "normalized": matched,
                                 }
                             )
-                            normalized_flag = True
                         if matched is None:
                             warnings.append(
                                 {
@@ -100,7 +97,6 @@ def normalize_attributes(
                             }
                         )
                         new_value = matched
-                        normalized_flag = True
                     elif matched is None:
                         warnings.append(
                             {

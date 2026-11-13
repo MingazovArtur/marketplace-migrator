@@ -7,12 +7,10 @@ TNVED_DATABASE — склейка из _database.py (тот же объект, �
 tests/test_tnved_mapper_split.py).
 """
 
-from typing import Dict, List, Optional
-
 from services.tnved_mapper._database import TNVED_DATABASE
 
 
-def suggest_tnved(name: str, category: str = "") -> List[Dict[str, str]]:
+def suggest_tnved(name: str, category: str = "") -> list[dict[str, str]]:
     """
     Ищет наиболее подходящий код ТН ВЭД по названию и категории товара.
 
@@ -46,7 +44,7 @@ def suggest_tnved(name: str, category: str = "") -> List[Dict[str, str]]:
     return matches[:3]  # Возвращаем топ-3 наиболее вероятных варианта
 
 
-def get_tnved_description(code: str) -> Optional[str]:
+def get_tnved_description(code: str) -> str | None:
     """Возвращает описание по точному коду ТН ВЭД."""
     for data in TNVED_DATABASE.values():
         if data["code"] == code:
@@ -54,7 +52,7 @@ def get_tnved_description(code: str) -> Optional[str]:
     return None
 
 
-def search_tnved(query: str) -> List[Dict[str, str]]:
+def search_tnved(query: str) -> list[dict[str, str]]:
     """
     Поиск по справочнику ТН ВЭД по произвольному запросу.
 

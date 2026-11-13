@@ -35,7 +35,7 @@ def write_rows(wb: Workbook, sheet_name: str, rows: list[dict], columns: list | 
 
 def write_columns(wb: Workbook, sheet_name: str, data: dict[str, list]):
     """ДОБАВЛЯЕТ новый лист из dict-of-columns (pd.DataFrame({...}))."""
-    rows = [dict(zip(data.keys(), values)) for values in zip(*data.values())]
+    rows = [dict(zip(data.keys(), values, strict=False)) for values in zip(*data.values(), strict=False)]
     return write_rows(wb, sheet_name, rows, columns=list(data.keys()))
 
 

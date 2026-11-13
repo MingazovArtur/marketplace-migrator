@@ -10,6 +10,7 @@
   (169.254.169.254, localhost, db, redis, приватные сети) заблокировано.
 """
 
+import contextlib
 import hashlib
 import logging
 import os
@@ -115,10 +116,8 @@ def download_single_photo(
         return None
     finally:
         if resp is not None:
-            try:
+            with contextlib.suppress(Exception):
                 resp.close()
-            except Exception:
-                pass
         if own_session:
             sess.close()
 
