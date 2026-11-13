@@ -95,44 +95,43 @@ class YmlParser:
                 timeout=30,
                 # follow_redirects по умолчанию выключен — защита от SSRF-редиректа на внутренний IP
                 headers={"User-Agent": "Mozilla/5.0 (Marketplace Migrator Bot)"},
-            ) as client:
-                with client.stream("GET", url) as response:
-                    if response.is_redirect or response.status_code in (301, 302, 303, 307, 308):
-                        redirect_url = response.headers.get("Location", "")
-                        if not self.validate_url(redirect_url):
-                            raise ValueError("Редирект фида ведёт на недопустимый адрес")
-                        return self.fetch_and_parse(redirect_url)
+            ) as client, client.stream("GET", url) as response:
+                if response.is_redirect or response.status_code in (301, 302, 303, 307, 308):
+                    redirect_url = response.headers.get("Location", "")
+                    if not self.validate_url(redirect_url):
+                        raise ValueError("Редирект фида ведёт на недопустимый адрес")
+                    return self.fetch_and_parse(redirect_url)
 
-                    response.raise_for_status()
+                response.raise_for_status()
 
-                    content_type = response.headers.get("Content-Type", "").lower()
-                    if "xml" not in content_type and "text" not in content_type:
-                        logger.warning(
-                            f"⚠️ Нестандартный Content-Type: {content_type}, пробуем парсить"
-                        )
+                content_type = response.headers.get("Content-Type", "").lower()
+                if "xml" not in content_type and "text" not in content_type:
+                    logger.warning(
+                        f"⚠️ Нестандартный Content-Type: {content_type}, пробуем парсить"
+                    )
 
-                    chunks = []
-                    total_bytes = 0
-                    for chunk in response.iter_bytes(chunk_size=64 * 1024):
-                        if not chunk:
-                            continue
-                        total_bytes += len(chunk)
-                        if total_bytes > MAX_YML_SIZE_BYTES:
-                            raise ValueError("Размер YML-фида превышает допустимый лимит (25 МБ)")
-                        chunks.append(chunk)
+                chunks = []
+                total_bytes = 0
+                for chunk in response.iter_bytes(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_YML_SIZE_BYTES:
+                        raise ValueError("Размер YML-фида превышает допустимый лимит (25 МБ)")
+                    chunks.append(chunk)
 
-                    content = b"".join(chunks)
+                content = b"".join(chunks)
 
             return self._parse_xml(content, url)
 
         except httpx.TimeoutException:
-            raise ValueError("Таймаут при загрузке фида (лимит 30 секунд)")
+            raise ValueError("Таймаут при загрузке фида (лимит 30 секунд)") from None
         except httpx.TransportError:
-            raise ValueError("Не удалось подключиться к серверу. Проверьте URL.")
+            raise ValueError("Не удалось подключиться к серверу. Проверьте URL.") from None
         except httpx.HTTPStatusError as e:
-            raise ValueError(f"HTTP ошибка {e.response.status_code}: {url}")
+            raise ValueError(f"HTTP ошибка {e.response.status_code}: {url}") from e
         except ElementTree.ParseError as e:
-            raise ValueError(f"Ошибка парсинга XML: {e}")
+            raise ValueError(f"Ошибка парсинга XML: {e}") from e
 
     def _parse_xml(self, content: bytes, source_url: str) -> dict:
         """Парсит XML-содержимое YML-фида с защитой от XML Bomb (ENTITY)."""
@@ -144,7 +143,7 @@ class YmlParser:
         try:
             root = ElementTree.fromstring(content)
         except ElementTree.ParseError as e:
-            raise ValueError(f"Невалидный XML: {e}")
+            raise ValueError(f"Невалидный XML: {e}") from e
 
         shop = root.find(".//shop")
         if shop is None:

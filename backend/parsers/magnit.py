@@ -2,13 +2,17 @@
 Парсер файлов Магнит Маркет (XLSX).
 """
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 from .base import BaseFileParser, ParseResult
 from .tables import ExcelBook, Table
 from .utils import (
-    clean_value, find_column, split_photos, parse_price, parse_stock,
-    is_service_row, SERVICE_MARKERS
+    clean_value,
+    find_column,
+    is_service_row,
+    parse_price,
+    parse_stock,
+    split_photos,
 )
 
 logger = logging.getLogger(__name__)
@@ -16,15 +20,15 @@ logger = logging.getLogger(__name__)
 
 class MagnitFileParser(BaseFileParser):
     """Парсер файлов Магнит Маркет."""
-    
+
     @property
     def platform(self) -> str:
         return "magnit"
-    
+
     @property
-    def supported_formats(self) -> List[str]:
+    def supported_formats(self) -> list[str]:
         return ["xlsx"]
-    
+
     def parse(self, file_content: bytes, file_type: str) -> ParseResult:
         if file_type != "xlsx":
             raise ValueError("Для Магнит Маркета поддерживается только формат XLSX")
@@ -81,7 +85,7 @@ class MagnitFileParser(BaseFileParser):
         data.columns = headers
 
         # Фильтрация служебных строк (сохраняем исходные индексы для номеров строк)
-        filtered_rows: List[tuple[int, Any]] = []
+        filtered_rows: list[tuple[int, Any]] = []
         for idx, row in data.iterrows():
             row_text = " ".join(str(v).lower() for v in row.values if v is not None)
             if is_service_row(row_text):
@@ -102,7 +106,7 @@ class MagnitFileParser(BaseFileParser):
             )
 
         filtered_df = Table(columns=headers, rows=[row.values for _, row in filtered_rows])
-        
+
         # Маппинг колонок Магнит
         magnit_mapping = {
             "name": ["Название товара", "Название", "Наименование"],
@@ -120,7 +124,7 @@ class MagnitFileParser(BaseFileParser):
             "okpd2": ["ОКПД2"],
             "tn_ved": ["ТН ВЭД", "ТНВЭД"],
         }
-        
+
         cols = list(filtered_df.columns)
         name_col = find_column(cols, magnit_mapping["name"])
         price_col = find_column(cols, magnit_mapping["price"])
@@ -136,38 +140,38 @@ class MagnitFileParser(BaseFileParser):
         stock_col = find_column(cols, magnit_mapping["stock"])
         okpd2_col = find_column(cols, magnit_mapping["okpd2"])
         tn_ved_col = find_column(cols, magnit_mapping["tn_ved"])
-        
+
         if not name_col:
             raise ValueError("Не найдена колонка 'Название товара' в файле Магнит Маркета")
-        
-        products: List[Dict] = []
-        errors: List[Dict] = []
-        
+
+        products: list[dict] = []
+        errors: list[dict] = []
+
         for orig_idx, row in filtered_rows:
             row_num = orig_idx + 2
             name = clean_value(row.get(name_col))
-            
+
             if not name:
                 errors.append({"row": row_num, "error": "Пустое название товара"})
                 continue
-            
+
             price = parse_price(clean_value(row.get(price_col))) if price_col else 0.0
-            
-            photos: List[str] = []
+
+            photos: list[str] = []
             if photo_col:
                 photos.extend(split_photos(clean_value(row.get(photo_col))))
             if photo_sku_col:
                 photos.extend(split_photos(clean_value(row.get(photo_sku_col))))
             photos = list(dict.fromkeys(photos))[:10]
-            
+
             description = clean_value(row.get(desc_col)) if desc_col else ""
             if not description and short_desc_col:
                 description = clean_value(row.get(short_desc_col))
-            
+
             sku = clean_value(row.get(sku_col)) if sku_col else ""
             if not sku and barcode_col:
                 sku = clean_value(row.get(barcode_col))
-            
+
             product = {
                 "name": name,
                 "price": price,
@@ -183,14 +187,14 @@ class MagnitFileParser(BaseFileParser):
                 "tn_ved": clean_value(row.get(tn_ved_col)) if tn_ved_col else "",
             }
             products.append(product)
-        
+
         warnings = []
         if products and all(p["price"] == 0 for p in products):
             warnings.append({
                 "type": "magnit_no_price",
                 "message": "В файле Магнит Маркета нет цен или все цены равны 0. Задайте цены вручную после импорта.",
             })
-        
+
         return ParseResult(
             products=products,
             errors=errors,

@@ -56,7 +56,9 @@ class Row:
             return default
 
     def to_dict(self) -> dict:
-        return dict(zip(self._columns, self.values))
+        # strict=False — прежнее поведение: если Row собран с непрямоугольными
+        # данными, тихое усечение по короткой стороне (не исключение)
+        return dict(zip(self._columns, self.values, strict=False))
 
 
 class Table:
@@ -101,9 +103,11 @@ class Table:
     def dropna_all(self) -> "Table":
         """Аналог df.dropna(how='all'): выкидывает строки целиком из None,
         сохраняя исходные индексы оставшихся (как pandas)."""
+        # strict=True — инвариант класса: _indices всегда длины _rows
+        # (конструктор и copy/dropna_all/iloc держат их согласованно)
         kept = [
             (idx, r)
-            for idx, r in zip(self._indices, self._rows)
+            for idx, r in zip(self._indices, self._rows, strict=True)
             if any(v is not None for v in r)
         ]
         t = Table(self.columns, [r for _, r in kept])

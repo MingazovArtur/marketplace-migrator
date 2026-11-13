@@ -53,7 +53,7 @@ class YandexFileParser(BaseFileParser):
         try:
             wb = openpyxl.load_workbook(io.BytesIO(file_content), data_only=True)
         except Exception as e:
-            raise ValueError(f"Не удалось открыть XLSX файл Яндекс Маркета: {e}")
+            raise ValueError(f"Не удалось открыть XLSX файл Яндекс Маркета: {e}") from e
 
         # Ищем лист с товарами («Список товаров», «Товары», «Офферы» или первый не-служебный лист)
         preferred_sheets = ("Список товаров", "Товары", "Офферы", "Шаблон")
@@ -169,7 +169,9 @@ class YandexFileParser(BaseFileParser):
             if is_service_row(row_text) or any(m in row_text for m in YANDEX_SKIP_MARKERS):
                 continue
 
-            def get_val(k: str) -> str:
+            def get_val(k: str, *, row=row) -> str:
+                # row=row: раннее связывание переменной цикла (B023) —
+                # get_val вызывается только внутри своей итерации
                 idx = col_indices.get(k)
                 if idx is not None and idx < len(row):
                     return clean_value(row[idx])

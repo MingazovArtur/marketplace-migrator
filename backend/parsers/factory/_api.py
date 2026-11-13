@@ -3,7 +3,7 @@
 Вынесено без изменений из монолита parsers/factory.py (Р25).
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from parsers.base import BaseFileParser, ParseResult
 from parsers.factory._registry import PARSERS
@@ -58,7 +58,7 @@ def parse_file(file_content: bytes, platform: str, file_type: str) -> ParseResul
 
 def preview_file(
     file_content: bytes, platform: str, file_type: str, max_rows: int = 10
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Возвращает превью первых строк файла для предпросмотра перед импортом.
     """

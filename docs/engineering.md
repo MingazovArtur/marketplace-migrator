@@ -109,10 +109,33 @@ Round 18 закрыл линию `services/` (31 замечание — см. в
 - SIM105 — `media_service.py`: закрытие HTTP-ответа через
   `contextlib.suppress(Exception)`.
 
-Остаток долга после Round 18 — 218 замечаний: `parsers/` (145),
-`tests/` (45), `alembic/` (9), `core/` (7), `database/` (4), `tasks/`,
-`connectors/` (по 3), `models/`, `celery_app.py` (по 1). Порядок
-дальше: `parsers/` (план п. 3), затем остатки — один каталог — один PR.
+Round 19 закрыл линию `parsers/` (145 замечаний — финальная линия плана п. 3):
+
+- W293/W292/I001/UP006/UP035/UP045/F401 — хвостовые пробелы (включая
+  пустые строки внутри docstring — ruff их не чинит автоматически,
+  почищены вручную: docstring не читается в рантайме), EOF-newline,
+  сортировка импортов, `typing.Dict/List/Optional` → `dict/list/str | None`,
+  мёртвые импорты (`typing.Optional/Any`, `utils.SERVICE_MARKERS`,
+  `utils.find_column`) — безопасные фиксы ruff + ручные docstring'и;
+- B904 (7): `raise ... from e` (или `from None` для `TimeoutException`/
+  `TransportError` без переменной) в ozon.py, yandex/_parser.py,
+  yml_parser.py (×5);
+- B023 (4): `get_val` в ozon.py и yandex/_parser.py — раннее связывание
+  переменной цикла дефолт-аргументом (`def get_val(key, *, row=row)`):
+  get_val вызывается только внутри своей итерации, поведение 1:1,
+  но замыкание больше не зависит от позднего связывания;
+- B905 (2): `Row.to_dict` → `strict=False` (Row может быть собран с
+  непрямоугольными данными — прежнее тихое усечение сохранено),
+  `Table.dropna_all` → `strict=True` (инвариант класса: `_indices`
+  всегда длины `_rows`, конструктор/copy/dropna_all/iloc согласованы);
+- SIM102/SIM117/F541 — объединение вложенных `if` (factory/_smart.py),
+  объединение вложенных `with` (yml_parser.py), снят пустой f-префикс
+  (wildberries.py).
+
+Остаток долга после Round 19 — 73 замечания: `tests/` (45), `alembic/` (9),
+`core/` (7), `database/` (4), `tasks/`, `connectors/` (по 3), `models/`,
+`celery_app.py` (по 1) — мелкие каталоги и тесты, далее закрываются
+последними линиями.
 
 ### Pre-commit
 

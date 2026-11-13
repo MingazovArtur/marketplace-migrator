@@ -4,12 +4,18 @@
 """
 import io
 import logging
-from typing import Dict, List, Optional, Any
+
 import openpyxl
+
 from .base import BaseFileParser, ParseResult
 from .utils import (
-    clean_value, find_column, split_photos, parse_price,
-    clean_vat, parse_int, clean_okpd, is_service_row, SERVICE_MARKERS
+    clean_okpd,
+    clean_value,
+    clean_vat,
+    is_service_row,
+    parse_int,
+    parse_price,
+    split_photos,
 )
 
 logger = logging.getLogger(__name__)
@@ -17,27 +23,27 @@ logger = logging.getLogger(__name__)
 
 class OzonFileParser(BaseFileParser):
     """Парсер файлов Ozon (шаблоны и отчёты)."""
-    
+
     @property
     def platform(self) -> str:
         return "ozon"
-    
+
     @property
-    def supported_formats(self) -> List[str]:
+    def supported_formats(self) -> list[str]:
         return ["xlsx"]
-    
+
     def parse(self, file_content: bytes, file_type: str) -> ParseResult:
         if file_type != "xlsx":
             raise ValueError("Для Ozon поддерживается только формат XLSX")
-        
+
         try:
             wb = openpyxl.load_workbook(io.BytesIO(file_content), data_only=True)
         except Exception as e:
-            raise ValueError(f"Не удалось открыть XLSX файл: {e}")
-        
+            raise ValueError(f"Не удалось открыть XLSX файл: {e}") from e
+
         sheet_name = "Шаблон" if "Шаблон" in wb.sheetnames else wb.sheetnames[0]
         ws = wb[sheet_name]
-        
+
         # 1. Поиск строки заголовков
         header_row_idx = None
         for idx, row in enumerate(ws.iter_rows(min_row=1, max_row=50, values_only=True)):
@@ -45,14 +51,14 @@ class OzonFileParser(BaseFileParser):
             if "артикул" in row_text and "название товара" in row_text:
                 header_row_idx = idx + 1
                 break
-        
+
         if header_row_idx is None:
             raise ValueError("Не найдена строка заголовков (Артикул, Название товара) в файле Ozon")
-        
+
         # 2. Маппинг колонок
         header_cells = list(ws[header_row_idx])
         headers = [str(cell.value).strip() if cell.value else f"col_{i}" for i, cell in enumerate(header_cells)]
-        
+
         ozon_mapping = {
             "name": ["название товара", "название"],
             "price": ["предельная цена без акций, руб.", "цена на сайте, ₽", "цена"],
@@ -70,7 +76,7 @@ class OzonFileParser(BaseFileParser):
             "category": ["категория"],
             "description": ["аннотация", "описание"],
         }
-        
+
         col_indices = {}
         for key, candidates in ozon_mapping.items():
             for i, h in enumerate(headers):
@@ -78,36 +84,38 @@ class OzonFileParser(BaseFileParser):
                 if any(cand in h_lower for cand in candidates):
                     col_indices[key] = i
                     break
-        
+
         if "name" not in col_indices or "sku" not in col_indices:
             raise ValueError("Не найдены обязательные колонки 'Артикул' или 'Название товара'")
-        
+
         products = []
         errors = []
-        
+
         # 3. Чтение данных
         for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
             row_text = " ".join(str(cell).lower() for cell in row if cell is not None)
-            
+
             if is_service_row(row_text) or not any(cell for cell in row):
                 continue
-            
-            def get_val(key):
+
+            def get_val(key, *, row=row):
+                # row=row: раннее связывание переменной цикла (B023) —
+                # get_val вызывается только внутри своей итерации
                 idx = col_indices.get(key)
                 if idx is not None and idx < len(row):
                     val = row[idx]
                     return clean_value(val)
                 return ""
-            
+
             sku = get_val("sku")
             name = get_val("name")
-            
+
             if not sku and not name:
                 continue
             if not name:
                 errors.append({"row": row_idx, "error": "Пустое название товара"})
                 continue
-            
+
             # Парсинг полей
             price = parse_price(get_val("price"))
             photos = []
@@ -118,7 +126,7 @@ class OzonFileParser(BaseFileParser):
             if add_photos:
                 photos.extend(split_photos(add_photos))
             photos = list(dict.fromkeys(photos))[:15]
-            
+
             product = {
                 "name": name,
                 "price": price,
@@ -137,9 +145,9 @@ class OzonFileParser(BaseFileParser):
                 "okpd_code": clean_okpd(get_val("okpd")),
             }
             products.append(product)
-        
+
         wb.close()
-        
+
         return ParseResult(
             products=products,
             errors=errors,
