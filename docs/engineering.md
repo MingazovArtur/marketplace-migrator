@@ -43,7 +43,7 @@ npm run test       # Vitest: хук debounce, чистые функции api/cl
 ```bash
 cd backend
 make lint          # CI-гейт: только критические правила (E9,F63,F7,F82)
-make lint-full     # полный набор из pyproject.toml (весь код пока не проходит)
+make lint-full     # полный набор из pyproject.toml (чист с Round 21)
 make format        # black + ruff --fix
 
 cd ../frontend
@@ -249,7 +249,42 @@ bcrypt 5.0.0, python-multipart 0.0.33): все контрольные прого
 (`pip install --dry-run` — nothing to install). Гейты после правки:
 `pip check` — 0 broken, ruff/CI-гейт 0, pytest 338, OpenAPI-снапшот
 идентичен (100 маршрутов, sha256 неизменен). Остаток линии: frontend-npm
-(включая миграцию eslint 10 на flat config), Actions, Docker.
+(включая миграцию eslint на flat config), Actions, Docker.
+
+Round 25 закрыл frontend-npm часть (PR #12, #15, #16):
+
+- обновлены react/react-dom 19.3.1, @types 19.3, vite 8.3,
+  @vitejs/plugin-react 6.3, eslint-plugin-react-refresh 0.5.7,
+  eslint-plugin-react 7.37.5, oxlint; добавлены явно `@eslint/js`,
+  `globals`, `@testing-library/dom` (peer у jest-dom@7 и
+  @testing-library/react@16, устанавливается только при явном объявлении);
+- `.eslintrc.json` → `eslint.config.js` (flat config — с ESLint 9 формат
+  по умолчанию, eslintrc-файлы не читаются): тот же набор правил
+  (`eslint:recommended` + `plugin:react/recommended` + `prettier` последним;
+  env browser/node/es2021 → `globals` + `ecmaVersion: latest`); lint-скрипт
+  без удалённого флага `--ext`; pre-commit eslint-хук аналогично;
+- **eslint-plugin-react-hooks 5→7**: v7 расширил recommended-пресет
+  15 compiler-правилами (purity, immutability, refs, …) в error — чтобы
+  обновление НЕ меняло набор проверок, подключены только правила пресета
+  v5 (rules-of-hooks error, exhaustive-deps warn); включение compiler-правил
+  v7 — отдельная линия долга с анализом каждого замечания;
+- **PR #14 (eslint 10) не мержится**: последний eslint-plugin-react 7.37.5
+  не поддерживает ESLint 10 (peer `^9.7`; detect-путь вызывает удалённый
+  `context.getFilename()`) — его мерж сломал бы `npm ci` (ERESOLVE) и
+  линт. ESLint остаётся на 9.39.5; когда плагин выпустит поддержку 10.x —
+  минорный раунд (в recommended 10 добавлено `preserve-caught-error`:
+  throw в catch должен сохранять caught-ошибку в `cause` — правка одной
+  строки в `api/sse.js` при переходе);
+- единственная правка кода под новый recommended: `catch (e) { /* ignore */ }`
+  → `catch {` в onboardingStorage.js (`no-unused-vars` в ESLint 9+
+  проверяет caught-переменные — caughtErrors: all; optional catch binding,
+  поведение 1:1).
+
+Гейты Round 25: `npm run lint` 0/0 (exit 0), Vitest 34, build, prettier —
+зелёные; `npm ci` на чистой копии без флагов — успешно (peer-дерево
+конфликтов не имеет); backend-гейты контрольные зелёные (pytest 338,
+OpenAPI-снапшот идентичен). Остаток линии: Actions (PR #2, #4, #5, #7),
+Docker (PR #1, #3, #6).
 
 ## 2. CI (GitHub Actions)
 

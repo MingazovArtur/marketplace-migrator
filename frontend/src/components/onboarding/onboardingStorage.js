@@ -16,7 +16,7 @@ export const STORAGE_KEY = 'onboarding_tour_v2';
 export const resetOnboarding = () => {
   try {
     localStorage.removeItem(STORAGE_KEY);
-  } catch (e) {
+  } catch {
     /* ignore */
   }
   window.dispatchEvent(new Event('onboarding-restart'));
