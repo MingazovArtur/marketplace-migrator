@@ -231,6 +231,26 @@ Round 23 — `npm run lint` теперь 0/0:
   компонент; STORAGE_KEY экспортирован — импортёр OnboardingTour,
   потребитель reset — HelpPage).
 
+### Зависимости (dependabot)
+
+На момент Round 24 открыто 16 dependabot-PR: backend pip (pydantic,
+celery, kombu, bcrypt, python-multipart), frontend npm (eslint 10 major,
+eslint-plugin-react-hooks 7, eslint-config-prettier 10, minor-группа),
+GitHub Actions (checkout 7, setup-node 7, setup-python 7, codeql 4),
+Docker (python 3.15-slim, node 26-alpine, nginx 1.31-alpine). Линия
+закрывается по категориям — от наиболее к наименее верифицируемым
+локальными гейтами.
+
+Round 24 закрыл backend-pip часть (PR #8, #9, #10, #11, #13) — подняты
+нижние границы в `requirements.txt` до фактически установленных в
+dev-окружении версий (pydantic 2.14.3, celery 5.7.0, kombu 5.7.0,
+bcrypt 5.0.0, python-multipart 0.0.33): все контрольные прогоны этих
+раундов уже выполнялись на них, изменений установленного кода нет
+(`pip install --dry-run` — nothing to install). Гейты после правки:
+`pip check` — 0 broken, ruff/CI-гейт 0, pytest 338, OpenAPI-снапшот
+идентичен (100 маршрутов, sha256 неизменен). Остаток линии: frontend-npm
+(включая миграцию eslint 10 на flat config), Actions, Docker.
+
 ## 2. CI (GitHub Actions)
 
 `.github/workflows/ci.yml`, три job'а на каждый push/PR:
