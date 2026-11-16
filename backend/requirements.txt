@@ -51,5 +51,5 @@ slowapi>=0.1.9                    # limits подтянется транзити
 
 # ===== Email =====
 aiosmtplib>=3.0.0                 # SMTP (async)
-jinja2>=3.1.0                     # шаблоны писем (autoescape=True)
+jinja2>=3.1.6                     # шаблоны писем (autoescape=True)
 email-validator>=2.1.0            # pydantic EmailStr (models/schemas.py)
