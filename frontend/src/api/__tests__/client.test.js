@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { extractErrorMessage, parseContentDisposition } from '../client';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { API_URL, doFetch, extractErrorMessage, parseContentDisposition } from '../client';
 
 describe('extractErrorMessage', () => {
   it('разворачивает fields из формата error_handler (field: message)', () => {
@@ -59,5 +59,63 @@ describe('parseContentDisposition', () => {
 
   it('нет заголовка → fallback', () => {
     expect(parseContentDisposition(null, 'mega.xlsx')).toBe('mega.xlsx');
+  });
+});
+
+describe('doFetch: централизованная обработка 401 (R30, С-3)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const stubFetch = (status) => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status })));
+  };
+  // spy.mock.calls — кортежи аргументов: [[event], ...]; достаём сами события
+  const expiredEvents = (spy) =>
+    spy.mock.calls.map(([e]) => e).filter((e) => e.type === 'auth:expired');
+
+  it('401 на бизнес-эндпоинте диспатчит auth:expired с URL', async () => {
+    stubFetch(401);
+    const spy = vi.spyOn(window, 'dispatchEvent');
+
+    const res = await doFetch(`${API_URL}/products`);
+
+    expect(res.status).toBe(401);
+    const [event] = expiredEvents(spy);
+    // jsdom- и node-классы CustomEvent различаются — проверяем контракт,
+    // а не instanceof: type + detail
+    expect(event.type).toBe('auth:expired');
+    expect(event.detail).toEqual({ url: `${API_URL}/products` });
+  });
+
+  it('401 на /auth/* — штатный ответ, события нет', async () => {
+    stubFetch(401);
+    const spy = vi.spyOn(window, 'dispatchEvent');
+
+    await doFetch(`${API_URL}/auth/login`, { method: 'POST' });
+
+    expect(expiredEvents(spy)).toHaveLength(0);
+  });
+
+  it('не-401 статус не диспатчит событие', async () => {
+    stubFetch(200);
+    const spy = vi.spyOn(window, 'dispatchEvent');
+
+    const res = await doFetch(`${API_URL}/products`);
+
+    expect(res.status).toBe(200);
+    expect(expiredEvents(spy)).toHaveLength(0);
+  });
+
+  it('куки передаются в каждый запрос (credentials: include)', async () => {
+    const fetchMock = vi.fn(async () => ({ status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await doFetch(`${API_URL}/products`);
+
+    expect(fetchMock).toHaveBeenCalledWith(`${API_URL}/products`, {
+      credentials: 'include',
+    });
   });
 });

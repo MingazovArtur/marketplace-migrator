@@ -11,6 +11,45 @@ logger = logging.getLogger(__name__)
 
 EXPORTS_DIR = Path("/app/media/exports")
 
+# Сколько живёт файл экспорта на диске. Синхронизировано с TTL Redis-ключа
+# владельца задачи: routers/export/_support.py:EXPORT_TASK_TTL_SEC (24 ч)
+EXPORTS_TTL_SEC = 24 * 3600
+
+
+def _cleanup_old_exports(
+    exports_dir: Path | None = None, ttl_sec: int = EXPORTS_TTL_SEC
+) -> int:
+    """
+    Ленивая чистка каталога экспортов (R30, С-7 ревью): удаляет файлы
+    старше ttl_sec, возвращает число удалённых.
+
+    В стеке нет celery-beat, поэтому чистка привязана к моменту сохранения
+    нового экспорта: каждая завершённая выгрузка заодно подметает
+    просроченные файлы (в т.ч. чужих задач). Ошибки чистки не должны
+    валить сам экспорт — логируем и продолжаем.
+    """
+    directory = Path(exports_dir) if exports_dir else EXPORTS_DIR
+    try:
+        if not directory.is_dir():
+            return 0
+        cutoff = time.time() - ttl_sec
+        removed = 0
+        for entry in directory.iterdir():
+            try:
+                if entry.is_file() and entry.stat().st_mtime < cutoff:
+                    entry.unlink()
+                    removed += 1
+            except OSError as e:
+                logger.warning(f"🧹 Чистка: не удалось удалить {entry.name}: {e}")
+        if removed:
+            logger.info(
+                f"🧹 Чистка экспортов: удалено {removed} файлов старше {ttl_sec // 3600} ч"
+            )
+        return removed
+    except OSError as e:
+        logger.warning(f"🧹 Чистка экспортов пропущена: {e}")
+        return 0
+
 
 def _ensure_exports_dir() -> Path:
     """Создаёт каталог экспортов при первом запуске задачи (без side-effect на импорте)."""
@@ -52,6 +91,9 @@ def generate_xlsx_export_task(
         file_path = _ensure_exports_dir() / f"{self.request.id}_{filename}"
         with open(file_path, "wb") as f:
             f.write(data)
+
+        # R30 (С-7): заодно подметаем просроченные файлы (ленивая чистка без beat)
+        _cleanup_old_exports()
 
         duration_ms = int((time.perf_counter() - t0) * 1000)
         logger.info(

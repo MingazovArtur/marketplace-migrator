@@ -27,8 +27,27 @@ export const getHeaders = () => ({
 
 export const getAuthHeaders = () => ({ ...csrfHeaders() });
 
-// fetch с куками (единая точка)
-export const doFetch = (url, options = {}) => fetch(url, { credentials: 'include', ...options });
+/* ---------- Централизованная обработка 401 (R30, С-3 ревью) ----------
+ * Истёкшая/отозванная кука access_token раньше оставляла пользователя в
+ * «залогиненном» UI: каждый запрос сыпал ошибками, пока не перезагрузишь
+ * страницу. Теперь doFetch при 401 на любом НЕ-auth эндпоинте диспатчит
+ * window-событие 'auth:expired'; App по нему выходит из залогиненного
+ * режима и открывает модалку входа (см. App.jsx).
+ * Событие, а не прямой вызов — client.js остаётся низкоуровневым,
+ * без зависимости от React-кода и циклических импортов.
+ *
+ * /api/auth/* — исключение: 401 там — штатный ответ («неверный пароль»,
+ * «не вошли»), а не истечение сессии.
+ */
+const AUTH_URL_PREFIX = `${API_URL}/auth/`;
+
+export async function doFetch(url, options = {}) {
+  const res = await fetch(url, { credentials: 'include', ...options });
+  if (res.status === 401 && !url.startsWith(AUTH_URL_PREFIX)) {
+    window.dispatchEvent(new CustomEvent('auth:expired', { detail: { url } }));
+  }
+  return res;
+}
 
 export function extractErrorMessage(data, fallback) {
   if (!data) return fallback;

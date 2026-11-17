@@ -418,6 +418,21 @@ function App() {
   // ==================== Обработчики авторизации ====================
   const openAuth = useCallback((tab) => setAuthTab(tab || 'login'), []);
 
+  // ==================== Истёкшая сессия (R30, С-3 ревью) ====================
+  // doFetch диспатчит 'auth:expired' при 401 на бизнес-эндпоинте (api/client.js):
+  // выходим из «залогиненного» UI и сразу показываем модалку входа.
+  // handleLogout безопасен: POST /auth/logout — из auth-семейства, рекурсии
+  // событий нет, а его finally гарантированно обнуляет пользователя.
+  useEffect(() => {
+    const onSessionExpired = () => {
+      setMessage('Сессия истекла — войдите заново');
+      handleLogout();
+      openAuth('login');
+    };
+    window.addEventListener('auth:expired', onSessionExpired);
+    return () => window.removeEventListener('auth:expired', onSessionExpired);
+  }, [handleLogout, openAuth]);
+
   // ==================== Обработчики редактирования товара ====================
   const handleEditAttributes = useCallback((product) => {
     setMessage('');

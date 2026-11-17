@@ -23,6 +23,12 @@ import io
 
 from openpyxl import load_workbook
 
+# R30 (С-2 ревью): потолок строк импортируемых таблиц. XLSX в пределах лимита
+# роута (15 МБ) раскладывается openpyxl в сотни тысяч строк, которые парсер
+# затем обходил целиком. 50 000 — с запасом над реальными прайсами;
+# превышение — внятная ошибка вместо многосекундной раскладки в RAM.
+MAX_TABLE_ROWS = 50_000
+
 
 def _mangle_columns(columns: list) -> list:
     """Дедупликация имён колонок с суффиксами, как в pandas: a, a.1, a.2."""
@@ -132,7 +138,7 @@ class _ILoc:
 # ---------------------------------------------------------------------------
 
 
-def read_csv_table(content: bytes) -> Table:
+def read_csv_table(content: bytes, max_rows: int | None = MAX_TABLE_ROWS) -> Table:
     """CSV -> Table. Кодировки: utf-8(-sig) -> windows-1251 -> utf-8/replace."""
     try:
         text = content.decode("utf-8-sig")
@@ -147,6 +153,13 @@ def read_csv_table(content: bytes) -> Table:
         if not record:  # полностью пустая строка — как skip_blank_lines
             continue
         rows.append([f if f != "" else None for f in record])
+
+    # R30 (С-2): потолок строк — до построения прямоугольника и шапки
+    if max_rows is not None and len(rows) > max_rows:
+        raise ValueError(
+            f"В файле {len(rows)} строк — превышен лимит {max_rows}. "
+            "Разделите файл на части"
+        )
 
     if not rows:
         raise ValueError("Файл пуст")
@@ -172,13 +185,23 @@ class ExcelBook:
         self._wb = load_workbook(io.BytesIO(content), data_only=True)
         self.sheet_names = list(self._wb.sheetnames)
 
-    def parse(self, sheet_name=None, header: int | None = 0, nrows: int | None = None) -> Table:
+    def parse(
+        self, sheet_name=None, header: int | None = 0, nrows: int | None = None,
+        max_rows: int | None = MAX_TABLE_ROWS,
+    ) -> Table:
         ws = self._wb[sheet_name] if sheet_name is not None else self._wb[self.sheet_names[0]]
         rows = [list(r) for r in ws.iter_rows(values_only=True)]
 
         # пустые строки в хвосте отбрасываем (как pandas read_excel)
         while rows and all(v is None for v in rows[-1]):
             rows.pop()
+        # R30 (С-2): потолок по ИСХОДНОМУ листу (до nrows-обрезки) — иначе
+        # «прогревочный» вызов с nrows=30 (поиск шапки) пропускал бы гигантов
+        if max_rows is not None and len(rows) > max_rows:
+            raise ValueError(
+                f"На листе {len(rows)} строк — превышен лимит {max_rows}. "
+                "Разделите файл на части"
+            )
         if nrows is not None:
             rows = rows[:nrows]
         if not rows:
@@ -200,6 +223,9 @@ class ExcelBook:
         return Table(columns, rows[header + 1 :])
 
 
-def read_excel_table(content: bytes, sheet_name=None, header: int | None = 0) -> Table:
+def read_excel_table(
+    content: bytes, sheet_name=None, header: int | None = 0,
+    max_rows: int | None = MAX_TABLE_ROWS,
+) -> Table:
     """XLSX -> Table одним вызовом (первый лист по умолчанию)."""
-    return ExcelBook(content).parse(sheet_name=sheet_name, header=header)
+    return ExcelBook(content).parse(sheet_name=sheet_name, header=header, max_rows=max_rows)
