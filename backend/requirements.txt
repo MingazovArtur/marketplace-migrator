@@ -23,13 +23,13 @@ python-multipart>=0.0.33         # загрузка файлов (FastAPI Upload
 httpx>=0.27.0                    # core/ssrf.py, парсеры, connectors/* (async)
 
 # ===== Excel / CSV =====
-openpyxl>=3.1.0                  # генерация/чтение xlsx (парсеры — без pandas: parsers/tables.py)
+openpyxl>=3.1.5                  # генерация/чтение xlsx (парсеры — без pandas: parsers/tables.py)
 
 # ===== Изображения =====
 Pillow>=10.0.0                   # WebP-миниатюры /media/thumbs (services/media_service.py)
 
 # ===== БД: Dual-Engine (sync psycopg2 + async asyncpg) =====
-sqlalchemy>=2.0.0
+sqlalchemy>=2.1.8
 psycopg2-binary>=2.9.9           # синхронный контур (Celery, миграции, repo)
 asyncpg>=0.29.0                  # асинхронный контур (FastAPI AsyncSession)
 greenlet>=3.0.0                  # нужен SQLAlchemy для async-движка
@@ -44,12 +44,12 @@ kombu>=5.7.0                     # прямой импорт в celery_app.py
 # ===== Аутентификация / шифрование =====
 python-jose[cryptography]>=3.3.0  # JWT
 bcrypt>=5.0.0                     # хэширование паролей
-cryptography>=42.0.0              # Fernet для ключей маркетплейсов (core/crypto.py)
+cryptography>=50.0.2              # Fernet для ключей маркетплейсов (core/crypto.py)
 
 # ===== Rate limiting =====
 slowapi>=0.1.9                    # limits подтянется транзитивно
 
 # ===== Email =====
 aiosmtplib>=3.0.0                 # SMTP (async)
-jinja2>=3.1.0                     # шаблоны писем (autoescape=True)
+jinja2>=3.1.6                     # шаблоны писем (autoescape=True)
 email-validator>=2.1.0            # pydantic EmailStr (models/schemas.py)
