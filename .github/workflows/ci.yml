@@ -41,6 +41,48 @@ jobs:
       - name: Pytest
         run: python -m pytest
 
+  migrations:
+    name: Миграции — alembic upgrade head
+    runs-on: ubuntu-latest
+    # R-35: функциональный гейт миграций — цепочка обязана применяться
+    # на ЧИСТОЙ базе без ошибок (duplicate column и т.п.). До этого
+    # миграции в CI не проверялись вовсе.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: migrator
+          POSTGRES_PASSWORD: migrator
+          POSTGRES_DB: marketplace_migrator
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U migrator"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg2://migrator:migrator@localhost:5432/marketplace_migrator
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Установка зависимостей
+        run: pip install -r requirements.txt
+
+      - name: alembic upgrade head (чистая БД)
+        run: alembic upgrade head
+
   frontend:
     name: Frontend — линт + тесты + сборка (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest

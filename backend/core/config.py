@@ -10,6 +10,7 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlparse
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -18,6 +19,12 @@ logger = logging.getLogger(__name__)
 
 # Заглушка ТОЛЬКО для разработки. В production с ней запуск невозможен.
 DEV_SECRET_FALLBACK = "dev-only-insecure-key-change-me"
+
+# Маркер-плейсхолдер из .env.example. Скопированный «как есть» файл .env.example
+# не должен молча становиться рабочей конфигурацией (R-35 из код-ревью):
+# раньше JWT_SECRET=CHANGE_ME__… проходил все проверки — значение не равно
+# DEV_SECRET_FALLBACK, и прод поднимался с плейсхолдером в качестве секрета.
+PLACEHOLDER_MARK = "CHANGE_ME"
 
 
 class Settings(BaseSettings):
@@ -138,9 +145,43 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _ensure_secret_is_set(self) -> "Settings":
-        """Унифицируем SECRET_KEY и JWT_SECRET; проверяем наличие ключа в production."""
+        """Унифицируем SECRET_KEY и JWT_SECRET; проверяем секреты (R-35)."""
         if self.SECRET_KEY == DEV_SECRET_FALLBACK and self.JWT_SECRET:
             self.SECRET_KEY = self.JWT_SECRET
+
+        # 1) Плейсхолдеры CHANGE_ME из .env.example — сам маркер независимо
+        #    от того, в каком из полей он оказался
+        with_placeholder = [
+            name
+            for name, value in (
+                ("SECRET_KEY", self.SECRET_KEY),
+                ("JWT_SECRET", self.JWT_SECRET),
+                ("DATABASE_URL", self.DATABASE_URL),
+                ("ADMIN_PASSWORD", self.ADMIN_PASSWORD),
+            )
+            if PLACEHOLDER_MARK in (value or "")
+        ]
+        if with_placeholder:
+            msg = (
+                "Обнаружены ненастоящие значения из .env.example (CHANGE_ME): "
+                + ", ".join(with_placeholder)
+                + '. Сгенерируйте реальные: python -c "import secrets; print(secrets.token_hex(32))"'
+            )
+            if self.ENVIRONMENT == "production":
+                raise ValueError(msg)
+            logger.warning(msg)
+
+        # 2) Подсказка на типовую ошибку compose: БД создаётся с POSTGRES_PASSWORD,
+        #    а бэкенд подключается по паролю из DATABASE_URL — при рассинхроне
+        #    подключение падает на runtime невнятной ошибкой аутентификации
+        if self.DATABASE_URL and self.POSTGRES_PASSWORD:
+            db_password = urlparse(self.DATABASE_URL).password or ""
+            if db_password and db_password != self.POSTGRES_PASSWORD:
+                logger.warning(
+                    "Пароль в DATABASE_URL не совпадает с POSTGRES_PASSWORD — "
+                    "подключение к БД, создаваемой docker compose, завершится "
+                    "ошибкой аутентификации."
+                )
 
         if self.ENVIRONMENT == "production" and self.SECRET_KEY == DEV_SECRET_FALLBACK:
             raise ValueError(

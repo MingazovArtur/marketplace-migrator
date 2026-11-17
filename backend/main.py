@@ -99,9 +99,11 @@ async def ban_check_middleware(request: Request, call_next):
         auth_header = request.headers.get("authorization")
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ", 1)[1]
-            from core.auth import decode_token
+            # R-35: payload кэшируется в request.state — rate-limiter и
+            # get_current_user ниже по конвейеру не декодируют токен заново
+            from core.auth import get_jwt_payload_cached
 
-            payload = decode_token(token)
+            payload = get_jwt_payload_cached(request, token)
             if payload and "sub" in payload:
                 user_id = str(payload["sub"])
                 if is_banned(f"user:{user_id}"):

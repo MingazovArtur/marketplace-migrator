@@ -386,11 +386,12 @@ exit 0) и сверкой checksums с официальными колёсами
 
 ## 2. CI (GitHub Actions)
 
-`.github/workflows/ci.yml`, три job'а на каждый push/PR:
+`.github/workflows/ci.yml`, четыре job'а на каждый push/PR:
 
 | Job | Что делает |
 |---|---|
 | **backend** | `ruff check .` (полный набор, ужесточён Round 34) + `python -m pytest` (матрица Python 3.12 / 3.15 — 3.15 = рантайм прод-образа, Round 27) |
+| **migrations** | `alembic upgrade head` на чистой БД PostgreSQL 15 из services (Round 35: до этого миграции в CI не проверялись) |
 | **frontend** | `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run build` (матрица Node 22 / 26 — 26 = рантайм build-стейджа прод-образа, Round 27) |
 | **docker** | сборка `backend/Dockerfile.prod` и `frontend/Dockerfile.prod` |
 
@@ -735,6 +736,11 @@ git push --force --mirror
 1. Сменить `SECRET_KEY`/`JWT_SECRET`, `POSTGRES_PASSWORD`, `ADMIN_PASSWORD` (и пароль dev-админа `admin123`, если использовался).
 2. Перевыпустить API-ключи маркетплейсов, хранящиеся в БД (шифруются `SECRET_KEY` — смена ключа делает старые токены нечитаемыми, их нужно ввести заново).
 3. `ENVIRONMENT=production` в проде — с ним приложение не стартует с dev-ключами.
+4. Сетевой гейт на плейсхолдеры (Round 35): `core/config.py` проверяет маркер
+   `CHANGE_ME` из `.env.example` в `SECRET_KEY`/`JWT_SECRET`/`DATABASE_URL`/
+   `ADMIN_PASSWORD` — вне production предупреждение, в production отказ запуска.
+   Отдельное предупреждение — при несовпадении пароля в `DATABASE_URL`
+   с `POSTGRES_PASSWORD`.
 
 ## 8. Шпаргалка
 

@@ -71,6 +71,33 @@ def decode_token(token: str) -> dict | None:
         return None
 
 
+def get_jwt_payload_cached(request: Request, token: str | None = None) -> dict | None:
+    """JWT-payload запроса с кэшем в request.state (R-35).
+
+    Раньше один и тот же токен декодировался до трёх раз за запрос:
+    ban_check middleware, key_func rate-limiter'а и get_current_user.
+    Теперь первый вызов декодирует и кладёт payload в request.state,
+    повторные — берут готовый (HMAC-декод дешёвый, но лишний — лишний).
+
+    Кэш ключуется строкой токена: get_current_user может взять токен
+    не из Authorization (httpOnly-cookie) — тогда кэш просто не совпадёт
+    и токен декодируется штатно.
+    """
+    if token is None:
+        auth_header = request.headers.get("authorization")
+        if not (auth_header and auth_header.startswith("Bearer ")):
+            return None
+        token = auth_header.split(" ", 1)[1]
+    cached_payload = getattr(request.state, "jwt_payload", None)
+    if cached_payload is not None and getattr(request.state, "jwt_token", None) == token:
+        return cached_payload
+    payload = decode_token(token)
+    if payload is not None:
+        request.state.jwt_token = token
+        request.state.jwt_payload = payload
+    return payload
+
+
 async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
@@ -99,7 +126,7 @@ async def get_current_user(
                 detail="CSRF-проверка не пройдена",
             )
 
-    payload = decode_token(token)
+    payload = get_jwt_payload_cached(request, token)
     if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

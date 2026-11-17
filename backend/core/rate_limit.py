@@ -74,16 +74,15 @@ def get_user_identifier(request: Request) -> str:
     - Если пользователь авторизован → user_id (сильнее, чем IP)
     - Иначе → IP
     """
-    # Пытаемся получить user_id из JWT (если есть)
+    # Пытаемся получить user_id из JWT (если есть). Payload берём из
+    # request.state, если ban_check middleware уже декодировал этот токен
+    # (R-35), иначе декодируем сами и кэшируем для get_current_user.
     try:
-        auth_header = request.headers.get("authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ")[1]
-            from core.auth import decode_token
+        from core.auth import get_jwt_payload_cached
 
-            payload = decode_token(token)
-            if payload and "sub" in payload:
-                return f"user:{payload['sub']}"
+        payload = get_jwt_payload_cached(request)
+        if payload and "sub" in payload:
+            return f"user:{payload['sub']}"
     except Exception:
         pass
     return f"ip:{get_client_ip(request)}"
