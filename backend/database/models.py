@@ -32,16 +32,19 @@ class User(Base):
     """Модель пользователя"""
 
     __tablename__ = "users"
-    email_verified_at = Column(DateTime, nullable=True)  # когда подтвердил email
+
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     role = Column(String, default="user", nullable=False)  # "user" или "admin"
-    # ✅ v5: слать ли письмо о завершении пакетной миграции
+    # письмо о завершении пакетной миграции
     notify_batch_done = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=utcnow)
+    # когда подтвердил email (R35: перенесено к хвосту класса — поле
+    # появилось позже базовых, держим в порядке «базовые → добавленные»)
+    email_verified_at = Column(DateTime, nullable=True)
 
     products = relationship("Product", back_populates="owner")
 
@@ -52,6 +55,8 @@ class AccessLog(Base):
     __tablename__ = "access_logs"
 
     id = Column(Integer, primary_key=True, index=True)
+    # Без FK на users.id — осознанно (R35): журнал доступа должен переживать
+    # удаление пользователя (аудит 152-ФЗ), иначе onDelete б пересёк историю.
     user_id = Column(Integer, nullable=True, index=True)
     username = Column(String(100), nullable=True)
     action = Column(
@@ -133,10 +138,10 @@ class Product(Base):
     brand = Column(String, nullable=True)
     photos = Column(JSON, default=list)
     sku_count = Column(Integer, default=1)
-    stock = Column(Integer, nullable=True)  # ← ДОБАВЛЕНО
-    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)  # ← ДОБАВЛЕНО
+    stock = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
-    # ✅ v4 (инкрементальный экспорт): когда и на какую площадку товар
+    # Инкрементальный экспорт (v4): когда и на какую площадку товар
     # выгружался в последний раз. «Только изменённые» = updated_at > last_export_at
     # либо товар ещё не выгружался вовсе.
     last_export_at = Column(DateTime, nullable=True)
@@ -264,6 +269,9 @@ class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
 
     id = Column(Integer, primary_key=True, index=True)
+    # unique=True на user_id — семантика «не более одного АКТИВНОГО токена
+    # сброса на пользователя» (R35): при новом запросе сброса предыдущий
+    # помечается used_at в email_service.py, а строки-история остаются.
     user_id = Column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
     )
@@ -280,7 +288,7 @@ class PlatformCategorySpec(Base):
     Спецификация категории площадки: обязательные поля, атрибуты, словари значений.
     Источник: официальный API площадки.
 
-    ✅ ГЛОБАЛЬНЫЙ справочник: структура категорий площадки одинакова для всех
+    ГЛОБАЛЬНЫЙ справочник: структура категорий площадки одинакова для всех
     продавцов, поэтому строка одна на пару (platform, category_id).
     user_id — только аудит: кто загрузил/обновил спек (nullable).
     """
@@ -328,9 +336,11 @@ class ExportDefault(Base):
     package_length_mm = Column(Integer, nullable=True)
     brand = Column(String, nullable=True)  # значение бренда по умолчанию
     marking = Column(String, nullable=True, default="Нет")  # Нужен код маркировки
-    price_default = Column(
-        Numeric(10, 2), nullable=True
-    )  # ✅ цена по умолчанию (только для нулевых)
+    # Разрядность 10,2 (не MONEY=12,2) — осознанное решение (R35): это
+    # дефолтная цена для дозаполнения пустых полей, а не цена товара;
+    # при необходимости дефолтов свыше 99 999 999.99 потребуется миграция
+    # на MONEY — синхронно с migration_profiles.price_default ниже.
+    price_default = Column(Numeric(10, 2), nullable=True)  # цена по умолчанию (только для нулевых)
 
     __table_args__ = (
         UniqueConstraint("user_id", "category_name", name="uq_export_defaults_user_category"),
@@ -339,7 +349,7 @@ class ExportDefault(Base):
 
 class MigrationProfile(Base):
     """
-    ✅ v4: профиль миграции — типовой набор «площадка + дефолты», чтобы
+    Профиль миграции (v4) — типовой набор «площадка + дефолты», чтобы
     повторять частую миграцию в один клик.
 
     Применение (POST /migration-profiles/{id}/apply) проставляет сохранённые
@@ -376,7 +386,7 @@ class BulkEditSnapshot(Base):
     """
     Снапшот значений перед операцией правки товаров (undo «Отменить»).
 
-    ✅ v4 (аудит-лог + undo): пишется ЛЮБОЙ правкой — массовым обновлением,
+    Пишется ЛЮБОЙ правкой (v4: аудит-лог + undo) — массовым обновлением,
     одиночной правкой, логистикой, массовым подбором ТН ВЭД, дозаполнением
     дефолтов. Для каждого затронутого товара сохраняются прежние значения
     РОВНО тех полей, которые менялись (payload.fields). POST /products/undo

@@ -15,13 +15,26 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import sessionmaker
 
-from core.config import DATABASE_URL
+from core.config import DATABASE_URL, settings
 
 # ==================== 1. Синхронный контур (Celery, миграции, repo) ====================
 
+# R35 (В-10 ревью): бюджет соединений к Postgres (default max_connections=100).
+# Было: 10+20 на каждый из двух движков → до 60 на процесс; 3 uvicorn-воркера
+# в проде + 3 celery-процесса → до 360 — исчерпание соединений под нагрузкой.
+# Теперь (DB_POOL_SIZE=5, DB_MAX_OVERFLOW=10 на движок):
+#   steady-state: uvicorn 3×(5+5) + celery 3×5 = 45 соединений — с запасом;
+#   пик (кратковременный overflow): 3×(10+20) + 3×15 = 135 — overflow живёт
+#   секунды и никогда не бывает одновременным у всех процессов.
+# При росте числа воркеров — pgbouncer (transaction pooling).
+
 if DATABASE_URL.startswith("postgresql"):
     engine = create_engine(
-        DATABASE_URL, pool_size=10, max_overflow=20, pool_pre_ping=True, pool_recycle=3600
+        DATABASE_URL,
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
+        pool_pre_ping=True,
+        pool_recycle=3600,
     )
 else:
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -59,8 +72,9 @@ ASYNC_DATABASE_URL = _make_async_url(DATABASE_URL)
 if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg"):
     async_engine = create_async_engine(
         ASYNC_DATABASE_URL,
-        pool_size=10,
-        max_overflow=20,
+        # Бюджет соединений — общий комментарий в блоке sync-движка выше (R35, В-10)
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
         pool_pre_ping=True,
         pool_recycle=3600,
     )

@@ -49,6 +49,11 @@ cryptography>=50.0.2              # Fernet для ключей маркетпл�
 # ===== Rate limiting =====
 slowapi>=0.1.9                    # limits подтянется транзитивно
 
+# ===== Наблюдаемость =====
+# R35 (В-12): sentry_sdk.init в main.py (инициализация только при заданном
+# SENTRY_DSN; пакет опционален — ошибка импорта не валит приложение)
+sentry-sdk>=2.0.0
+
 # ===== Email =====
 aiosmtplib>=3.0.0                 # SMTP (async)
 jinja2>=3.1.6                     # шаблоны писем (autoescape=True)

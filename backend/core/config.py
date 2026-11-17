@@ -57,6 +57,16 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "migrator_user"
     POSTGRES_PASSWORD: str = ""
     POSTGRES_DB: str = "marketplace_migrator"
+    # R-35 (В-10 ревью): бюджет соединений. Раньше каждый из двух движков
+    # держал 10+20: до 60 соединений на процесс, 3 uvicorn-воркера в проде
+    # + celery-воркеры → гарантированное исчерпание max_connections=100.
+    # Дефолты ужаты (бюджет — комментарий в database/session.py).
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+
+    # --- Логирование ---
+    # R-35 (В-12): уровень для configure_logging() (core/logging_config.py)
+    LOG_LEVEL: str = "INFO"
 
     # --- Redis (Celery + rate-limit) ---
     REDIS_URL: str = "redis://redis:6379/0"

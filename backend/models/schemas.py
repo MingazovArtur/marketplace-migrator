@@ -7,13 +7,25 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
+def _check_password_bytes(v: str) -> str:
+    """R35 (В-5): пароль не длиннее 72 БАЙТ — лимит bcrypt.
+
+    bcrypt игнорирует байты после 72-го, а хэширование длинного пароля —
+    бесплатный CPU-DoS (hashpw линейно дорог). Лимит именно по байтам,
+    не по символам: 40 кириллических символов = 80 байт и уже не влезают.
+    """
+    if len(v.encode("utf-8")) > 72:
+        raise ValueError("Пароль длиннее 72 байт — предел алгоритма bcrypt")
+    return v
+
+
 # ========== Аутентификация ==========
 class UserCreate(BaseModel):
     """Схема для регистрации нового пользователя"""
 
     email: EmailStr
     username: str
-    password: str
+    password: str  # ≥6 символов (роутер) и ≤72 байт (валидатор ниже)
     consent: bool = False
 
     model_config = ConfigDict(
@@ -27,12 +39,22 @@ class UserCreate(BaseModel):
         }
     )
 
+    @field_validator("password")
+    @classmethod
+    def _password_within_bcrypt_limit(cls, v: str) -> str:
+        return _check_password_bytes(v)
+
 
 class UserLogin(BaseModel):
     """Схема для входа"""
 
     username: str
     password: str
+
+    @field_validator("password")
+    @classmethod
+    def _password_within_bcrypt_limit(cls, v: str) -> str:
+        return _check_password_bytes(v)
 
 
 class UserResponse(BaseModel):
@@ -44,7 +66,7 @@ class UserResponse(BaseModel):
     role: str = "user"
     email_verified_at: datetime | None = None
     is_active: bool
-    # ✅ v5: письмо о завершении пакетной миграции (вкл/выкл в меню профиля)
+    # письмо о завершении пакетной миграции (вкл/выкл в меню профиля)
     notify_batch_done: bool = True
     created_at: datetime
 
@@ -73,6 +95,11 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str = Field(..., min_length=6)
+
+    @field_validator("new_password")
+    @classmethod
+    def _password_within_bcrypt_limit(cls, v: str) -> str:
+        return _check_password_bytes(v)
 
 
 class VerifyEmailRequest(BaseModel):

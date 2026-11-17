@@ -13,12 +13,24 @@
 
 ## Быстрый старт (Docker, весь стек)
 
+> Файл `docker-compose.yml` — DEV-ONLY конфигурация: фронт-дев-сервер
+> слушает 0.0.0.0 и проксирует /api на backend сам (модель доверия —
+> комментарий в `frontend/vite.config.js`), поэтому запускать его имеет
+> смысл только на доверенной машине/сети. Прод — отдельный
+> [docker-compose.prod.yml](docker-compose.prod.yml) за nginx.
+
 ```bash
 git clone https://github.com/MingazovArtur/marketplace-migrator.git
 cd marketplace-migrator
 cp .env.example .env        # заполнить секреты (CHANGE_ME -> сгенерировать)
 docker compose up --build   # API: localhost:8000 (swagger: /docs), фронт: localhost:5173
 ```
+
+Обязательный минимум в `.env` (compose без них не стартует — fail-fast,
+дефолтных паролей с R35 нет): `POSTGRES_PASSWORD` (пароль БД, тот же —
+в `DATABASE_URL`) и `SECRET_KEY`/`JWT_SECRET`. Миграции БД выполняет
+отдельный one-shot сервис `migrate` (см. docker-compose.yml), приложения
+стартуют только после его успешного завершения.
 
 Прод-конфигурация (nginx, 8 сервисов, HTTPS): [docker-compose.prod.yml](docker-compose.prod.yml)
 + [deploy/](deploy/) (nginx-конфиги, HTTPS одной командой, бэкапы БД).

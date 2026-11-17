@@ -65,6 +65,10 @@ def download_single_photo(
     if not url:
         return None
 
+    # session (внешний httpx.Client) — обязательный паттерн для батчей:
+    # download_photos создаёт ОДИН клиент на весь список и передаёт его
+    # сюда, так что соединения переиспользуются (R35, В-13). Создание
+    # собственного клиента — только для одиночных вызовов.
     dest = MEDIA_ROOT / "products" / str(product_id)
     dest.mkdir(parents=True, exist_ok=True)
 
@@ -126,6 +130,10 @@ def download_photos(product_id: int, urls: list[str]) -> list[str]:
     """
     Скачивает список фото в MEDIA_ROOT/products/{product_id}/.
     Возвращает список сохранённых относительных путей.
+
+    Один httpx.Client на весь батч (R35, В-13): download_single_photo
+    получает его параметром session — keep-alive переиспользуется,
+    вместо нового TCP-хендшейка на каждое фото.
 
     Собственные /media/products/ URL пропускаем: фото уже локальные,
     а SSRF-защита корректно блокирует их скачивание «из самого себя»

@@ -2,11 +2,13 @@
 Главный файл приложения FastAPI
 
 Порядок обработки запроса (от внешнего к внутреннему):
-  Запрос → CORS (самый внешний) → GZip → SlowAPI → ban_check → роутер
+  Запрос → CORS → SlowAPI → GZip → ban_check → request-id → роутер
 """
 
+import asyncio
 import logging
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +19,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from core.config import settings
 from core.error_handler import register_exception_handlers
+from core.logging_config import configure_logging, request_id_var
 from core.platforms import PLATFORM_CONFIG, Platform
 from core.rate_limit import (
     get_client_ip,
@@ -32,9 +35,9 @@ from routers import (
     export,
     history,
     import_router,
-    photos,  # ✅ ИСПРАВЛЕНО: подключен роутер фотографий
+    photos,
     products,
-    profiles,  # ✅ v4: профили миграции (площадка + дефолты)
+    profiles,
     stats,
     templates,
     tnved,
@@ -44,13 +47,41 @@ from routers import (
     defaults as defaults_router,
 )
 from routers import (
-    media as media_router,  # ✅ /media с авторизацией (замена StaticFiles)
+    media as media_router,  # /media с авторизацией (замена StaticFiles)
 )
 from routers.health import router as health_router
 from routers.migrate_router import router as migrate_router
 
-logging.basicConfig(level=logging.INFO)
+# R-35 (В-12): формат с датой и request-id вместо голого basicConfig;
+# при уже настроенном root (pytest/gunicorn) — no-op
+configure_logging()
 logger = logging.getLogger(__name__)
+
+
+def _init_sentry() -> None:
+    """R-35 (В-12): поля SENTRY_* в конфиге были, но sentry_sdk.init не
+    вызывался нигде — интеграция существовала только на бумаге. Теперь:
+    DSN задан → инициализируем (пакет опционален, ошибки импорта не фатальны).
+    """
+    dsn = getattr(settings, "SENTRY_DSN", "")
+    if not dsn:
+        return
+    try:
+        import sentry_sdk
+    except ImportError:
+        logger.warning("SENTRY_DSN задан, но sentry-sdk не установлен — Sentry отключён")
+        return
+    sentry_sdk.init(
+        dsn=dsn,
+        environment=getattr(settings, "SENTRY_ENVIRONMENT", "development"),
+        release=getattr(settings, "SENTRY_RELEASE", "local"),
+        send_default_pii=False,
+        traces_sample_rate=0.0,
+    )
+    logger.info("Sentry инициализирован (env=%s)", settings.SENTRY_ENVIRONMENT)
+
+
+_init_sentry()
 
 # Было В-6 из код-ревью: /docs, /redoc и /openapi.json были доступны в проде
 # и раскрывали полную карту API (в т.ч. внутренние эндпоинты).
@@ -79,6 +110,15 @@ async def ban_check_middleware(request: Request, call_next):
     """
     Проверяет бан IP и user_id перед обработкой запроса.
     Пропускает: healthcheck, статику, docs, OPTIONS (preflight).
+
+    R-35 (В-6): проверки банов ушли в threadpool (asyncio.to_thread) —
+    sync-redis-клиент больше не блокирует event loop каждого запроса;
+    Redis недоступен → исключение (fail-closed), но без латентности для лупа.
+
+    Асимметрия (В-9): здесь проверяем ТОЛЬКО баны по sub из токена —
+    авторизация по роли всегда идёт через БД (get_current_admin_user),
+    поэтому понижение роли применяется сразу и не зависит от содержимого
+    токена.
     """
     if request.method == "OPTIONS":
         return await call_next(request)
@@ -89,7 +129,7 @@ async def ban_check_middleware(request: Request, call_next):
         return await call_next(request)
 
     ip = get_client_ip(request)
-    if is_banned(f"ip:{ip}"):
+    if await asyncio.to_thread(is_banned, f"ip:{ip}"):
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
             content={"detail": "Доступ временно ограничен из-за подозрительной активности"},
@@ -106,7 +146,7 @@ async def ban_check_middleware(request: Request, call_next):
             payload = get_jwt_payload_cached(request, token)
             if payload and "sub" in payload:
                 user_id = str(payload["sub"])
-                if is_banned(f"user:{user_id}"):
+                if await asyncio.to_thread(is_banned, f"user:{user_id}"):
                     return JSONResponse(
                         status_code=status.HTTP_403_FORBIDDEN,
                         content={"detail": "Ваш аккаунт временно заблокирован"},
@@ -115,6 +155,33 @@ async def ban_check_middleware(request: Request, call_next):
         logger.debug(f"ban_check token parse failed: {e}")
 
     response = await call_next(request)
+    return response
+
+
+# ============================================================
+# 1b. Request-ID middleware (Correlation-ID, R-35 В-12)
+# ============================================================
+# Регистрируется ПОСЛЕ ban_check → в рантайме стоит ВНЕШНЕГО него:
+# request-id известен уже логам ban_check и доступен в ответах 403/500.
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Сквозной id запроса для склейки логов и сопоставления с ответом.
+
+    Входящий X-Request-ID (короткая печатная ASCII-строка) принимается
+    эхом — удобно прокидывать id из nginx; иначе генерируется новый.
+    id попадает в заголовок ответа X-Request-ID и в каждую запись
+    лога через RequestIdFilter (core/logging_config.py).
+    """
+    rid = (request.headers.get("x-request-id") or "").strip()
+    if not (rid and rid.isascii() and rid.isprintable() and len(rid) <= 64):
+        rid = uuid4().hex[:16]
+    token = request_id_var.set(rid)
+    request.state.request_id = rid
+    try:
+        response = await call_next(request)
+    finally:
+        request_id_var.reset(token)
+    response.headers["X-Request-ID"] = rid
     return response
 
 
@@ -167,9 +234,7 @@ if hasattr(settings, "CORS_ORIGINS") and settings.CORS_ORIGINS:
     else:
         config_origins = list(settings.CORS_ORIGINS)
 
-allowed_origins = _build_cors_origins(
-    is_production=_IS_PRODUCTION, configured=config_origins
-)
+allowed_origins = _build_cors_origins(is_production=_IS_PRODUCTION, configured=config_origins)
 
 if _IS_PRODUCTION and not allowed_origins:
     logger.warning(
@@ -195,7 +260,7 @@ app.include_router(migrate_router)
 app.include_router(variants.router)
 app.include_router(stats.router)
 app.include_router(attributes.router)
-app.include_router(photos.router)  # ✅ ИСПРАВЛЕНО: подключен роутер фотографий
+app.include_router(photos.router)
 app.include_router(templates.router)
 app.include_router(products.router)
 app.include_router(import_router.router)
@@ -207,7 +272,7 @@ app.include_router(categories.router)
 app.include_router(history.router)
 app.include_router(defaults_router.router)
 app.include_router(tnved.router)
-app.include_router(profiles.router)  # ✅ v4: профили миграции
+app.include_router(profiles.router)  # профили миграции (площадка + дефолты)
 
 # ============================================================
 # Статика: раздача скачанных фото
@@ -223,15 +288,23 @@ MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 # ============================================================
 @app.get("/api/platforms")
 def get_platforms():
-    """Получить список доступных платформ"""
+    """Получить список доступных платформ.
+
+    R-35 (В-14): итерируем по общему ключу — раньше PLATFORM_CONFIG[p.value]
+    падал бы с KeyError при любом расхождении enum и реестра. Пары без
+    конфигурации не показываются; сам рассинхрон ловит тест реестра
+    (tests/test_platform_registry.py), требующий полного совпадения
+    ключей Platform / PLATFORM_CONFIG / PRICE_RULES.
+    """
     return {
         "platforms": [
             {
                 "id": p.value,
-                "name": PLATFORM_CONFIG[p.value]["name"],
-                "color": PLATFORM_CONFIG[p.value]["color"],
+                "name": cfg["name"],
+                "color": cfg["color"],
             }
             for p in Platform
+            if (cfg := PLATFORM_CONFIG.get(p.value)) is not None
         ]
     }
 

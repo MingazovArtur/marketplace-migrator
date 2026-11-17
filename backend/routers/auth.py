@@ -9,21 +9,25 @@ B-1 (неделя 2): register/login/logout — sync def. FastAPI выполня
 
 import logging
 import secrets
+import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.auth import (
+    ACCESS_COOKIE,
+    CSRF_COOKIE,
     create_access_token,
     get_current_user,
     get_password_hash,
     verify_password,
 )
 from core.config import settings
-from core.rate_limit import limiter
+from core.rate_limit import limiter, revoke_token
 from database.access_log import get_client_ip, log_access
 from database.models import User
 from database.session import SessionLocal, get_db
@@ -36,7 +40,7 @@ security = HTTPBearer()
 
 
 class NotificationsUpdate(BaseModel):
-    """✅ v5: настройки уведомлений (пока одна — письмо о пакете)."""
+    """Настройки уведомлений (пока одна — письмо о пакете)."""
 
     notify_batch_done: bool | None = None
 
@@ -49,7 +53,7 @@ class NotificationsUpdate(BaseModel):
 def register(
     payload: UserCreate,
     request: Request,
-    background_tasks: BackgroundTasks,  # ← добавлено
+    background_tasks: BackgroundTasks,
 ):
     """Регистрация нового пользователя с логированием доступа и отправкой письма подтверждения."""
     if len(payload.password) < 6:
@@ -83,10 +87,21 @@ def register(
             is_active=True,
         )
         db.add(user)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # R35 (В-4): гонка «проверил email → INSERT» между параллельными
+            # регистрациями решается на уровне БД — unique-констрейнты не
+            # пускают дубль; здесь остаётся вернуть понятный 400 вместо
+            # общего 500 «Ошибка при регистрации».
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Пользователь с таким email или логином уже существует",
+            ) from None
         db.refresh(user)
 
-        # ✅ Логирование регистрации и согласия
+        # Логирование регистрации и согласия
         ip = get_client_ip(request)
         ua = request.headers.get("user-agent")
         log_access(user_id=user.id, username=user.username, action="register", ip=ip, user_agent=ua)
@@ -99,10 +114,11 @@ def register(
                 user_agent=ua,
             )
 
-        logger.info(f"✅ Зарегистрирован пользователь: {user.username} (id={user.id})")
+        logger.info(f"Зарегистрирован пользователь: {user.username} (id={user.id})")
 
-        # ✅ Отправка письма подтверждения (в фоне, после ответа клиенту)
-        # Детачим значения пользователя от сессии, чтобы background task работал после db.close()
+        # Отправка письма подтверждения (в фоне, после ответа клиенту).
+        # Детачим значения пользователя от сессии, чтобы background task
+        # работал после db.close()
         user_snapshot = {
             "id": user.id,
             "email": user.email,
@@ -170,17 +186,19 @@ def login(payload: UserLogin, request: Request):
             user_id=user.id, username=user.username, action="login_success", ip=ip, user_agent=ua
         )
         token = create_access_token({"sub": str(user.id), "role": user.role})
-        logger.info(f"✅ Вход выполнен: {user.username}")
+        logger.info(f"Вход выполнен: {user.username}")
 
         # Куки: access_token — httpOnly (JS не может прочитать токен — защита от XSS-кражи),
-        # csrf_token — читается фронтендом и возвращается заголовком X-CSRF-Token (double-submit)
+        # csrf_token — читается фронтендом и возвращается заголовком X-CSRF-Token (double-submit).
+        # R35: имена кук — константы ACCESS_COOKIE/CSRF_COOKIE из core/auth.py
+        # (раньше те же строки были продублированы литералами в трёх местах).
         csrf_token = secrets.token_urlsafe(32)
         max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         response = JSONResponse(
             content={"access_token": token, "token_type": "bearer", "csrf_token": csrf_token}
         )
         response.set_cookie(
-            "access_token",
+            ACCESS_COOKIE,
             token,
             max_age=max_age,
             httponly=True,
@@ -189,7 +207,7 @@ def login(payload: UserLogin, request: Request):
             path="/",
         )
         response.set_cookie(
-            "csrf_token",
+            CSRF_COOKIE,
             csrf_token,
             max_age=max_age,
             httponly=False,
@@ -209,7 +227,7 @@ def login(payload: UserLogin, request: Request):
 @limiter.limit("10/minute")
 @router.post("/logout")
 def logout(request: Request, response: Response, current_user: User = Depends(get_current_user)):
-    """Выход с логированием и очисткой кук"""
+    """Выход: отзыв токена по jti (R35, К-3), логирование и очистка кук."""
     ip = get_client_ip(request)
     ua = request.headers.get("user-agent")
     log_access(
@@ -219,10 +237,39 @@ def logout(request: Request, response: Response, current_user: User = Depends(ge
         ip=ip,
         user_agent=ua,
     )
-    logger.info(f"👋 Выход: {current_user.username}")
-    # сбрасываем обе куки (браузер удалит их)
-    response.delete_cookie("access_token", path="/")
-    response.delete_cookie("csrf_token", path="/")
+
+    # R35 (К-3): logout больше не «просто стёр куку» — токен отзывается по
+    # jti (блэклист в Redis на остаток его жизни), поэтому и украденная
+    # копия этого же access-токена тоже умрёт (проверка — get_current_user).
+    auth_header = request.headers.get("authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+    else:
+        token = request.cookies.get(ACCESS_COOKIE)
+    if token:
+        from core.auth import get_jwt_payload_cached
+
+        # get_current_user уже декодировал этот токен — берём из кэша
+        payload = get_jwt_payload_cached(request, token) or {}
+        jti = payload.get("jti")
+        exp = payload.get("exp")
+        if jti and exp:
+            try:
+                revoke_token(jti, int(exp - time.time()))
+            except Exception as e:
+                # Redis недоступен: logout не должен 500-ить, но факт
+                # «токен НЕ отозван и доживёт до exp» обязан попасть в лог
+                logger.error(f"Не удалось отозвать токен (jti={str(jti)[:8]}…): {e}")
+
+    logger.info(f"Выход: {current_user.username}")
+    # Сбрасываем обе куки. Атрибуты path/samesite/secure повторяют
+    # установку: часть браузеров матчит куку на удаление по ним (R35).
+    response.delete_cookie(
+        ACCESS_COOKIE, path="/", samesite=settings.COOKIE_SAMESITE, secure=settings.COOKIE_SECURE
+    )
+    response.delete_cookie(
+        CSRF_COOKIE, path="/", samesite=settings.COOKIE_SAMESITE, secure=settings.COOKIE_SECURE
+    )
     return {"message": "Вы вышли из системы"}
 
 
@@ -238,7 +285,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
 
 @router.get("/notifications")
 async def get_notifications(current_user: User = Depends(get_current_user)):
-    """✅ v5: настройки уведомлений пользователя."""
+    """Настройки уведомлений пользователя."""
     return {
         "notify_batch_done": bool(current_user.notify_batch_done),
         "email": current_user.email,
@@ -252,7 +299,7 @@ async def update_notifications(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """✅ v5: включить/выключить письмо о завершении пакетной миграции."""
+    """Включить/выключить письмо о завершении пакетной миграции."""
     if payload.notify_batch_done is None:
         raise HTTPException(status_code=400, detail="Не указаны настройки для обновления")
 

@@ -5,7 +5,10 @@ services:
     container_name: marketplace_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-migrator_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-migrator_password_2026}
+      # R35 (К-1 ревью): дефолтного пароля больше нет — fail-fast вместо
+      # молчаливого старта с известным из репозитория паролем. .env обязан
+      # содержать POSTGRES_PASSWORD (шаблон — .env.example).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env (see .env.example)}
       POSTGRES_DB: ${POSTGRES_DB:-marketplace_migrator}
     ports:
       # R29 (В-4 ревью): БД только для localhost — не торчит в LAN;
@@ -33,6 +36,31 @@ services:
       timeout: 5s
       retries: 5
 
+  # R35 (В-11 ревью): миграции — отдельный one-shot сервис. Раньше
+  # `alembic upgrade head` выполнялся в CMD backend-контейнера, а
+  # celery-воркеры ждут лишь service_started: воркер мог начать работать
+  # со схемой, которая ещё накатывается. Теперь миграции гоняются ОДИН
+  # раз до старта приложений: backend ждёт service_completed_successfully,
+  # celery-воркеры ждут старта backend — цепочка транзитивна.
+  # Поднимать как обычно: docker compose up -d --build (образ собирается
+  # до создания контейнеров, migrate использует marketplace_backend:latest).
+  migrate:
+    image: marketplace_backend:latest
+    pull_policy: never
+    container_name: marketplace_migrate
+    command: alembic upgrade head
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
   backend:
     build:
       context: ./backend
@@ -42,6 +70,8 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     image: marketplace_backend:latest
     container_name: marketplace_backend
+    # R35 (В-11): alembic убран из команды — миграции в сервисе migrate
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       # R29 (В-4/Н-5 ревью): backend наружу хоста не нужен (в проде за nginx);
       # dev-фронт и утилиты ходят с этого же хоста — хватает 127.0.0.1
@@ -61,6 +91,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   celery_worker:

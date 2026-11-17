@@ -11,7 +11,12 @@ export const enc = encodeURIComponent;
  * Токен живёт в httpOnly-куке access_token (JS не читает — защита от XSS).
  * Все запросы идут с credentials: 'include' (в проде same-origin, в dev — CORS).
  * Мутации дополнительно подписываются CSRF-заголовком (double-submit).
+ * Имена кук (access_token / csrf_token) продублированы константами в
+ * backend/core/auth.py — синхронность обеспечивают тесты test_cookie_auth.py.
  */
+// Берём ПЕРВУЮ куку csrf_token: пока приложение живёт на одном домене,
+// других не бывает. Если появятся поддомены с собственными csrf_token —
+// уточнить выбор по path/domain (R35, замечание ревью).
 const getCsrfToken = () =>
   document.cookie
     .split('; ')

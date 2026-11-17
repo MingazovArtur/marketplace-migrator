@@ -25,4 +25,9 @@ USER app
 
 EXPOSE 8000
 
+# R35 (В-11): в docker-compose.yml миграции выделены в отдельный one-shot
+# сервис migrate (backend ждёт его service_completed_successfully) —
+# alembic больше не гоняется параллельно со стартующим приложением.
+# CMD ниже остаётся для одиночного `docker run` (тогда процесс один,
+# гонки нет).
 CMD ["sh", "-c", "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"]
