@@ -27,6 +27,14 @@ log() { echo "[$(date '+%F %T')] $*"; }
 
 POSTGRES_USER=$(grep -E '^POSTGRES_USER=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '\r"')
 POSTGRES_DB=$(grep -E '^POSTGRES_DB=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '\r"')
+if [ -z "$POSTGRES_USER" ] || [ -z "$POSTGRES_DB" ]; then
+  log "ERROR: не удалось прочитать POSTGRES_USER/POSTGRES_DB из $ENV_FILE"
+  exit 1
+fi
+if [ ! -f "$COMPOSE_FILE" ]; then
+  log "ERROR: не найден $COMPOSE_FILE (PROJECT_DIR=$PROJECT_DIR?)"
+  exit 1
+fi
 
 # --- выбор дампа ------------------------------------------------------------
 if [ $# -lt 1 ]; then

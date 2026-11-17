@@ -81,7 +81,9 @@ docker compose -f /opt/prod/docker-compose.prod.yml ps
 
 ```bash
 # поднимаем копию БД на другом порте и восстанавливаем туда
-docker run -d --name restore-test -e POSTGRES_PASSWORD=test -p 55432:5432 postgres:15
+# (порт публикуем только на 127.0.0.1: тестовая БД с паролем test
+#  не должна быть доступна снаружи)
+docker run -d --name restore-test -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:15
 cat /backups/marketplace/marketplace_<дата>.dump | \
   docker exec -i restore-test pg_restore -U postgres --dbname postgres --clean --if-exists --no-owner
 docker exec -it restore-test psql -U postgres -c "SELECT count(*) FROM products;"

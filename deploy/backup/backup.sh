@@ -43,17 +43,25 @@ if [ ! -f "$COMPOSE_FILE" ]; then
 fi
 
 # --- место на диске ---------------------------------------------------------
+# Каталог создаём ДО проверки df: на свежем сервере df по несуществующему
+# пути молча вернёт пусто, и первый запуск упадёт с ложным «мало места».
+mkdir -p "$BACKUP_DIR"
+
 free_mb=$(df -Pm "$BACKUP_DIR" 2>/dev/null | awk 'NR==2 {print $4}' || echo 0)
 if [ "${free_mb:-0}" -lt "$MIN_FREE_MB" ]; then
-  log "ERROR: на разделе $BACKUP_DIR свободно ${free_mb} МБ < ${MIN_FREE_MB} МБ — бэкап не запускаю"
+  log "ERROR: на разделе $BACKUP_DIR свободно ${free_mb:-0} МБ < ${MIN_FREE_MB} МБ — бэкап не запускаю"
   exit 1
 fi
-
-mkdir -p "$BACKUP_DIR"
 
 # --- дамп БД: сначала во временный файл, валидация, потом атомарный mv -----
 DUMP="$BACKUP_DIR/marketplace_$STAMP.dump"
 TMP="$DUMP.tmp"
+MEDIA="$BACKUP_DIR/media_$STAMP.tar.gz"
+MEDIA_TMP="$MEDIA.tmp"
+# Частичный .tmp не подбирается ротацией (find ищет *.dump/*.tar.gz) —
+# вычищаем при любом выходе: сбой pg_dump/tar, set -e, прерывание по сигналу.
+trap 'rm -f "$TMP" "$MEDIA_TMP"' EXIT
+trap 'exit 1' INT TERM
 
 log "pg_dump: $POSTGRES_DB (custom format) -> $DUMP"
 docker compose -f "$COMPOSE_FILE" exec -T db \
@@ -73,15 +81,13 @@ log "backup ok: $DUMP ($size_h)"
 
 # --- (опция) том media: tar через контейнер backend (том смонтирован) ------
 if [ "$BACKUP_MEDIA" = "1" ]; then
-  MEDIA="$BACKUP_DIR/media_$STAMP.tar.gz"
   docker compose -f "$COMPOSE_FILE" exec -T backend \
-    tar czf - -C /app/media . > "$MEDIA.tmp"
-  if ! tar -tzf "$MEDIA.tmp" > /dev/null 2>&2; then
+    tar czf - -C /app/media . > "$MEDIA_TMP"
+  if ! tar -tzf "$MEDIA_TMP" > /dev/null 2>/dev/null; then
     log "ERROR: media-архив битый — удаляю"
-    rm -f "$MEDIA.tmp"
-    exit 1
+    exit 1   # .tmp вычистит trap
   fi
-  mv "$MEDIA.tmp" "$MEDIA"
+  mv "$MEDIA_TMP" "$MEDIA"
   log "media ok: $MEDIA ($(du -h "$MEDIA" | cut -f1))"
 fi
 

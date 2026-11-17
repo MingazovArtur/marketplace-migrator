@@ -53,8 +53,8 @@ npm run test       # Vitest: хук debounce, чистые функции api/cl
 
 ```bash
 cd backend
-make lint          # CI-гейт: только критические правила (E9,F63,F7,F82)
-make lint-full     # полный набор из pyproject.toml (чист с Round 21)
+make lint          # CI-гейт: полный набор (ужесточён в Round 34)
+make lint-full     # алиас make lint (истор. имя; чист с Round 21)
 make format        # black + ruff --fix
 
 cd ../frontend
@@ -62,10 +62,11 @@ npm run lint       # eslint
 npm run format     # prettier
 ```
 
-**Текущий долг по стилю** (полный набор ruff): 447 замечаний в старом коде
+**Стилевой долг** (полный набор ruff): 447 замечаний в старом коде
 (замер до Round 17) — в основном `W293/W292` (пробелы/переводы строк),
 `B008` (FastAPI `Depends()` в дефолтах — норма для FastAPI), `UP006/UP035`
-(старые аннотации), `I001` (сортировка импортов). План:
+(старые аннотации), `I001` (сортировка импортов). План (выполнен:
+Round 21 — 0 замечаний; Round 34 — CI-гейт переведён на полный набор):
 
 1. CI гейтится только на `E9,F63,F7,F82` (падения и критические ошибки);
 2. новые файлы обязаны проходить полный набор (все файлы недели 4 проходят);
@@ -389,7 +390,7 @@ exit 0) и сверкой checksums с официальными колёсами
 
 | Job | Что делает |
 |---|---|
-| **backend** | `ruff check --select E9,F63,F7,F82 .` + `python -m pytest` (матрица Python 3.12 / 3.15 — 3.15 = рантайм прод-образа, Round 27) |
+| **backend** | `ruff check .` (полный набор, ужесточён Round 34) + `python -m pytest` (матрица Python 3.12 / 3.15 — 3.15 = рантайм прод-образа, Round 27) |
 | **frontend** | `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run build` (матрица Node 22 / 26 — 26 = рантайм build-стейджа прод-образа, Round 27) |
 | **docker** | сборка `backend/Dockerfile.prod` и `frontend/Dockerfile.prod` |
 

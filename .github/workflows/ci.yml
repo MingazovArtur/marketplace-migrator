@@ -32,11 +32,11 @@ jobs:
       - name: Установка зависимостей
         run: pip install -r requirements.txt -r requirements-dev.txt
 
-      # Гейт = критические правила (синтаксис, undefined names, сравнение с константой).
-      # Полный набор правил (см. backend/pyproject.toml) — локально: make lint-full
-      # (долг по стилю старого кода и план ужесточения — docs/engineering.md)
-      - name: Ruff — критические правила (гейт)
-        run: ruff check --select E9,F63,F7,F82 .
+      # Гейт = полный набор правил проекта (backend/pyproject.toml).
+      # Стилевой долг закрыт в Round 21 (447 → 0), с Round 34 CI гоняет
+      # полный набор — как локальные гейты (docs/engineering.md)
+      - name: Ruff
+        run: ruff check .
 
       - name: Pytest
         run: python -m pytest
