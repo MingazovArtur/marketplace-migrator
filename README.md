@@ -42,24 +42,24 @@ docker compose up --build   # API: localhost:8000 (swagger: /docs), фронт: 
 
 ### Backend
 - **FastAPI (0.115+)** — основной асинхронный фреймворк API
-- **SQLAlchemy 2.0** — ORM для работы с БД
+- **SQLAlchemy 2.1** — ORM для работы с БД
 - **PostgreSQL 15** — основная реляционная база данных (SQLite fallback для локальной разработки)
 - **Redis 7** — кэширование справочников/спеков, хранение лимитов/банов и брокер задач
 - **Celery 5** — фоновые задачи (миграции, загрузка спеков Ozon, скачивание фото)
 - **Alembic** — управление миграциями схемы БД
-- **OpenPyXL / Pandas** — парсинг и генерация XLSX/CSV со сложным форматированием и валидацией ячеек (`DataValidation`)
+- **OpenPyXL** — парсинг и генерация XLSX/CSV со сложным форматированием и валидацией ячеек (`DataValidation`); парсеры на чистом openpyxl, без pandas
 - **SlowAPI** — rate limiting и автоблокировка нарушителей
 - **Pydantic v2 + pydantic-settings** — валидация схем и конфигурация окружения
 - **bcrypt + python-jose** — хэширование паролей и JWT-аутентификация
 
 ### Frontend
 - **React 19** + **Vite** — клиентское SPA-приложение
-- **Custom Hooks** — управление состоянием (`useAuth`, `useProducts`, `useMigration`, `useCategoryMapping`)
+- **Custom Hooks** — управление состоянием (`useAuth`, `useProducts`, `useMigration`, `useDebouncedValue`)
 - **CSS Variables** — адаптивная дизайн-система с поддержкой тёмной и светлой тем
-- **Hash-based routing** — легковесная навигация без внешних зависимостей
+- **react-router-dom (HashRouter)** — хэш-навигация SPA: работает на любой статической раздаче, без серверных rewrite
 
 ### Инфраструктура
-- **Docker + Docker Compose** — изолированная конфигурация для `dev` и `prod` с лимитами памяти и CPU
+- **Docker + Docker Compose** — изолированная конфигурация для `dev` и `prod` (в проде — лимиты памяти и CPU)
 - **Nginx** — reverse proxy, раздача статики/медиа, сжатие gzip и rate-limiting на уровне периметра
 - **Certbot** — автоматический выпуск и обновление SSL-сертификатов Let's Encrypt
 
@@ -71,7 +71,7 @@ docker compose up --build   # API: localhost:8000 (swagger: /docs), фронт: 
 ┌─────────────────────────────────────────────────────────────┐
 │  Nginx (порт 80/443)                                        │
 │  ├── /api/*   → backend:8000 (FastAPI)                      │
-│  ├── /media/* → /var/media (статические копии фото)         │
+│  ├── /media/* → backend:8000 (авторизованная раздача фото)  │
 │  └── /*       → frontend (React SPA)                        │
 └───────────────┬───────────────────────────┬─────────────────┘
                 │                           │

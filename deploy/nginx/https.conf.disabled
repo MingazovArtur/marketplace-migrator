@@ -77,11 +77,21 @@ server {
         client_max_body_size 50m;
     }
 
-    # Медиа (копии фото)
+    # Медиа (копии фото) — через backend: авторизация (владелец/админ)
+    # и ownership-проверка (routers/media.py). Кэш приватный: файл зависит от куки.
+    # R33: было `alias /var/media/` — volume media в nginx НЕ смонтирован
+    # (все /media/* давали бы 404 в HTTPS-режиме), а его монтирование
+    # раскрывало бы фото и /media/exports/ анонимно (регрессия В-1 из
+    # round29). Поведение приведено к default.conf (HTTP): идентично.
     location /media/ {
-        alias /var/media/;
-        expires 30d;
-        add_header Cache-Control "public";
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        expires 7d;
+        add_header Cache-Control "private";
     }
 
     # Статика фронта с долгим кэшем
