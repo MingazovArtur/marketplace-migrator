@@ -132,14 +132,31 @@ app.add_middleware(SlowAPIMiddleware)
 
 
 # ============================================================
-# 3. CORS — САМЫЙ ВНЕШНИЙ middleware (добавляется последним)
+# 4. CORS — САМЫЙ ВНЕШНИЙ middleware (добавляется последним)
 # ============================================================
-local_origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
+# Было Н-1 из код-ревью: dev-origins (localhost:5173/3000) попадали в
+# CORS всегда, включая production, вместе с allow_credentials=True.
+# Теперь dev-origins добавляются ТОЛЬКО вне production; в проде список
+# строится исключительно из settings.CORS_ORIGINS.
+
+
+def _build_cors_origins(*, is_production: bool, configured: list[str]) -> list[str]:
+    """Разрешённые CORS-origins.
+
+    Вне production к настроенным origins добавляются локальные dev-адреса
+    (Vite 5173 и альтернативный 3000). В production — только явные
+    settings.CORS_ORIGINS. Дубликаты схлопываются, порядок сохраняется.
+    """
+    local_origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    if is_production:
+        return list(dict.fromkeys(configured))
+    return list(dict.fromkeys(local_origins + configured))
+
 
 config_origins = []
 if hasattr(settings, "CORS_ORIGINS") and settings.CORS_ORIGINS:
@@ -148,7 +165,16 @@ if hasattr(settings, "CORS_ORIGINS") and settings.CORS_ORIGINS:
     else:
         config_origins = list(settings.CORS_ORIGINS)
 
-allowed_origins = list(set(local_origins + config_origins))
+allowed_origins = _build_cors_origins(
+    is_production=_IS_PRODUCTION, configured=config_origins
+)
+
+if _IS_PRODUCTION and not allowed_origins:
+    logger.warning(
+        "CORS_ORIGINS не задан в production: кросс-доменные запросы с "
+        "credentials будут отклоняться (штатно, если фронт и API живут "
+        "на одном домене за reverse-proxy)"
+    )
 
 app.add_middleware(
     CORSMiddleware,
