@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../icons';
 import { logger } from '../../utils/logger';
+import { API_URL, doFetch } from '../../api/client';
 
 /**
  * Компонент выбора кода ТН ВЭД с автоподсказками.
@@ -21,9 +22,17 @@ const TnvedSelector = ({ value, onChange, productName = '', category = '', disab
 
       setLoading(true);
       try {
-        const response = await fetch(
-          `/api/tnved/suggest?name=${encodeURIComponent(text)}&category=${encodeURIComponent(category)}`
+        // R29: через единый api-клиент (API_URL + doFetch) вместо сырого
+        // fetch('/api/...') и с проверкой res.ok — раньше 4xx/5xx молча
+        // превращались в пустой список подсказок
+        const response = await doFetch(
+          `${API_URL}/tnved/suggest?name=${encodeURIComponent(text)}&category=${encodeURIComponent(category)}`
         );
+        if (!response.ok) {
+          logger.error('Ошибка получения подсказок ТН ВЭД:', response.status);
+          setSuggestions([]);
+          return;
+        }
         const data = await response.json();
         if (data.success) {
           setSuggestions(data.suggestions || []);

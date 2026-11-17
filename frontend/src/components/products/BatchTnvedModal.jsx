@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Button from '../common/Button';
 import Icon from '../icons';
 import { api } from '../../api';
+import { API_URL, doFetch } from '../../api/client';
 
 /**
  * ✅ Массовый подбор ТН ВЭД для выбранных товаров.
@@ -51,7 +52,14 @@ const BatchTnvedModal = ({ isOpen, onClose, selectedIds = [], onSaved }) => {
     }
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/tnved/search?query=${encodeURIComponent(text)}`);
+        // R29: через единый api-клиент (API_URL + doFetch) вместо сырого
+        // fetch('/api/...') и с проверкой res.ok — раньше HTTP-ошибки
+        // молча превращались в пустой список
+        const res = await doFetch(`${API_URL}/tnved/search?query=${encodeURIComponent(text)}`);
+        if (!res.ok) {
+          setSearchResults([]);
+          return;
+        }
         const d = await res.json();
         setSearchResults((d.results || []).slice(0, 8));
       } catch {

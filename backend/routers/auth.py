@@ -227,7 +227,8 @@ def logout(request: Request, response: Response, current_user: User = Depends(ge
 
 
 # ============================================================
-# Профиль: без лимитов (покрывается глобальным 100/min из middleware)
+# Профиль: без собственного лимита — покрыт общим 200/min
+# (default_limits в core/rate_limit.py, R29)
 # ============================================================
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):

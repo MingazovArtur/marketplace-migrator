@@ -1,16 +1,23 @@
 """
 Парсер YML-фидов Яндекс Маркета с защитой от SSRF и XML Bomb (XXE).
 Docs: https://yandex.ru/support/partner2/yml/yml-format.html
+
+R29: загрузка переведена на core.ssrf.safe_get — DNS-пиннинг на время
+запроса (защита от DNS-rebinding/TOCTOU: раньше между проверкой и
+соединением DNS мог «переключиться» на внутренний адрес), валидация
+КАЖДОГО перехода редиректа и лимит глубины 3 (раньше редиректы
+обходились неограниченной рекурсией fetch_and_parse). Собственная
+урезанная проверка validate_url удалена — используется единый
+эталонный модуль SSRF-защиты проекта.
 """
 
-import ipaddress
 import logging
 import re
-import socket
-from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 import httpx
+
+from core.ssrf import safe_get
 
 logger = logging.getLogger(__name__)
 
@@ -29,53 +36,13 @@ class YmlParser:
         """
         self.max_offers = max_offers
 
-    def validate_url(self, url: str) -> bool:
-        """
-        Проверяет, что URL валидный, использует http/https и НЕ ведёт
-        во внутреннюю сеть (защита от SSRF).
-        """
-        try:
-            result = urlparse(url)
-            if not all([result.scheme, result.netloc]):
-                return False
-            if result.scheme not in ("http", "https"):
-                return False
-
-            hostname = result.hostname
-            if not hostname:
-                return False
-
-            # Запрещаем очевидные локальные имена внутри Docker-сети
-            forbidden_hosts = {"localhost", "db", "redis", "backend", "celery", "nginx"}
-            if hostname.lower() in forbidden_hosts:
-                logger.warning(f"🚫 SSRF block: запрещённый хост {hostname}")
-                return False
-
-            # Резолвим все IP-адреса хоста и проверяем, что среди них нет приватных/локальных
-            addr_info = socket.getaddrinfo(hostname, None)
-            for item in addr_info:
-                ip_str = item[4][0]
-                ip_obj = ipaddress.ip_address(ip_str)
-                if (
-                    ip_obj.is_private
-                    or ip_obj.is_loopback
-                    or ip_obj.is_link_local
-                    or ip_obj.is_multicast
-                    or ip_obj.is_reserved
-                ):
-                    logger.warning(
-                        f"🚫 SSRF block: хост {hostname} резолвится во внутренний IP {ip_str}"
-                    )
-                    return False
-
-            return True
-        except Exception as e:
-            logger.warning(f"Ошибка валидации URL {url}: {e}")
-            return False
-
     def fetch_and_parse(self, url: str) -> dict:
         """
         Скачивает и парсит YML-фид.
+
+        Загрузка — через core.ssrf.safe_get (R29): исходный URL и каждый
+        редирект валидируются, валидированные IP пиннятся на время запроса.
+
         Возвращает: {
             "shop_name": str,
             "categories": {id: name},
@@ -84,29 +51,19 @@ class YmlParser:
             "parsed_offers": int
         }
         """
-        if not self.validate_url(url):
-            raise ValueError(
-                f"Невалидный или небезопасный URL: {url}. "
-                "Разрешены только публичные http/https адреса."
-            )
-
         logger.info(f"📡 Скачиваем YML-фид: {url}")
 
         try:
-            with (
-                httpx.Client(
-                    timeout=30,
-                    # follow_redirects по умолчанию выключен — защита от SSRF-редиректа на внутренний IP
-                    headers={"User-Agent": "Mozilla/5.0 (Marketplace Migrator Bot)"},
-                ) as client,
-                client.stream("GET", url) as response,
-            ):
-                if response.is_redirect or response.status_code in (301, 302, 303, 307, 308):
-                    redirect_url = response.headers.get("Location", "")
-                    if not self.validate_url(redirect_url):
-                        raise ValueError("Редирект фида ведёт на недопустимый адрес")
-                    return self.fetch_and_parse(redirect_url)
-
+            # R29: safe_get сам обрабатывает редиректы (с валидацией каждого
+            # перехода и лимитом MAX_REDIRECTS=3) и возвращает не-редирект
+            # ответ; «Запрещённый адрес» прилетает как ValueError
+            response = safe_get(
+                url,
+                timeout=30,
+                headers={"User-Agent": "Mozilla/5.0 (Marketplace Migrator Bot)"},
+                stream=True,
+            )
+            try:
                 response.raise_for_status()
 
                 content_type = response.headers.get("Content-Type", "").lower()
@@ -126,6 +83,8 @@ class YmlParser:
                     chunks.append(chunk)
 
                 content = b"".join(chunks)
+            finally:
+                response.close()
 
             return self._parse_xml(content, url)
 
@@ -140,9 +99,10 @@ class YmlParser:
 
     def _parse_xml(self, content: bytes, source_url: str) -> dict:
         """Парсит XML-содержимое YML-фида с защитой от XML Bomb (ENTITY)."""
-        # Защита от Billion Laughs / XXE: запрещаем объявления <!ENTITY в XML
-        head_sample = content[:4096].upper()
-        if b"<!ENTITY" in head_sample:
+        # Защита от Billion Laughs / XXE: запрещаем объявления <!ENTITY в XML.
+        # R29: проверяем весь контент — раньше сканировались только первые
+        # 4096 байт, и DTD среди больших <categories> обходила проверку
+        if b"<!ENTITY" in content:
             raise ValueError(
                 "XML содержит запрещённые конструкции <!ENTITY> (защита от XXE/XML Bomb)"
             )

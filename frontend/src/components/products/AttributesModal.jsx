@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Button from '../common/Button';
 import { api } from '../../api';
 import Icon from '../icons';
@@ -7,16 +7,25 @@ const AttributesModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
   const [attributes, setAttributes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // R29: стабильные ключи строк — key={index} при удалении средней строки
+  // «склеивал» стейты соседних инпутов (React переиспользовал DOM по позиции)
+  const keySeq = useRef(0);
 
   useEffect(() => {
     if (isOpen && product) {
-      setAttributes(product.attributes || []);
+      keySeq.current = 0;
+      setAttributes(
+        (product.attributes || []).map((attr) => ({ ...attr, _key: ++keySeq.current }))
+      );
       setError(''); // Сбрасываем ошибку при каждом открытии
     }
   }, [isOpen, product]);
 
   const handleAdd = () => {
-    setAttributes([...attributes, { name: '', value: '', sort_order: attributes.length }]);
+    setAttributes([
+      ...attributes,
+      { name: '', value: '', sort_order: attributes.length, _key: ++keySeq.current },
+    ]);
   };
 
   const handleRemove = (index) => {
@@ -33,7 +42,9 @@ const AttributesModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
     setLoading(true);
     setError('');
     try {
-      const result = await api.setAttributes(product.id, attributes);
+      // R29: служебный _key — только для React-ключей, в API не отправляем
+      const payload = attributes.map(({ _key, ...rest }) => rest);
+      const result = await api.setAttributes(product.id, payload);
       onSave();
 
       // ✅ Показываем уведомления о нормализации
@@ -81,7 +92,7 @@ const AttributesModal = ({ isOpen, onClose, product, onSave, onNotify }) => {
 
         <div className="attributes-list">
           {attributes.map((attr, idx) => (
-            <div key={idx} className="attribute-row">
+            <div key={attr._key ?? `row-${idx}`} className="attribute-row">
               <input
                 className="form-input"
                 placeholder="Название (Размер, Цвет...)"

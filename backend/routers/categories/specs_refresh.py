@@ -15,12 +15,13 @@
 import logging
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from core.auth import get_current_user
 from core.config import settings
 from core.crypto import encrypt_str
+from core.rate_limit import limiter
 from core.sse import SSE_HEADERS, task_events
 from database.models import User
 from models.schemas import RefreshSpecRequest
@@ -32,8 +33,10 @@ router = APIRouter()
 
 
 @router.post("/specs/{platform}/refresh")
+@limiter.limit("5/minute")  # R29: запуск тяжёлой Celery-загрузки шёл без лимита
 async def refresh_specs(
     platform: str,
+    request: Request,
     payload: RefreshSpecRequest,
     current_user: User = Depends(get_current_user),
 ):

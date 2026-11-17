@@ -1,8 +1,11 @@
 """Загрузка фото с компьютера в карточку товара (multipart).
 
-Вынесено без изменений из монолита routers/photos.py (Р21).
+Вынесено без изменений из монолита routers/photos.py (Р21);
+R29: дисковые записи и обращения к БД обёрнуты в asyncio.to_thread —
+раньше они выполнялись синхронно внутри async def и блокировали event loop.
 """
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -37,7 +40,8 @@ async def upload_photo_files(
     Загрузить одно или несколько фото с компьютера в карточку товара.
     Файлы сохраняются в /app/media/products/{product_id}/ и сразу привязываются к товару.
     """
-    product = repo.get_by_id(product_id, user_id=current_user.id)
+    # R29: синхронные обращения к БД уводим из event loop
+    product = await asyncio.to_thread(repo.get_by_id, product_id, user_id=current_user.id)
     if not product:
         raise HTTPException(status_code=404, detail="Товар не найден или не принадлежит вам")
 
@@ -49,9 +53,11 @@ async def upload_photo_files(
         )
 
     dest_dir = Path(MEDIA_ROOT) / "products" / str(product_id)
-    dest_dir.mkdir(parents=True, exist_ok=True)
 
-    uploaded_urls = []
+    # R29: сначала читаем все файлы (async), валидируем их — и только потом
+    # одним вызовом to_thread пишем на диск и обновляем БД. Побочно: при
+    # ошибке в середине пакета на диске больше не остаётся осиротевших файлов
+    prepared = []
     for upload in files:
         if not upload.filename:
             continue
@@ -74,17 +80,25 @@ async def upload_photo_files(
         # Формируем безопасное имя файла без символов '/' и '_' (требование Ozon к именам фото)
         digest = hashlib.md5(data).hexdigest()[:12]
         rand_suffix = secrets.token_hex(3)
-        safe_filename = f"photo-{digest}-{rand_suffix}{ext}"
-        file_path = dest_dir / safe_filename
-        file_path.write_bytes(data)
+        prepared.append((f"photo-{digest}-{rand_suffix}{ext}", data))
 
+    def _write_files():
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for safe_filename, file_data in prepared:
+            (dest_dir / safe_filename).write_bytes(file_data)
+
+    await asyncio.to_thread(_write_files)
+
+    uploaded_urls = []
+    for safe_filename, _ in prepared:
         rel_path = f"products/{product_id}/{safe_filename}"
         public_url = _build_public_media_url(request, rel_path)
         uploaded_urls.append(public_url)
         if public_url not in existing_photos:
             existing_photos.append(public_url)
 
-    repo.update(
+    await asyncio.to_thread(
+        repo.update,
         product_id,
         {"photos": existing_photos, "photos_count": len(existing_photos)},
         user_id=current_user.id,

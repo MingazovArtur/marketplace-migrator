@@ -134,7 +134,9 @@ async def import_products(
     # ---------- 2. YML-фид (Яндекс Маркет по ссылке) ----------
     if auth_key.startswith(("http://", "https://")):
         try:
-            yml_result = YmlParser().fetch_and_parse(auth_key)
+            # R29: скачивание фида (до 25 МБ + XML-парсинг) уводим из event
+            # loop — соседние ветки роута уже обёрнуты в to_thread
+            yml_result = await asyncio.to_thread(YmlParser().fetch_and_parse, auth_key)
             yml_products = (
                 yml_result.get("offers", []) if isinstance(yml_result, dict) else yml_result
             )

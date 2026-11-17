@@ -8,7 +8,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-migrator_password_2026}
       POSTGRES_DB: ${POSTGRES_DB:-marketplace_migrator}
     ports:
-      - "5432:5432"
+      # R29 (В-4 ревью): БД только для localhost — не торчит в LAN;
+      # внутри docker-сети сервисы ходят на db:5432 напрямую, без этого порта
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -22,7 +24,8 @@ services:
     image: redis:7-alpine
     container_name: marketplace_redis
     ports:
-      - "6379:6379"
+      # R29 (В-4 ревью): Redis без пароля — только localhost
+      - "127.0.0.1:6379:6379"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -40,7 +43,9 @@ services:
     image: marketplace_backend:latest
     container_name: marketplace_backend
     ports:
-      - "8000:8000"
+      # R29 (В-4/Н-5 ревью): backend наружу хоста не нужен (в проде за nginx);
+      # dev-фронт и утилиты ходят с этого же хоста — хватает 127.0.0.1
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./backend:/app
       - media:/app/media

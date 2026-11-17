@@ -6,11 +6,13 @@ import io
 import logging
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from openpyxl.utils import get_column_letter
 
+from core.auth import get_current_user
 from core.platforms import PLATFORM_CONFIG, Platform
+from database.models import User
 from services.xlsx_io import rows_workbook, write_columns
 
 logger = logging.getLogger(__name__)
@@ -36,9 +38,14 @@ def _workbook_response(workbook, filename: str) -> StreamingResponse:
 
 
 @router.get("/templates/{platform}")
-def download_template(platform: str):
+def download_template(platform: str, current_user: User = Depends(get_current_user)):
     """
     Скачать шаблон Excel файла для импорта товаров
+
+    R29: эндпоинт закрыт авторизацией — раньше отдавался анонимно, при том
+    что дублирующий его /api/export/template/{platform} требовал входа.
+    Единственный потребитель (фронт, api/imports.js) качает шаблон через
+    doFetch с cookie-аутентификацией — поведение не меняется.
 
     Args:
         platform: ozon, wildberries, yandex, magnit, megamarket, holodilnik, aliexpress

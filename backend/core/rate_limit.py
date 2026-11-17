@@ -129,6 +129,10 @@ limiter = Limiter(
     key_func=get_user_identifier,
     storage_uri=settings.REDIS_URL,
     strategy="fixed-window",
+    # R29: общий зонт на все эндпоинты без собственного лимита. Раньше комментарий
+    # в routers/auth.py обещал «глобальный 100/min из middleware», но default_limits
+    # не был задан — эндпоинты без @limiter.limit не имели ограничений вовсе.
+    default_limits=["200/minute"],
 )
 
 

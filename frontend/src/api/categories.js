@@ -18,8 +18,9 @@ export const categoriesApi = {
   },
 
   refreshCategories: async (platform, apiKey) => {
-    const q = new URLSearchParams({ api_key: apiKey || '' });
-    const res = await doFetch(`${API_URL}/categories/${enc(platform)}/refresh?${q.toString()}`, {
+    // R29: ключ только в теле запроса — раньше дублировался в query-string
+    // (?api_key=...) и оседал в access-логах nginx (В-2 код-ревью)
+    const res = await doFetch(`${API_URL}/categories/${enc(platform)}/refresh`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ api_key: apiKey || '' }),

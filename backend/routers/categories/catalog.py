@@ -6,9 +6,10 @@
 
 import logging
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, Request
 
 from core.auth import get_current_user
+from core.rate_limit import limiter
 from database.models import User
 from routers.categories._support import RefreshCategoriesPayload
 from services import cache_service
@@ -60,17 +61,21 @@ def get_categories_tree(platform: str):
 
 
 @router.post("/categories/{platform}/refresh")
+@limiter.limit("10/minute")  # R29: раньше тяжёлый refresh шёл без лимита
 def refresh_categories_with_api(
     platform: str,
-    api_key: str | None = Query(default=None),
+    request: Request,
     payload: RefreshCategoriesPayload | None = Body(default=None),
     current_user: User = Depends(get_current_user),
 ):
     """
-    ✅ ИСПРАВЛЕНО: Обновить справочник категорий с использованием API ключа.
-    Принимает api_key как из JSON-тела (от CategoryMapping.jsx), так и из query-параметра.
+    Обновить справочник категорий с использованием API ключа.
+
+    R29: api_key принимается ТОЛЬКО из JSON-тела — раньше ключ дублировался
+    в query-string (?api_key=...) и оседал в access-логах nginx (В-2
+    код-ревью); фронт шлёт его в теле с самого начала поддержки body.
     """
-    resolved_key = (api_key or (payload.api_key if payload else "") or "").strip()
+    resolved_key = (payload.api_key if payload else "").strip()
     categories = category_service.get_categories_with_api_key(platform, resolved_key)
 
     cache_service.delete_pattern(f"categories:{platform}:*")

@@ -68,6 +68,11 @@ async def import_from_file(
 
     # ---------- Парсинг ----------
     try:
+        # R29 (С-1 ревью): размер известен ДО чтения (Starlette спулит multipart
+        # на диск) — отклоняем перегруз, не загружая файл в RAM целиком.
+        # Если размер недоступен (None), страховочная проверка ниже остаётся.
+        if file.size is not None and file.size > MAX_IMPORT_FILE_SIZE:
+            raise HTTPException(status_code=400, detail="Файл слишком большой (максимум 15 МБ)")
         contents = await file.read()
         if len(contents) > MAX_IMPORT_FILE_SIZE:
             raise HTTPException(status_code=400, detail="Файл слишком большой (максимум 15 МБ)")

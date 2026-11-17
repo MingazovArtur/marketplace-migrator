@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Button from '../common/Button';
 import { api } from '../../api';
 import Icon from '../icons';
@@ -6,17 +6,30 @@ import Icon from '../icons';
 const VariantsModal = ({ isOpen, onClose, product, onSave }) => {
   const [variants, setVariants] = useState([]);
   const [loading, setLoading] = useState(false);
+  // R29: стабильные ключи строк — key={index} при удалении средней строки
+  // «склеивал» стейты соседних инпутов (React переиспользовал DOM по позиции)
+  const keySeq = useRef(0);
+  const withKeys = (rows) => rows.map((row) => ({ ...row, _key: ++keySeq.current }));
 
   useEffect(() => {
     if (isOpen && product) {
-      setVariants(product.variants || []);
+      keySeq.current = 0;
+      setVariants(withKeys(product.variants || []));
     }
   }, [isOpen, product]);
 
   const handleAdd = () => {
     setVariants([
       ...variants,
-      { sku: '', size: '', color: '', price: null, stock: null, sort_order: variants.length },
+      {
+        sku: '',
+        size: '',
+        color: '',
+        price: null,
+        stock: null,
+        sort_order: variants.length,
+        _key: ++keySeq.current,
+      },
     ]);
   };
 
@@ -97,7 +110,7 @@ const VariantsModal = ({ isOpen, onClose, product, onSave }) => {
                 </tr>
               )}
               {variants.map((v, idx) => (
-                <tr key={idx}>
+                <tr key={v._key ?? `row-${idx}`}>
                   <td>
                     <input
                       className="form-input"
