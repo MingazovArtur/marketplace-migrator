@@ -64,15 +64,17 @@ describe('FirstMigrationWizard', () => {
     expect(screen.getByText('Wildberries')).toBeInTheDocument();
   });
 
-  it('«Не сейчас» закрывает мастер и не помечает его пройденным', () => {
+  it('«Не сейчас» закрывает мастер: не пройден, но и не беспокоит до конца сессии', () => {
     const onClose = vi.fn();
     renderWizard({ onClose });
 
     fireEvent.click(screen.getByText('Не сейчас', { selector: 'button' }));
 
     expect(onClose).toHaveBeenCalledTimes(1);
-    // Ключ «пройден» не ставится: автопоказ возможен после перезагрузки
+    // Ключ «пройден» не ставится: автопоказ возможен в следующей сессии браузера
     expect(localStorage.getItem('first_migration_wizard_v1')).toBeNull();
+    // Dismiss на сессию — после F5 мастер не выскочит сам (до закрытия вкладки)
+    expect(sessionStorage.getItem('first_migration_wizard_dismissed')).toBe('true');
   });
 
   it('с товарами: мастер начинает сразу с выбора площадки назначения', () => {

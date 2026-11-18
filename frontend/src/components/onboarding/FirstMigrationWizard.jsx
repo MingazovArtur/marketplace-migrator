@@ -4,7 +4,7 @@ import Icon from '../icons';
 import { PLATFORMS } from '../../utils/platformUtils';
 import { api } from '../../api';
 import { GAP_LABELS, BLOCKING_GAP_FIELDS } from '../../constants/gaps';
-import { completeWizard } from './firstMigrationStorage';
+import { completeWizard, dismissWizardForSession } from './firstMigrationStorage';
 
 /**
  * Мастер первой миграции — проводит новичка по полному циклу
@@ -151,7 +151,9 @@ const FirstMigrationWizard = ({ isOpen, onClose, onNotify, onImported, initialPr
 
   const handleClose = useCallback(() => {
     // Закрытие на середине — «Не сейчас»: в этой сессии автопоказ не повторится
+    // (sessionStorage — переживёт F5, сотрётся при закрытии вкладки)
     if (step !== 'done') {
+      dismissWizardForSession();
       onNotify?.(
         'Мастер можно запустить позже: кнопка «Мастер первой миграции» на странице «Товары».'
       );
