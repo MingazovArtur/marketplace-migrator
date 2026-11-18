@@ -1,6 +1,7 @@
 import React from 'react';
 import Icon from '../components/icons';
 import { resetOnboarding } from '../components/onboarding/onboardingStorage';
+import { restartWizard } from '../components/onboarding/firstMigrationStorage';
 
 const SECTION = { maxWidth: 800, margin: '0 auto', padding: '2rem 1.5rem' };
 const CARD = {
@@ -211,6 +212,19 @@ const HelpPage = () => (
           style={{ padding: '0.6rem 1.25rem', borderRadius: 6 }}
         >
           <Icon name="refresh" size={16} /> Пройти тур заново
+        </button>
+        {/* Мастер первой миграции: пошагово проводит реальную миграцию
+            (файл → проверка → площадка → перенос → XLSX). Нужен вход. */}
+        <button
+          className="btn btn-secondary"
+          onClick={() => {
+            window.location.hash = '#/products';
+            restartWizard();
+          }}
+          title="Пошагово провести первую миграцию (нужен вход)"
+          style={{ padding: '0.6rem 1.25rem', borderRadius: 6 }}
+        >
+          <Icon name="migrate" size={16} /> Мастер первой миграции
         </button>
       </div>
     </div>

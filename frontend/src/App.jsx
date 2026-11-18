@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import {
   Routes,
   Route,
@@ -31,6 +31,11 @@ import { api } from './api';
 import './App.css';
 import EmptyState from './components/common/EmptyState';
 import OnboardingTour from './components/onboarding/OnboardingTour';
+import FirstMigrationWizard from './components/onboarding/FirstMigrationWizard';
+import {
+  isWizardCompleted,
+  isWizardDismissedThisSession,
+} from './components/onboarding/firstMigrationStorage';
 import LogisticsModal from './components/products/LogisticsModal';
 import ProductsPage from './pages/ProductsPage';
 
@@ -435,6 +440,31 @@ function App() {
     return () => window.removeEventListener('auth:expired', onSessionExpired);
   }, [handleLogout, openAuth]);
 
+  // ==================== Мастер первой миграции ====================
+  // Автопоказ: вошли, список загрузился, товаров 0, мастер не пройден и в этой
+  // сессии его не закрывали. wizardShownRef страхует от повторного показа
+  // после рефрешей списков (условие «0 товаров» верно до первого импорта).
+  const [showWizard, setShowWizard] = useState(false);
+  const wizardShownRef = useRef(false);
+
+  useEffect(() => {
+    if (!isAuthenticated || wizardShownRef.current) return;
+    if (productsLoading) return; // ждём список — иначе 0 «из ниоткуда»
+    wizardShownRef.current = true;
+    if (isWizardCompleted() || isWizardDismissedThisSession()) return;
+    if ((stats?.total ?? 0) === 0 && products.length === 0) setShowWizard(true);
+  }, [isAuthenticated, productsLoading, stats, products]);
+
+  // Ручной запуск: кнопка «Мастер первой миграции» на странице «Справка»
+  // диспатчит 'wizard:restart' (аналогично 'onboarding-restart' у тура).
+  useEffect(() => {
+    const onWizardRestart = () => {
+      if (isAuthenticated) setShowWizard(true);
+    };
+    window.addEventListener('wizard:restart', onWizardRestart);
+    return () => window.removeEventListener('wizard:restart', onWizardRestart);
+  }, [isAuthenticated]);
+
   // ==================== Обработчики редактирования товара ====================
   const handleEditAttributes = useCallback((product) => {
     setMessage('');
@@ -603,6 +633,7 @@ function App() {
                   onPhotos={handleEditPhotos}
                   onExport={handleOpenExport}
                   onImport={() => setShowImportModal(true)}
+                  onStartWizard={() => setShowWizard(true)}
                 />
               }
             />
@@ -717,6 +748,15 @@ function App() {
           onNotify={setMessage}
         />
       )}
+
+      {/* ==================== Мастер первой миграции ==================== */}
+      <FirstMigrationWizard
+        isOpen={showWizard}
+        onClose={() => setShowWizard(false)}
+        onNotify={setMessage}
+        onImported={refreshAll}
+        initialProducts={products}
+      />
 
       <AuthModal
         isOpen={!!authTab}

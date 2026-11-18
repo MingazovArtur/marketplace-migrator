@@ -43,6 +43,7 @@ const ProductsPage = ({
   onPhotos,
   onExport,
   onImport,
+  onStartWizard,
 }) => {
   const queryClient = useQueryClient();
 
@@ -544,6 +545,8 @@ const ProductsPage = ({
           description="Импортируйте товары из файла или по API-ключу площадки-источника."
           actionLabel={onImport ? 'Импортировать' : undefined}
           onAction={onImport}
+          secondaryLabel={onStartWizard ? 'Мастер первой миграции' : undefined}
+          onSecondary={onStartWizard}
         />
       ) : (
         <ProductsTable
