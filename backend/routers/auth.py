@@ -32,6 +32,7 @@ from database.access_log import get_client_ip, log_access
 from database.models import User
 from database.session import SessionLocal, get_db
 from models.schemas import Token, UserCreate, UserLogin, UserResponse
+from services.demo_data import DEMO_USERNAME, ensure_demo_user, reset_demo_if_stale
 from services.email_service import send_verification_email
 
 logger = logging.getLogger(__name__)
@@ -217,6 +218,67 @@ def login(payload: UserLogin, request: Request):
         )
         return response
 
+    finally:
+        db.close()
+
+
+# ============================================================
+# Демо-вход: общий демо-аккаунт без регистрации. Данные подложены
+# и сбрасываются раз в сутки (services/demo_data.py). 30/день —
+# демонстрацию не выкачивают, но и брутфорс-поле не открывают.
+# ============================================================
+@limiter.limit("30/day")
+@router.post("/demo", response_model=Token)
+def demo_login(request: Request):
+    """Вход в демо-аккаунт: без пароля и регистрации.
+
+    Общий аккаунт `demo` с подложенными товарами и историей. Отключается
+    админом деактивацией пользователя demo (is_active=False) — токены
+    деактивированного аккаунта отклоняются get_current_user сразу.
+    """
+    db = SessionLocal()
+    try:
+        user = ensure_demo_user(db)
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Демо-доступ временно отключён администратором",
+            )
+        reset_demo_if_stale(db, user)
+
+        ip = get_client_ip(request)
+        ua = request.headers.get("user-agent")
+        log_access(
+            user_id=user.id, username=user.username, action="demo_login", ip=ip, user_agent=ua
+        )
+        token = create_access_token({"sub": str(user.id), "role": user.role})
+        logger.info(f"Демо-вход (id={user.id}, username={DEMO_USERNAME})")
+
+        # Куки — ровно как у обычного логина (httpOnly access + csrf double-submit)
+        csrf_token = secrets.token_urlsafe(32)
+        max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        response = JSONResponse(
+            content={"access_token": token, "token_type": "bearer", "csrf_token": csrf_token}
+        )
+        response.set_cookie(
+            ACCESS_COOKIE,
+            token,
+            max_age=max_age,
+            httponly=True,
+            samesite=settings.COOKIE_SAMESITE,
+            secure=settings.COOKIE_SECURE,
+            path="/",
+        )
+        response.set_cookie(
+            CSRF_COOKIE,
+            csrf_token,
+            max_age=max_age,
+            httponly=False,
+            samesite=settings.COOKIE_SAMESITE,
+            secure=settings.COOKIE_SECURE,
+            path="/",
+        )
+        return response
     finally:
         db.close()
 

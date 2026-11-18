@@ -14,14 +14,18 @@ const NAV = [
   { to: '/specs', label: 'Спецификации', icon: 'layers' },
   { to: '/templates', label: 'Шаблоны', icon: 'template' }, // ✅ управление эталонами Ozon
   { to: '/history', label: 'История', icon: 'history' },
+  { to: '/analytics', label: 'Аналитика', icon: 'report' }, // заполненность/категории/правки
 ];
 
-// Мониторинг загрузок спеков (очередь Celery + прогресс) — только для админа,
-// вставляется сразу после «Спецификаций»
-const ADMIN_NAV_ITEM = { to: '/specs-monitor', label: 'Мониторинг спеков', icon: 'report' };
+// Разделы только для админа, вставляются сразу после «Спецификаций»:
+// мониторинг загрузок спеков (очередь Celery + прогресс) и админ-панель
+const ADMIN_NAV_ITEMS = [
+  { to: '/specs-monitor', label: 'Мониторинг спеков', icon: 'report' },
+  { to: '/admin', label: 'Админ-панель', icon: 'settings' },
+];
 
 const Sidebar = ({ theme, setTheme, isAdmin = false }) => {
-  const items = isAdmin ? [...NAV.slice(0, 5), ADMIN_NAV_ITEM, ...NAV.slice(5)] : NAV;
+  const items = isAdmin ? [...NAV.slice(0, 5), ...ADMIN_NAV_ITEMS, ...NAV.slice(5)] : NAV;
 
   return (
     <aside className="sidebar">

@@ -46,6 +46,23 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
     }
   };
 
+  /* Демо-вход: общий аккаунт с подложенными товарами — оценить
+   * интерфейс до регистрации. */
+  const submitDemo = async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const data = await api.demoLogin();
+      onLogin(data.access_token);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Демо-вход недоступен, попробуйте позже');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const submitRegister = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -165,6 +182,30 @@ const AuthModal = ({ isOpen, initialTab = 'login', onClose, onLogin }) => {
             <div className="modal-actions">
               <Button type="submit" disabled={loading} loading={loading}>
                 Войти
+              </Button>
+            </div>
+
+            {/* Демо-вход: снизить барьер первого захода — попробовать
+                интерфейс можно без регистрации */}
+            <div
+              style={{
+                textAlign: 'center',
+                margin: '0.25rem 0 0.5rem',
+                fontSize: '0.8rem',
+                color: 'var(--text-muted)',
+              }}
+            >
+              или
+            </div>
+            <div className="modal-actions">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={loading}
+                loading={loading}
+                onClick={submitDemo}
+              >
+                Попробовать демо без регистрации
               </Button>
             </div>
           </form>

@@ -26,4 +26,25 @@ export const statsApi = {
     if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить историю'));
     return res.json();
   },
+
+  /* Аналитика селлера: заполненность полей, срезы по категориям, правки */
+  getFillAnalytics: async () => {
+    const res = await doFetch(`${API_URL}/analytics/fill`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить заполненность'));
+    return res.json();
+  },
+
+  getCategoryAnalytics: async () => {
+    const res = await doFetch(`${API_URL}/analytics/categories`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить срез по категориям'));
+    return res.json();
+  },
+
+  getEditAnalytics: async (days = 30) => {
+    const res = await doFetch(`${API_URL}/analytics/edits?days=${enc(days)}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Не удалось загрузить историю правок'));
+    return res.json();
+  },
 };

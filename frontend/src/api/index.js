@@ -8,6 +8,7 @@
  */
 
 import { authApi } from './auth';
+import { adminApi } from './admin';
 import { categoriesApi } from './categories';
 import { defaultsApi } from './defaults';
 import { exportApi } from './exports';
@@ -21,6 +22,7 @@ export { API_URL } from './client';
 
 export const api = {
   ...authApi,
+  ...adminApi,
   ...productsApi,
   ...migrationApi,
   ...categoriesApi,

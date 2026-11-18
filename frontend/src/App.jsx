@@ -43,6 +43,8 @@ const StatsDashboard = lazy(() => import('./components/dashboard/StatsDashboard'
 const SpecsPage = lazy(() => import('./pages/SpecsPage'));
 const SpecsMonitorPage = lazy(() => import('./pages/SpecsMonitorPage'));
 const TemplatesPage = lazy(() => import('./pages/TemplatesPage'));
+const AdminPage = lazy(() => import('./pages/AdminPage'));
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
 const HelpPage = lazy(() => import('./pages/HelpPage'));
 const PrivacyPolicyPage = lazy(() =>
   import('./pages/Legal').then((m) => ({ default: m.PrivacyPolicyPage }))
@@ -602,6 +604,28 @@ function App() {
                   onExport={handleOpenExport}
                   onImport={() => setShowImportModal(true)}
                 />
+              }
+            />
+            {/* Аналитика селлера — всем авторизованным */}
+            <Route
+              path="/analytics"
+              element={
+                <Suspense fallback={<ViewFallback />}>
+                  <AnalyticsPage user={user} onNotify={setMessage} />
+                </Suspense>
+              }
+            />
+            {/* Админ-панель — только админ; остальным тихий редирект */}
+            <Route
+              path="/admin"
+              element={
+                user?.role === 'admin' ? (
+                  <Suspense fallback={<ViewFallback />}>
+                    <AdminPage user={user} onNotify={setMessage} />
+                  </Suspense>
+                ) : (
+                  <Navigate to="/products" replace />
+                )
               }
             />
             <Route path="*" element={<Navigate to="/products" replace />} />

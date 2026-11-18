@@ -23,6 +23,17 @@ export const authApi = {
     return res.json();
   },
 
+  /* Демо-вход: общий аккаунт demo без регистрации (кнопка «Попробовать демо»).
+   * Куки ставит бэкенд так же, как при обычном логине. */
+  demoLogin: async () => {
+    const res = await doFetch(`${API_URL}/auth/demo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) throw new Error(await safeError(res, 'Демо-вход недоступен, попробуйте позже'));
+    return res.json();
+  },
+
   /* ✅ v5: настройки уведомлений (письмо о завершении пакетной миграции) */
   getNotifications: async () => {
     const res = await doFetch(`${API_URL}/auth/notifications`, { headers: getHeaders() });

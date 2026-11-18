@@ -28,6 +28,8 @@ from core.rate_limit import (
     rate_limit_exceeded_handler,
 )
 from routers import (
+    admin,
+    analytics,
     attributes,
     auth,
     categories,
@@ -51,6 +53,7 @@ from routers import (
 )
 from routers.health import router as health_router
 from routers.migrate_router import router as migrate_router
+from services.admin_bootstrap import bootstrap_initial_admin
 
 # R-35 (В-12): формат с датой и request-id вместо голого basicConfig;
 # при уже настроенном root (pytest/gunicorn) — no-op
@@ -82,6 +85,10 @@ def _init_sentry() -> None:
 
 
 _init_sentry()
+
+# Стартовый админ из ADMIN_USERNAME/ADMIN_EMAIL/ADMIN_PASSWORD (если заданы
+# и такого пользователя ещё нет). Сбои не роняют приложение — только лог.
+bootstrap_initial_admin()
 
 # Было В-6 из код-ревью: /docs, /redoc и /openapi.json были доступны в проде
 # и раскрывали полную карту API (в т.ч. внутренние эндпоинты).
@@ -273,6 +280,8 @@ app.include_router(history.router)
 app.include_router(defaults_router.router)
 app.include_router(tnved.router)
 app.include_router(profiles.router)  # профили миграции (площадка + дефолты)
+app.include_router(admin.router)  # админ-панель: пользователи/роли/статистика
+app.include_router(analytics.router)  # аналитика селлера: заполненность/категории/правки
 
 # ============================================================
 # Статика: раздача скачанных фото
