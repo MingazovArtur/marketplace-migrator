@@ -29,7 +29,7 @@ openpyxl>=3.1.5                  # генерация/чтение xlsx (пар�
 Pillow>=10.0.0                   # WebP-миниатюры /media/thumbs (services/media_service.py)
 
 # ===== БД: Dual-Engine (sync psycopg2 + async asyncpg) =====
-sqlalchemy>=2.1.8
+sqlalchemy>=2.1.9
 psycopg2-binary>=2.9.9           # синхронный контур (Celery, миграции, repo)
 asyncpg>=0.29.0                  # асинхронный контур (FastAPI AsyncSession)
 greenlet>=3.0.0                  # нужен SQLAlchemy для async-движка
