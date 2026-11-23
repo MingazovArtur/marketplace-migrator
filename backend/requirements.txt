@@ -32,7 +32,7 @@ Pillow>=10.0.0                   # WebP-миниатюры /media/thumbs (servic
 sqlalchemy>=2.1.8
 psycopg2-binary>=2.9.9           # синхронный контур (Celery, миграции, repo)
 asyncpg>=0.29.0                  # асинхронный контур (FastAPI AsyncSession)
-greenlet>=3.0.0                  # нужен SQLAlchemy для async-движка
+greenlet>=3.5.6                  # нужен SQLAlchemy для async-движка
 aiosqlite>=0.20.0                # локальная разработка без Postgres (sqlite+aiosqlite)
 alembic>=1.13.0                  # миграции (CLI: alembic upgrade head в Dockerfile.prod)
 
