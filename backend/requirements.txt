@@ -57,4 +57,4 @@ sentry-sdk>=2.0.0
 # ===== Email =====
 aiosmtplib>=3.0.0                 # SMTP (async)
 jinja2>=3.1.6                     # шаблоны писем (autoescape=True)
-email-validator>=2.1.0            # pydantic EmailStr (models/schemas.py)
+email-validator>=2.4.0            # pydantic EmailStr (models/schemas.py)
