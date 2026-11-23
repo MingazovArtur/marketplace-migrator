@@ -38,7 +38,7 @@ alembic>=1.13.0                  # миграции (CLI: alembic upgrade head �
 
 # ===== Очереди =====
 celery>=5.7.0
-redis>=5.0.0
+redis>=8.1.0
 kombu>=5.7.0                     # прямой импорт в celery_app.py
 
 # ===== Аутентификация / шифрование =====
