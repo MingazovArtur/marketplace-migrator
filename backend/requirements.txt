@@ -15,7 +15,7 @@
 # ===== Web-фреймворк =====
 fastapi>=0.115.0
 uvicorn>=0.30.0
-pydantic>=2.14.3
+pydantic>=2.14.4
 pydantic-settings>=2.2.1
 python-multipart>=0.0.33         # загрузка файлов (FastAPI UploadFile)
 
